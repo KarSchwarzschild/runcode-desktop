@@ -154,6 +154,13 @@ func TestAutoTrustSkipsWhenExecControlOff(t *testing.T) {
 
 func TestInstallStampMovesWithTheInstallDirs(t *testing.T) {
 	dir := fakePack(t)
+	// 把目录时间拨回一小时：fakePack 刚建好它，紧接着再建子目录很可能落在同一个
+	// 时钟刻度里（Windows 上是 0.5~15ms），时间戳就不变。真实场景里 pip 装库发生在
+	// 很久以后，不存在这个问题。
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(filepath.Join(dir, "lib", "python3.12", "site-packages"), old, old); err != nil {
+		t.Fatal(err)
+	}
 	before := installStamp(protocol.RuntimePackPython, dir)
 	if before == "" {
 		t.Fatal("no stamp for a normal pack layout")

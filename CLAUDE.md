@@ -27,6 +27,7 @@
 - 宿主工具通过 `tool.InputPresentationProvider` 声明流式主参数（文件路径、运行时名称、计划阶段）；这仅控制展示，不改变 schema、授权或执行，更不是敏感参数隐藏机制。
 - 引擎 `host.Manager.Close` 先取消并等待构建/回合（含收尾回调）和状态落盘操作，再关资源；失败保留关闭中的会话供重试，不接受新回合或同 ID 重建。`OnTurnEnd` 不能同步关闭自身会话，否则会等待自己。desktop 关闭失败必须向上传错，不标已关闭、不丢编辑复审/预览引用；TUI 退出先停止事件发送、取消并等待回合，再用独立有界 context 清理。不能复用已取消的回合 context 做清理。
 - **2026-09-30 已随引擎 `v0.15.0` 发布**：包含上述 API/关闭修复、上下文预算、提问分支、图片路由与后台无控制台工具。GitLab 与 GitHub 镜像使用同一 tag，三个 module 统一 require `v0.15.0`。正式构建使用 `GOWORK=off`；仅开发联调显式 `--local-engine`，不能拿工作区验证替代固定 tag 验证。
+- **2026-11-03 发布引擎 `v0.16.0`**：授权证据、统一目录授权、压缩恢复与工具原文、WebFetch 本机代理恢复、共用 frontmatter 解析。GitLab 与 GitHub 镜像同一 tag，三个 module 统一 require `v0.16.0`。
 
 ### 上下文自动压缩契约
 
@@ -232,21 +233,21 @@ OS 窗口标题（无边框窗口下只在任务栏/alt-tab 显示，UI 标题�
 - `.runcode/image-analysis/<会话ID的sha256>.json` 是有界、原子、rooted 的派生记录，不含原图/凭据；恢复展示真实已保存结果。分支只复制问题和全部图片均属于前缀的分析，重新绑定图片引用，不能把后续分析倒灌到过去；损坏按缺缓存处理。删除会话前须关闭它，不能删除仍在后台持有历史/分析写入器的非聚焦会话。
 - 所需 agentloop API 已随 `v0.15.0` 发布，三个 module 固定到该 tag；真实第三方模型兼容性、真实 OA 图片与其它平台 GUI 不能拿合成 HTTP/UI fixture 冒充验收。
 
-### WebFetch 本机代理恢复（本地引擎联调，尚未发布 tag）
+### WebFetch 本机代理恢复（已随引擎 `v0.16.0` 发布）
 
 `WebFetch` 新增 `proxy` / `diagnose_only`。省略 proxy 即 auto：原配置连接失败后由引擎 `webaccess` 有界发现并验证本机代理，满足条件时只重试一次，不再依赖模型执行 Bash。显式会话/环境代理与 NO_PROXY 不自动绕过；带 query、userinfo 的 URL 和 HTTP 正文不自动改投新代理。`configured` 固定原路线，显式回环代理 URL 只用于单次调用。HEAD origin 探测只用于 diagnose_only，不带原路径/query/凭据，也不作为正式 GET 的前置条件。正式代理 GET 独立获得 30 秒总预算（含 TLS 与正文），通过实际请求验证路线；原路由仍保留原超时。诊断记录区分连接、代理隧道、TLS、等待响应和读取正文，短探测超时不能误报为没有代理，HTTP 403 不能误报为网络不通。
 
 授权摘要/授权键区分访问路线，旧域名 allow 不扩大权限，旧 deny 仍有效；工具名不变，禁用与 OA 锁继续覆盖诊断。平台 WebSearch 仍由服务器出网，不套本机代理。自定义注入 HTTP client 默认不允许恢复服务绕过它；系统代理、进程发现与 SSRF/TLS 都在引擎，本仓只接审批/工具展示。
 
-本轮须 `--local-engine`；正式发布前先发真实引擎 tag、统一升级三个 require 并做 `GOWORK=off` 验证。详见引擎 `docs/web-recovery.md`；不将本机受控代理测试或跨平台编译冒充真实外网/其它 OS 真机验收。
+已随引擎 `v0.16.0` 发布，正式构建 `GOWORK=off` 即可。详见引擎 `docs/web-recovery.md`；不将本机受控代理测试或跨平台编译冒充真实外网/其它 OS 真机验收。
 
-### 技能 frontmatter（本地引擎联调，尚未发布 tag）
+### 技能 frontmatter（已随引擎 `v0.16.0` 发布）
 
 技能、子代理与桌面元数据共用引擎 `frontmatter` 包（yaml.v3），不再逐行拆冒号。支持 `>-` / `|-` 等块标量、引号与注释；仅读顶层字段，块内容里的缩进 `---` 不是结束标记。头部限制 64 KiB，重复键、错误缩进及必需字段的集合/别名值明确报错，错误不回显文件内容。未知 metadata 不做对象/别名展开。
 
 `SaveSkill` / `SaveAgent` / 市场补展示字段统一转义字符串，描述段落不再强制压平；模型的 `description` 与人看的 `display-description` 不互相覆盖。市场只补未声明的字段，明确空值也不追加重复键，原包正文/BOM 不重写。旧应用生成的平铺单行非 YAML 值有窄兼容路径，块标量/嵌套/损坏引号等不静默降级。
 
-子代理仍使用逗号/空白分隔的 tools 标量，不扩展成 YAML 列表；损坏或非标量 tools 必须拒绝，不能当空白名单继承全部工具。`null` / `false` 等标量保留文本，不做会放宽权限的类型强转。本轮同样须 `--local-engine`；正式发布先发真实引擎 tag 并统一升级三个 require。
+子代理仍使用逗号/空白分隔的 tools 标量，不扩展成 YAML 列表；损坏或非标量 tools 必须拒绝，不能当空白名单继承全部工具。`null` / `false` 等标量保留文本，不做会放宽权限的类型强转。已随引擎 `v0.16.0` 发布。
 
 ### 逐模型上下文预算（2026-10-20）
 
@@ -258,15 +259,15 @@ OS 窗口标题（无边框窗口下只在任务栏/alt-tab 显示，UI 标题�
 
 保存预算不打断活回合，新建、重开或重新选择该模型后生效。旧 Bridge 缺完整字段时明确要求升级，或用户为该模型覆盖全部三项；自定义连接未覆盖时使用引擎/供应商的未设置语义，不复活旧统一值。部署先更新 Bridge 及模型配置，再更新桌面；本轮不自动部署、打包或发布引擎。
 
-### 压缩恢复与工具原文（本地引擎联调，尚未发布 tag）
+### 压缩恢复与工具原文（已随引擎 `v0.16.0` 发布）
 
 引擎保持 60% 裁剪 / 80% 摘要 / 约 60% 目标。`sessions.LoadHistory` 始终是原日志，供回放、提问分支与图片恢复；可选 `ContextStore` 单独保存有版本、原日志前缀游标/指纹与投影校验的 checkpoint，恢复用有效投影加未覆盖尾部，不调用模型。损坏/漂移/超限回退原日志，不信旧 token 数，仍按当前模型准入。日志写失败禁止推进 checkpoint；普通追加不重写投影。`ResetHistory` 保持仅清当前工作历史，失效 checkpoint 并在本次打开后停用其保存，不偷偷改成持久化清空。
 
 超大工具文本在入口限长前进入有界存档，历史带节选和结构化引用。主会话 `ReadToolResult` 仅按本会话引用分页读取，走正常权限/hooks、禁用与 OA 边界，不接路径/URL/会话，不重跑命令，不注入子代理；工具自身已截掉的输出无法找回。默认单份 16 MiB、每会话 64 MiB/128 份、每工作区后端 256 MiB/1024 份、7 天、每页最多 32 KiB；checkpoint 单份 32 MiB、总量 128 MiB/1024 份。原文可过期/被淘汰，不宣称永久留存。不持久化/后端不支持时不写另一处缓存。分支只复制前缀拥有的原文，不复制源摘要或后续结果；删除会话一并清理。
 
-摘要按工具 ID 分别保留头尾、错误状态与引用，用户事实/thinking 全量参与分段摘要；不是模型绝对无损承诺。JSONL 用 rooted 原子 sidecar，SQLite 加法迁移到 schema v3，不扩大 Backend/Store 基础接口。详见引擎 `docs/context-persistence.md`。本轮用 go.work 联调；正式发布仍须真实引擎 tag、三模块统一 require 与 GOWORK=off 验证，本机 fixture/CLI 不替代真实渠道或其它平台 GUI 验收。
+摘要按工具 ID 分别保留头尾、错误状态与引用，用户事实/thinking 全量参与分段摘要；不是模型绝对无损承诺。JSONL 用 rooted 原子 sidecar，SQLite 加法迁移到 schema v3，不扩大 Backend/Store 基础接口。详见引擎 `docs/context-persistence.md`。已随引擎 `v0.16.0` 发布；本机 fixture/CLI 不替代真实渠道或其它平台 GUI 验收。
 
-### 统一目录授权与来源预览（本地引擎联调，尚未发布 tag）
+### 统一目录授权与来源预览（已随引擎 `v0.16.0` 发布）
 
 目录管理复用引擎 `.runcode/permissions.json` 与独立 session overlay；授权边界读取有界快照，项目 RMW 跨进程锁 + rooted 原子替换。目录读写分开，写含读；精确撤销不删除 deny、其它 scope 或祖先规则。损坏/持久失败明确拒绝，不降级成空 store/session allow。目录授权不改变 CWD、不加载额外目录配置，也不等于 Bash 执行授权；已有显式读授权供 safe 文件读取，写/执行边界不变。
 
@@ -274,9 +275,9 @@ OS 窗口标题（无边框窗口下只在任务栏/alt-tab 显示，UI 标题�
 
 预览先 OpenArtifact(sessionID,path)，后续 Wails/HTTP/Office/系统动作都用绑定 session + generation + live permit 的后端引用，无裸路径/焦点回退。HTTP listener 复用不共享授权，HTML 子资源另查 standing 权限；旧工作区静态路由/缓存 URL 不服务。Office 从授权句柄生成私有快照，PDF 缓存有界且绑定源权限。关闭取消并等待，失败留状态且拒新读取；同逻辑会话重建只迁移目录 session grants，不迁移命令/once。撤销尽力取消在途预览，不能收回已显示/交给系统程序的字节。
 
-详见 `docs/directory-access.md` 与引擎同名文档。本轮用 go.work，未打包/发布；正式发布须真实引擎 tag、三 require 升级与 GOWORK=off 验证。隔离 host/DOCX/浏览器 fixture 不是原生 Wails、真实 Office 或其它平台 GUI 验收。
+详见 `docs/directory-access.md` 与引擎同名文档。已随引擎 `v0.16.0` 发布。隔离 host/DOCX/浏览器 fixture 不是原生 Wails、真实 Office 或其它平台 GUI 验收。
 
-### 命令、联网与 MCP 授权证据（本地引擎联调，尚未发布 tag）
+### 命令、联网与 MCP 授权证据（已随引擎 `v0.16.0` 发布）
 
 一次调用身份用完整参数摘要、真实工具绑定及来源会话/回合，不用截断预览。Bash standing 记完整命令 + 固定执行壳；网络记 HTTP(S) origin + route/diagnose；MCP 记实际配置指纹 + 协议种类 + 指定目标，资源 URI 与宿主工具参数在新规则中仅保留摘要。旧粗 allow 不自动继承，旧 deny 和重分类前的命令 deny 仍生效；显式 deny 先于普通可信放行，flight 仍为主动绕过。
 
@@ -286,4 +287,4 @@ WebFetch、公共/平台搜索和 MCP HTTP 同源有界重定向，跨 origin/�
 
 任务快照仅内存 16 条 / 64 KiB，缺失、图片或截断转人工；脚本只按来源工作区 rooted 读取，有界且不宣称任意脚本安全。旧风险-only 裁判不能隐式免批。原有 permission mode、工作区变更信任、OA 外层锁、提权人工关和计划边界分别保留，不宣称 OS 沙箱或模型绝对理解意图。
 
-详见本仓与引擎的 `docs/authorization-boundaries.md`。本轮不打包/部署/发布；正式发布仍须真实引擎 tag、三 require 升级与 GOWORK=off 验证，合成 host/SSE/浏览器 fixture 和跨平台编译不替代原生/真实渠道验收。
+详见本仓与引擎的 `docs/authorization-boundaries.md`。已随引擎 `v0.16.0` 发布；合成 host/SSE/浏览器 fixture 和跨平台编译不替代原生/真实渠道验收。

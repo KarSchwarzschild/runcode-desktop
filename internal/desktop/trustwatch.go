@@ -238,13 +238,25 @@ func libraryName(dir, path string) string {
 func installStamp(id, dir string) string {
 	var b strings.Builder
 	for _, d := range installWatchDirs(id, dir) {
-		info, err := os.Stat(d)
+		info, err := dirStat(d)
 		if err != nil {
 			return ""
 		}
 		fmt.Fprintf(&b, "%s=%d;", filepath.Base(d), info.ModTime().UnixNano())
 	}
 	return b.String()
+}
+
+// dirStat 读目录自身的元数据。不用 os.Stat：Windows 上它读的是父目录索引里那份
+// 时间戳副本，NTFS 对它是懒更新的，目录里新建子目录后可能仍是旧值；打开句柄再
+// Stat 读的是目录本身。Linux/macOS 上两者等价。
+func dirStat(d string) (os.FileInfo, error) {
+	f, err := os.Open(d)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = f.Close() }() // 只读句柄，关闭失败不影响已读到的元数据
+	return f.Stat()
 }
 
 // installWatchDirs 是一个包里"装了新东西就会变"的目录。
