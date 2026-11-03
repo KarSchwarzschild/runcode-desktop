@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gitlab.ouc-online.com.cn/aibase/agentloop/frontmatter"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/skill"
 )
 
@@ -84,9 +85,13 @@ func skillDisplayMeta(path string) (name, desc string) {
 	if err != nil {
 		return "", ""
 	}
-	content := string(data)
-	return strings.TrimSpace(frontmatterValue(content, skillDisplayNameKeys...)),
-		strings.TrimSpace(frontmatterValue(content, skillDisplayDescKeys...))
+	doc, err := frontmatter.Parse(string(data))
+	if err != nil {
+		return "", ""
+	}
+	name, _ = doc.Scalar(skillDisplayNameKeys...)
+	desc, _ = doc.Scalar(skillDisplayDescKeys...)
+	return strings.TrimSpace(name), strings.TrimSpace(desc)
 }
 
 // setSkillDisplayMeta writes the market's display name and description into
@@ -106,6 +111,13 @@ func setSkillDisplayMeta(dir, name, desc string) error {
 		return err
 	}
 	content := string(data)
+	doc, err := frontmatter.Parse(content)
+	if errors.Is(err, frontmatter.ErrMissing) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read skill display metadata: %w", err)
+	}
 	add := make([]string, 0, 2)
 	for _, f := range []struct {
 		key   string
@@ -113,10 +125,10 @@ func setSkillDisplayMeta(dir, name, desc string) error {
 		seen  []string
 	}{
 		{"display-name", collapseLine(name), skillDisplayNameKeys},
-		{"display-description", collapseLine(desc), skillDisplayDescKeys},
+		{"display-description", strings.TrimSpace(desc), skillDisplayDescKeys},
 	} {
-		if f.value != "" && strings.TrimSpace(frontmatterValue(content, f.seen...)) == "" {
-			add = append(add, f.key+": "+f.value)
+		if f.value != "" && !doc.Has(f.seen...) {
+			add = append(add, f.key+": "+frontmatter.Quote(f.value))
 		}
 	}
 	if len(add) == 0 {
@@ -128,7 +140,7 @@ func setSkillDisplayMeta(dir, name, desc string) error {
 	}
 	// Insert right after the opening "---" so the lines land inside the block.
 	// Keep the file's own line endings out of it: writing "\n" into a CRLF file
-	// is fine for a line-based parser, and rewriting the whole file's endings
+	// is accepted by the YAML parser, and rewriting the whole file's endings
 	// would touch content this function has no business changing.
 	first, rest, ok := strings.Cut(content, "\n")
 	if !ok || strings.TrimSpace(strings.TrimSuffix(first, "\r")) != "---" {
@@ -172,8 +184,8 @@ func (a *App) SaveSkill(req SkillSaveRequest) (SkillList, error) {
 	if !validResourceName(name) {
 		return SkillList{}, wireError(errors.New("技能名只能包含字母、数字、- 或 _，且不超过 64 个字符"))
 	}
-	description := strings.TrimSpace(collapseLine(req.Description))
-	if description == "" {
+	description := req.Description
+	if strings.TrimSpace(description) == "" {
 		return SkillList{}, wireError(errors.New("技能描述不能为空"))
 	}
 	body := strings.TrimRight(req.Body, "\n")
@@ -186,14 +198,14 @@ func (a *App) SaveSkill(req SkillSaveRequest) (SkillList, error) {
 	// an empty key would read as "its display name IS the empty string", and every
 	// fallback ("no display name → show the id") would have to special-case it.
 	var fm strings.Builder
-	fmt.Fprintf(&fm, "---\nname: %s\n", name)
+	fmt.Fprintf(&fm, "---\nname: %s\n", frontmatter.Quote(name))
 	if d := collapseLine(req.DisplayName); d != "" {
-		fmt.Fprintf(&fm, "display-name: %s\n", d)
+		fmt.Fprintf(&fm, "display-name: %s\n", frontmatter.Quote(d))
 	}
-	if d := collapseLine(req.DisplayDescription); d != "" {
-		fmt.Fprintf(&fm, "display-description: %s\n", d)
+	if d := strings.TrimSpace(req.DisplayDescription); d != "" {
+		fmt.Fprintf(&fm, "display-description: %s\n", frontmatter.Quote(d))
 	}
-	fmt.Fprintf(&fm, "description: %s\n---\n\n%s\n", description, body)
+	fmt.Fprintf(&fm, "description: %s\n---\n\n%s\n", frontmatter.Quote(description), body)
 	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(fm.String()), 0o600); err != nil {
 		return SkillList{}, wireError(fmt.Errorf("write SKILL.md: %w", err))
 	}

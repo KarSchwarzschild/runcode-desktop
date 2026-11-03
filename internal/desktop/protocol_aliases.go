@@ -60,11 +60,16 @@ const (
 //
 //nolint:revive // 再导出别名:文档以定义方的 protocol 包为准(见上)
 type (
-	QuestionReference     = protocol.QuestionReference
-	QuestionImage         = protocol.QuestionImage
-	QuestionDraft         = protocol.QuestionDraft
-	SubmitQuestionRequest = protocol.SubmitQuestionRequest
-	QuestionReceipt       = hostproto.QuestionReceipt
+	ModelReference                  = protocol.ModelReference
+	ModelContextValues              = protocol.ModelContextValues
+	ModelContextOverride            = protocol.ModelContextOverride
+	ModelContextView                = protocol.ModelContextView
+	SaveModelContextSettingsRequest = protocol.SaveModelContextSettingsRequest
+	QuestionReference               = protocol.QuestionReference
+	QuestionImage                   = protocol.QuestionImage
+	QuestionDraft                   = protocol.QuestionDraft
+	SubmitQuestionRequest           = protocol.SubmitQuestionRequest
+	QuestionReceipt                 = hostproto.QuestionReceipt
 	// Turn stream, session state and approval — the engine host's contract.
 	SessionInfo       = hostproto.SessionInfo
 	AssistantDelta    = hostproto.AssistantDelta

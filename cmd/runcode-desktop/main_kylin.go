@@ -281,9 +281,21 @@ func main() {
 			quit.setCtx(ctx)
 			deskApp.Startup()
 		},
+		// 收尾放在 OnBeforeClose 而不是 OnShutdown。v2 在 Linux 上是先 gtk_main_quit、
+		// 主循环停了才调 OnShutdown（internal/app/app_production.go 的 Run），这时窗口
+		// 已经不会重绘也不会消失：关会话最长要等十几秒，用户看到的是一个点了关闭却
+		// 冻住不动的窗口，再点也没反应。关闭按钮、前端的退出、SIGTERM 与更新安装都
+		// 经 Frontend.Quit 走到这里，而且在单独的 goroutine 里调，主循环仍在跑，
+		// 所以先藏窗口它是真的会消失。返回 false = 不拦，接着退出。
+		OnBeforeClose: func(ctx context.Context) bool {
+			wruntime.WindowHide(ctx)
+			deskApp.PrepareExit(desktop.ExitTimeout)
+			return false
+		},
+		// 兜底：万一有哪条路绕过了 OnBeforeClose，这里补做一次；已经做过的话
+		// PrepareExit 直接返回同一个结果，不会重复收尾，也不会再等满时限。
 		OnShutdown: func(context.Context) {
-			deskApp.Shutdown()
-			_ = deskApp.CloseAllSessions()
+			deskApp.PrepareExit(desktop.ExitTimeout)
 		},
 		Bind: []any{
 			deskApp,

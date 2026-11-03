@@ -100,16 +100,29 @@ export function ThinkingPreview() {
       <div className="w-full max-w-[1280px] mx-auto flex flex-col gap-6">
         <h2 className="text-[18px] font-bold tracking-tight">上下文用量条(不同占用)</h2>
         <div className="flex flex-col gap-3 bg-surface border border-line2 rounded-xl p-4">
-          {[10000, 96000, 120000, 130000].map((u) => (
-            <div key={u} className="flex items-center gap-4 text-[13px] text-muted">
-              <ContextMeter used={u} budget={128000} onCompact={noop} compacting={false} busy={false} />
+          {([
+            { model: 'qwen3-30b', used: 10000, budget: 65536 },
+            { model: 'qwen3.6-27b', used: 32768, budget: 131072 },
+            { model: 'qwen3-vl-plus', used: 65536, budget: 262144 },
+            { model: 'qwen3.8-flash', used: 250000, budget: 1000000 },
+            { model: 'glm-5.3', used: 262144, budget: 1048576 },
+            { model: 'glm-5.1', used: 159999, budget: 200000 },
+            { model: 'glm-5.1', used: 160000, budget: 200000 },
+            { model: 'glm-5.1', used: 250000, budget: 200000 },
+          ]).map((example, i) => (
+            <div key={i} className="flex flex-wrap items-center gap-4 text-[13px] text-muted">
+              <span className="w-[128px] font-mono text-[11px] text-faint">{example.model}</span>
+              <ContextMeter {...example} onCompact={noop} compacting={false} busy={false} />
             </div>
           ))}
           <div className="flex items-center gap-4 text-[13px] text-muted">
             <ContextMeter used={44000} budget={0} onCompact={noop} compacting={false} busy={false} />
           </div>
           <div className="flex items-center gap-4 text-[13px] text-muted">
-            <ContextMeter used={18000} budget={200000} estimated onCompact={noop} compacting={false} busy={false} />
+            <ContextMeter used={0} budget={null} onCompact={noop} compacting={false} busy={false} />
+          </div>
+          <div className="flex items-center gap-4 text-[13px] text-muted">
+            <ContextMeter used={18000} budget={200000} model="glm-5.1" estimated onCompact={noop} compacting={false} busy={false} />
           </div>
         </div>
         <h2 className="text-[18px] font-bold tracking-tight">结构化思考卡片</h2>

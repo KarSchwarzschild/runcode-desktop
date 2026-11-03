@@ -20,26 +20,16 @@ func TestBuildConfigRequiresModel(t *testing.T) {
 	}
 }
 
-func TestBuildConfigMaxTokensDefaultsGenerously(t *testing.T) {
+func TestBuildConfigDoesNotInventModelBudgets(t *testing.T) {
 	t.Parallel()
-	// No requested value → 80k for every provider, so large file writes are not
-	// truncated mid-JSON; an explicit value wins, which is the only way to stay under
-	// an endpoint whose ceiling is lower than the default.
 	for _, provider := range []string{"", "openai", "anthropic", "passport", "custom"} {
 		cfg, err := buildConfig(StartSessionRequest{CWD: t.TempDir(), Model: "m", Provider: provider})
 		if err != nil {
-			t.Fatalf("buildConfig(%q): %v", provider, err)
+			t.Fatal(err)
 		}
-		if cfg.MaxTokens != desktopDefaultMaxTokens {
-			t.Fatalf("%q MaxTokens = %d, want %d", provider, cfg.MaxTokens, desktopDefaultMaxTokens)
+		if cfg.MaxTokens != 0 || cfg.MaxContextTokens != 0 || cfg.MaxHistoryMessages != 0 {
+			t.Fatal("model-independent budgets leaked into base config")
 		}
-	}
-	cfg, err := buildConfig(StartSessionRequest{CWD: t.TempDir(), Model: "m", MaxTokens: 2048})
-	if err != nil {
-		t.Fatalf("buildConfig: %v", err)
-	}
-	if cfg.MaxTokens != 2048 {
-		t.Fatalf("MaxTokens = %d, want explicit 2048", cfg.MaxTokens)
 	}
 }
 
@@ -65,29 +55,6 @@ func TestBuildConfigRejectsBadPermissionMode(t *testing.T) {
 	_, err := buildConfig(StartSessionRequest{CWD: t.TempDir(), Model: "m", PermissionMode: "yolo"})
 	if err == nil {
 		t.Fatal("want error for unsupported permission mode")
-	}
-}
-
-func TestBuildConfigContextControl(t *testing.T) {
-	t.Parallel()
-	// The two context levers pass through verbatim; 0 leaves each off.
-	cfg, err := buildConfig(StartSessionRequest{CWD: t.TempDir(), Model: "m", MaxContextTokens: 128000, MaxHistoryMessages: 40})
-	if err != nil {
-		t.Fatalf("buildConfig: %v", err)
-	}
-	if cfg.MaxContextTokens != 128000 {
-		t.Fatalf("MaxContextTokens = %d, want 128000", cfg.MaxContextTokens)
-	}
-	if cfg.MaxHistoryMessages != 40 {
-		t.Fatalf("MaxHistoryMessages = %d, want 40", cfg.MaxHistoryMessages)
-	}
-	// A negative from a stray form value is clamped to off, never sent as-is.
-	cfg, err = buildConfig(StartSessionRequest{CWD: t.TempDir(), Model: "m", MaxContextTokens: -5})
-	if err != nil {
-		t.Fatalf("buildConfig: %v", err)
-	}
-	if cfg.MaxContextTokens != 0 {
-		t.Fatalf("negative MaxContextTokens = %d, want clamped to 0", cfg.MaxContextTokens)
 	}
 }
 
@@ -150,25 +117,5 @@ func TestBuildConfigRequestOverridesEnv(t *testing.T) {
 	}
 	if cfg.PermissionMode != "interactive" {
 		t.Fatalf("mode = %q, want interactive", cfg.PermissionMode)
-	}
-}
-
-// One output budget for every connection: 80k. Overshooting an endpoint's ceiling is
-// a hard 400 rather than a clamp, so a model capped lower needs an explicit value —
-// that escape hatch is what the second half of this test guards.
-func TestMaxTokensDefaultsTo80k(t *testing.T) {
-	t.Parallel()
-
-	if got := maxTokensOrDefault(0); got != 81920 {
-		t.Fatalf("default = %d, want 81920", got)
-	}
-	// An explicit value always wins, including one below the default: a model with a
-	// lower ceiling has no other way to be usable.
-	if got := maxTokensOrDefault(4096); got != 4096 {
-		t.Fatalf("explicit request = %d, want it honored", got)
-	}
-	// A negative or zero request is "unset", not a budget of its own.
-	if got := maxTokensOrDefault(-1); got != 81920 {
-		t.Fatalf("negative request = %d, want the default", got)
 	}
 }

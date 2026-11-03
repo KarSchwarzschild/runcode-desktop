@@ -4,13 +4,17 @@ package desktop
 // 以及设置页的整体保存。
 //
 // 贯穿全文的一条区分:a.config 是"下一个会话"的配置,a.liveConfig 是"当前活着的
-// 连接"。改模型能否原地生效取决于二者是否同一个连接——同连接只换模型 id,换连接
-// 则必须重建会话并恢复历史。
+// 连接"。切换模型统一重建并恢复历史，使构建时的工具与预算保持一致。
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
+
+	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 
 	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/llm"
@@ -33,8 +37,8 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 	default:
 		return SessionInfo{}, wireError(errors.New("不支持的权限模式"))
 	}
-	if req.MaxTokens < 0 || req.MaxContextTokens < 0 || req.MaxHistoryMessages < 0 || req.HarmJudgeVotes < 0 {
-		return SessionInfo{}, wireError(errors.New("上下文限制与判定次数不能为负数"))
+	if req.HarmJudgeVotes < 0 {
+		return SessionInfo{}, wireError(errors.New("判定次数不能为负数"))
 	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
@@ -42,9 +46,6 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 		cfg.PermissionMode = req.PermissionMode
 		cfg.HarmJudgeModel = strings.TrimSpace(req.HarmJudgeModel)
 		cfg.HarmJudgeVotes = req.HarmJudgeVotes
-		cfg.MaxTokens = req.MaxTokens
-		cfg.MaxContextTokens = req.MaxContextTokens
-		cfg.MaxHistoryMessages = req.MaxHistoryMessages
 		cfg.SkipLogin = req.SkipLogin
 		return nil
 	}); err != nil {
@@ -54,9 +55,6 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 	a.config.PermissionMode = req.PermissionMode
 	a.config.HarmJudgeModel = firstNonEmpty(req.HarmJudgeModel, os.Getenv("RUNCODE_HARM_JUDGE_MODEL"))
 	a.config.HarmJudgeVotes = harmVotesFromRequest(StartSessionRequest{HarmJudgeVotes: req.HarmJudgeVotes})
-	a.config.MaxTokens = maxTokensOrDefault(req.MaxTokens)
-	a.config.MaxContextTokens = req.MaxContextTokens
-	a.config.MaxHistoryMessages = req.MaxHistoryMessages
 	e := a.liveEntryLocked()
 	id := ""
 	if e != nil {
@@ -72,27 +70,44 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 	return a.Status(id)
 }
 
-// SetModel switches the model used for subsequent turns.
+// SetModel uses the same budget-aware rebuild as the model picker.
 func (a *App) SetModel(sessionID, model string) error {
-	id, err := a.sessionIDOf(sessionID)
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return wireError(errors.New("模型为空"))
+	}
+	a.startMu.Lock()
+	e, err := a.entryOf(sessionID)
 	if err != nil {
+		a.startMu.Unlock()
 		return wireError(err)
 	}
-	return wireError(a.mgr.SetModel(id, strings.TrimSpace(model)))
+	a.mu.Lock()
+	ref, passport, cfg, tenant, locked := e.modelRef, e.passport, e.connectionConfig, e.tenantID, e.oaLocalModel
+	a.mu.Unlock()
+	if !passport && ref.Name == "" {
+		defer a.startMu.Unlock()
+		if locked != "" && !oaModelSwitchAllowed(locked, model) {
+			return wireError(oaLockedSwitchError(locked))
+		}
+		cfg.Model = model
+		_, err = a.rebuildResumingWithConnectionHeld(cfg, e.id, false, tenant, modelReference{})
+		return err
+	}
+	a.startMu.Unlock()
+	kind := "platform"
+	if ref.Kind == "custom" {
+		kind = "custom"
+		if model, err = customProfileForModel(loadRawConfig(), ref.Name, cfg.Model, model); err != nil {
+			return wireError(err)
+		}
+	}
+	_, err = a.SwitchModel(sessionID, kind, model)
+	return err
 }
 
-// SwitchModel changes the model for the running session, spanning both platform
-// (passport) and custom direct-connection models so the in-chat picker can offer
-// either. A platform model that stays on the current bridge connection is swapped
-// in place (cheap, no history reload). Any switch that changes the connection —
-// picking a custom model, or returning to a platform model from a custom-model
-// session — rebuilds the session against the new endpoint and resumes the current
-// conversation so history is preserved. Kind is "custom" for a custom model (name
-// is its display name) or "platform"/"" for a passport model (name is its id).
-//
-// A connection-changing switch is refused mid-turn, since the rebuild would
-// discard the running turn; the picker is disabled while a turn is in flight, so
-// this only guards against races.
+// SwitchModel rebuilds the target session so model, tools and context budgets
+// change together. Running turns are never interrupted to apply a preference.
 func (a *App) SwitchModel(sessionID, kind, name string) (SessionInfo, error) {
 	kind = strings.TrimSpace(kind)
 	name = strings.TrimSpace(name)
@@ -109,9 +124,8 @@ func (a *App) SwitchModel(sessionID, kind, name string) (SessionInfo, error) {
 	a.mu.Lock()
 	id, busy := e.id, e.turnActive
 	cfg := e.connectionConfig
-	livePassport := e.passport
 	liveTenant := e.tenantID
-	nextTenant := a.passportTenant
+	nextTenant := e.tenantID
 	oaLocked := e.oaLocalModel
 	a.mu.Unlock()
 	if id == "" {
@@ -158,27 +172,16 @@ func (a *App) SwitchModel(sessionID, kind, name string) (SessionInfo, error) {
 		if err != nil {
 			return SessionInfo{}, err
 		}
-		persistConnectionChoice(cfg.Provider, cm.Model, name)
+		if a.focusedSessionID() == info.SessionID {
+			persistConnectionChoice(cfg.Provider, cm.Model, name)
+		}
 		return info, nil
 	}
 
-	// Platform (passport) model. Staying on the current live Passport connection and
-	// tenant is just a model-id swap: no rebuild, no history reload. Any other case —
-	// coming from a custom-model session, or a different tenant selected in Settings —
-	// rebuilds against the target Bridge connection and resumes history.
-	if livePassport && nextTenant == liveTenant {
-		if err := a.mgr.SetModel(id, name); err != nil {
-			return SessionInfo{}, wireError(err)
-		}
-		a.mu.Lock()
-		a.liveConfig.Model = name
-		if a.configPassport {
-			a.config.Model = name
-		}
-		a.mu.Unlock()
-		persistConnectionChoice("passport", name, "")
-		return a.Status("")
+	if kind != "" && kind != "platform" {
+		return SessionInfo{}, wireError(errors.New("不支持的模型类型"))
 	}
+
 	// Rebuild as a passport/bridge session on the target tenant, re-wiring the token
 	// source (mirrors applyPassport, which reads the request).
 	if !a.tokens.LoggedIn() {
@@ -198,8 +201,34 @@ func (a *App) SwitchModel(sessionID, kind, name string) (SessionInfo, error) {
 	if err != nil {
 		return SessionInfo{}, err
 	}
-	persistConnectionChoice("passport", name, "")
+	if a.focusedSessionID() == info.SessionID {
+		persistConnectionChoice("passport", name, "")
+	}
 	return info, nil
+}
+
+// customProfileForModel maps SetModel's raw model id onto a custom profile name.
+// SwitchModel resolves custom connections by profile, and a model id that only
+// happens to equal some profile's name would silently pick another endpoint and
+// credentials, so ambiguity is an error rather than a guess.
+func customProfileForModel(stored desktopConfig, currentProfile, currentModel, model string) (string, error) {
+	if model == currentModel && currentProfile != "" {
+		return currentProfile, nil
+	}
+	name := ""
+	for _, cm := range stored.CustomModels {
+		if cm.Model != model {
+			continue
+		}
+		if name != "" {
+			return "", fmt.Errorf("有多个自定义连接使用模型 %q，请在模型选择器中选择", model)
+		}
+		name = cm.Name
+	}
+	if name == "" {
+		return "", fmt.Errorf("没有使用模型 %q 的自定义连接，请在模型选择器中选择", model)
+	}
+	return name, nil
 }
 
 // persistConnectionChoice records the connection a live SwitchModel settled on, so
@@ -235,18 +264,96 @@ func persistConnectionChoice(provider, model, customModelName string) {
 // resuming the current conversation. Explicit connection identity keeps custom
 // URLs and Passport routing distinct. The caller must hold startMu.
 func (a *App) rebuildResumingWithConnectionHeld(cfg engine.Config, resumeID string, passport bool, tenantID string, refs ...modelReference) (SessionInfo, error) {
-	cfg.Resume = resumeID
-	cfg.Continue = false
-	cfg.SessionID = ""
-	// 目录取**被重建的这条会话**记着的那个：cfg 来自 liveConfig（进程级的"当前
-	// 连接"），它的 CWD 是上一次建会话时的快照，多工作区并行之后可能是别人的目录。
-	// 照抄的话，换一次模型就会把这条会话搬到另一个工作区里去。
-	cfg.CWD = a.workspaceOfSession(resumeID)
-	info, err := a.openSessionWithConnectionHeld(cfg, passport, tenantID, refs...)
+
+	e, err := a.entryOf(resumeID)
 	if err != nil {
 		return SessionInfo{}, wireError(err)
 	}
+	if !e.questionMu.TryLock() {
+		return SessionInfo{}, wireError(errBusy)
+	}
+	defer e.questionMu.Unlock()
+	a.mu.Lock()
+	busy, focused := e.turnActive, a.focused == e.id
+	locked, switched, lastText := e.oaLocalModel, e.oaSwitchDone, e.lastUserText
+	// The engine cannot hold two live sessions on one resume id, so the old one
+	// must close before the replacement builds; keep its connection to reopen it
+	// if the replacement fails.
+	previous, previousPassport, previousTenant, previousRef := e.connectionConfig, e.passport, e.tenantID, e.modelRef
+	a.mu.Unlock()
+	if busy {
+		return SessionInfo{}, wireError(errBusy)
+	}
+	cfg.Resume, cfg.Continue, cfg.SessionID, cfg.CWD = resumeID, false, "", a.workspaceOfSession(resumeID)
+	// Check defaults/authorization before closing a usable old connection.
+	if _, err := a.applyModelContext(context.Background(), cfg, a.referenceForBuild(cfg, passport, tenantID, refs)); err != nil {
+		return SessionInfo{}, wireError(err)
+	}
+	// Capture only directory session grants, not command grants or once permits.
+	var directoryGrants []permissions.DirectoryGrant
+	err = a.mgr.WithSessionOperation(context.Background(), resumeID, func(ctx context.Context, access host.SessionAccess) error {
+		service, capErr := permissionService(access)
+		if errors.Is(capErr, permissions.ErrDirectoryAccessUnsupported) {
+			return nil
+		}
+		if capErr != nil {
+			return capErr
+		}
+		directoryGrants, capErr = service.SessionDirectoryGrants(ctx)
+		return capErr
+	})
+	if err != nil {
+		return SessionInfo{}, wireError(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), sessionCloseTimeout)
+	defer cancel()
+	if err := a.closeEntryHeld(ctx, e, false); err != nil {
+		return SessionInfo{}, wireError(err)
+	}
+	info, err := a.buildSessionResolvedHeld(context.Background(), cfg, passport, tenantID, focused, false, refs...)
+	if err != nil {
+		previous.Resume, previous.Continue, previous.SessionID, previous.CWD = resumeID, false, "", cfg.CWD
+		restored, restoreErr := a.buildSessionResolvedHeld(context.Background(), previous, previousPassport, previousTenant, focused, false, previousRef)
+		if restoreErr != nil {
+			return SessionInfo{}, wireError(fmt.Errorf("切换失败且原会话未能恢复，请从最近对话重新打开：%w", errors.Join(err, restoreErr)))
+		}
+		a.adoptRebuiltSession(restored.SessionID, directoryGrants, locked, switched, lastText)
+		return SessionInfo{}, wireError(fmt.Errorf("切换失败，已恢复原会话：%w", err))
+	}
+	a.adoptRebuiltSession(info.SessionID, directoryGrants, locked, switched, lastText)
 	return info, nil
+}
+
+// adoptRebuiltSession carries the per-conversation state that a fresh
+// sessionEntry does not have onto the rebuilt session. The rebuild itself has
+// already succeeded, so a grant that cannot be restored is a warning on that
+// conversation, not a failed switch: callers would otherwise skip persisting the
+// connection and the UI would keep showing the old model.
+func (a *App) adoptRebuiltSession(id string, directoryGrants []permissions.DirectoryGrant, locked string, switched bool, lastText string) {
+	a.mu.Lock()
+	var emit func(string, any)
+	if replacement := a.entryLocked(id); replacement != nil {
+		replacement.oaLocalModel, replacement.oaSwitchDone, replacement.lastUserText = locked, switched, lastText
+		emit = replacement.emit
+	}
+	a.mu.Unlock()
+	if len(directoryGrants) == 0 {
+		return
+	}
+	err := a.mgr.WithSessionOperation(context.Background(), id, func(ctx context.Context, access host.SessionAccess) error {
+		service, err := permissionService(access)
+		if err != nil {
+			return err
+		}
+		return service.RestoreSessionDirectoryGrants(ctx, directoryGrants)
+	})
+	if err == nil {
+		return
+	}
+	debugLog("rebuild: restore directory grants session=%s: %v", id, err)
+	if emit != nil {
+		emit(EventWarning, Warning{Message: fmt.Sprintf("模型已切换，但本次会话的目录授权未能恢复，需要时会重新询问：%v", err)})
+	}
 }
 
 // SetPlanMode toggles plan mode on the active session and returns the updated

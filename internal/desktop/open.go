@@ -1,28 +1,36 @@
 package desktop
 
 import (
+	"context"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+
+	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
 )
 
-// OpenExternal opens the workspace file with the OS default application. It is
-// bounded to the workspace (rejects escapes before launching).
-func (a *App) OpenExternal(relPath string) error {
-	full, err := a.resolveArtifact(relPath)
-	if err != nil {
-		return wireError(err)
-	}
-	return wireError(startAndReap(openCommand(full)))
+// OpenExternal hands the authorized source file to the OS default application.
+func (a *App) OpenExternal(reference string) error {
+	return wireError(a.withArtifactPath(reference, func(path string) error { return startAndReap(openCommand(path)) }))
 }
 
-// RevealInFolder shows the workspace file in the OS file manager.
-func (a *App) RevealInFolder(relPath string) error {
-	full, err := a.resolveArtifact(relPath)
-	if err != nil {
-		return wireError(err)
-	}
-	return wireError(startAndReap(revealCommand(full)))
+// RevealInFolder shows the authorized source file in the OS file manager.
+func (a *App) RevealInFolder(reference string) error {
+	return wireError(a.withArtifactPath(reference, func(path string) error { return startAndReap(revealCommand(path)) }))
+}
+
+func (a *App) withArtifactPath(reference string, fn func(string) error) error {
+	return a.withArtifact(context.Background(), reference, func(ctx context.Context, _ host.SessionAccess, e *artifactAccess) error {
+		f, err := e.permit.Open(ctx)
+		if err != nil {
+			return artifactFSError(e.ref.Path, err)
+		}
+		_ = f.Close()
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		return fn(e.permit.Path())
+	})
 }
 
 // startAndReap starts cmd and reaps it in the background once it exits. The
@@ -37,18 +45,18 @@ func startAndReap(cmd *exec.Cmd) error {
 	return nil
 }
 
-// ResolveArtifactPath returns the absolute path of a workspace file, for the
-// UI's "copy path" action.
-func (a *App) ResolveArtifactPath(relPath string) (string, error) {
-	full, err := a.resolveArtifact(relPath)
+// ResolveArtifactPath returns the authorized source path for the UI copy action.
+func (a *App) ResolveArtifactPath(reference string) (string, error) {
+	full, err := a.resolveArtifact(reference)
 	return full, wireError(err)
 }
-
-func (a *App) resolveArtifact(relPath string) (string, error) {
-	a.mu.Lock()
-	ws := a.workspace
-	a.mu.Unlock()
-	return resolveWithinWorkspace(ws, relPath)
+func (a *App) resolveArtifact(reference string) (string, error) {
+	var path string
+	err := a.withArtifactPath(reference, func(source string) error { path = source; return nil })
+	if err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // openCommand builds the command to open path with the OS default app WITHOUT a
@@ -73,7 +81,7 @@ func openCommand(path string) *exec.Cmd {
 func revealCommand(path string) *exec.Cmd {
 	switch runtime.GOOS {
 	// G204 在这里是误报,原因见上:二进制名是常量、不经 shell、path 已过
-	// resolveWithinWorkspace,拼进 argv 的都是惰性元素而非可解释的命令串。
+	// source-bound ReadPermit,拼进 argv 的都是惰性元素而非可解释的命令串。
 	case "windows":
 		return exec.Command("explorer", "/select,"+path) //nolint:gosec // G204
 	case "darwin":

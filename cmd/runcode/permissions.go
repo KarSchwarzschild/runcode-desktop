@@ -2,11 +2,14 @@ package main
 
 import (
 	"fmt"
+	"net/url"
 	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/netorigin"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/webaccess"
 )
 
 // defaultNetworkTool is the tool that network allow/deny rules apply to. WebFetch
@@ -53,7 +56,7 @@ func permissionsListCmd() *cobra.Command {
 
 func permissionsDenyCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "deny <host>",
+		Use:          "deny <host|origin>",
 		Short:        "Add a denylist rule for a network host (deny always wins over allow)",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
@@ -63,9 +66,20 @@ func permissionsDenyCmd() *cobra.Command {
 				return err
 			}
 			tool, _ := cmd.Flags().GetString("tool")
-			key, err := networkRuleKey(tool, args[0])
-			if err != nil {
-				return err
+			var key string
+			var keyErr error
+			if strings.Contains(args[0], "://") {
+				route, _ := cmd.Flags().GetString("route")
+				diagnose, _ := cmd.Flags().GetBool("diagnose")
+				key, keyErr = networkOriginRuleKey(tool, args[0], route, diagnose)
+			} else {
+				if cmd.Flags().Changed("route") || cmd.Flags().Changed("diagnose") {
+					return fmt.Errorf("route/diagnose require an explicit HTTP(S) origin")
+				}
+				key, keyErr = networkRuleKey(tool, args[0])
+			}
+			if keyErr != nil {
+				return keyErr
 			}
 			changed, err := store.DenyPersistent(key)
 			if err != nil {
@@ -81,13 +95,15 @@ func permissionsDenyCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("tool", defaultNetworkTool, "tool the rule applies to")
+	cmd.Flags().String("route", "auto", "origin-only rule route: auto, configured, or loopback proxy URL")
+	cmd.Flags().Bool("diagnose", false, "origin-only rule applies to diagnostics")
 	return cmd
 }
 
 func permissionsAllowCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:          "allow <host>",
-		Short:        "Add a project allow rule for a network host (pre-approve so it never prompts)",
+		Use:          "allow <origin>",
+		Short:        "Allow one explicit HTTP(S) origin and route (legacy host-only allows are not reused)",
 		Args:         cobra.ExactArgs(1),
 		SilenceUsage: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -96,11 +112,16 @@ func permissionsAllowCmd() *cobra.Command {
 				return err
 			}
 			tool, _ := cmd.Flags().GetString("tool")
-			key, err := networkRuleKey(tool, args[0])
+			route, _ := cmd.Flags().GetString("route")
+			diagnose, _ := cmd.Flags().GetBool("diagnose")
+			key, err := networkOriginRuleKey(tool, args[0], route, diagnose)
 			if err != nil {
 				return err
 			}
-			if store.Denied(key) {
+			origin, _ := netorigin.Parse(args[0])
+			parsed, _ := url.Parse(origin)
+			host := parsed.Hostname()
+			if store.Denied(key) || store.Denied(permissions.NetworkSessionKey(tool, host)) {
 				return fmt.Errorf("%s is on the denylist; remove the deny rule first (deny wins over allow)", args[0])
 			}
 			if err := store.RememberPersistent(key); err != nil {
@@ -111,6 +132,8 @@ func permissionsAllowCmd() *cobra.Command {
 		},
 	}
 	cmd.Flags().String("tool", defaultNetworkTool, "tool the rule applies to")
+	cmd.Flags().String("route", "auto", "WebFetch route: auto, configured, or explicit loopback proxy URL")
+	cmd.Flags().Bool("diagnose", false, "allow only origin diagnostics, not fetching content")
 	return cmd
 }
 
@@ -196,11 +219,39 @@ func networkRuleKey(tool, host string) (string, error) {
 	if host == "" {
 		return "", fmt.Errorf("empty host")
 	}
+	parsed, err := url.Parse("https://" + host)
+	if err != nil || parsed.Hostname() == "" || parsed.Port() != "" || parsed.User != nil || parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", fmt.Errorf("use a bare host, or an explicit HTTP(S) origin for a port-specific rule")
+	}
+	host = parsed.Hostname()
 	key := permissions.NetworkSessionKey(tool, host)
 	if key == "" {
 		return "", fmt.Errorf("invalid host %q", host)
 	}
 	return key, nil
+}
+
+func networkOriginRuleKey(name, raw, route string, diagnose bool) (string, error) {
+	name = strings.TrimSpace(name)
+	parsed, parseErr := url.Parse(raw)
+	if parseErr != nil || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" || (parsed.Path != "" && parsed.Path != "/") {
+		return "", fmt.Errorf("origin must not contain credentials, a path, query or fragment")
+	}
+	origin, err := netorigin.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("explicit HTTP(S) origin required, for example https://example.com: %w", err)
+	}
+	if strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("empty tool")
+	}
+	if name == "WebSearch" {
+		return "", fmt.Errorf("approve WebSearch in the prompt so its configured destination and route are bound")
+	}
+	route, err = webaccess.ParseRoute(route)
+	if err != nil {
+		return "", err
+	}
+	return permissions.NetworkOriginKey(name, origin, route, diagnose), nil
 }
 
 // ruleEntry pairs a parsed rule with its list (allow/deny) for display.

@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gitlab.ouc-online.com.cn/aibase/agentloop/frontmatter"
 )
 
 // resourceKind is the directory name a resource lives under in either scope.
@@ -83,8 +85,8 @@ func validResourceName(name string) bool {
 	return true
 }
 
-// collapseLine flattens a value to a single line so it stays valid in the
-// frontmatter (which is line-based).
+// collapseLine normalizes intentionally single-line fields, such as display
+// names and tool lists. YAML quoting, not flattening, makes arbitrary text safe.
 func collapseLine(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", " ")
 	s = strings.ReplaceAll(s, "\n", " ")
@@ -103,30 +105,16 @@ func frontmatterName(content string) string {
 // display_name, a hand-written SKILL.md follows the allowed-tools style and says
 // display-name — and neither is worth rejecting a file over.
 //
-// Not a YAML parser: frontmatter here is line-based `key: value`, which is all
-// the engine's own parser reads too. A real one would accept nesting and block
-// scalars this format never uses.
+// Syntax is shared with the engine so import names and display metadata agree
+// with the catalog consumed by the model.
 func frontmatterValue(content string, keys ...string) string {
-	// Tolerate the BOM some Windows editors prepend — the engine's parser does,
-	// so a file it loads fine must not read as "no frontmatter" here.
-	content = strings.TrimPrefix(content, string(utf8BOM))
-	lines := strings.Split(strings.ReplaceAll(content, "\r\n", "\n"), "\n")
-	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+	doc, err := frontmatter.Parse(content)
+	if err != nil {
 		return ""
 	}
-	for i := 1; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) == "---" {
-			break
-		}
-		key, value, ok := strings.Cut(lines[i], ":")
-		if !ok {
-			continue
-		}
-		for _, want := range keys {
-			if strings.EqualFold(strings.TrimSpace(key), want) {
-				return strings.Trim(strings.TrimSpace(value), `"'`)
-			}
-		}
+	value, err := doc.Scalar(keys...)
+	if err != nil {
+		return ""
 	}
-	return ""
+	return value
 }

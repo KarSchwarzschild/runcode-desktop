@@ -6,8 +6,8 @@ import { useEffect, useRef, useState, type RefObject } from 'react'
 import { Icon } from '@/ui/icons'
 import { Markdown } from '@/ui/markdown'
 import { basename } from '@/core/paths'
-import { copyText, errCode, errText, openExternal, readArtifact, renderOfficePDF, resolveArtifactPath } from '@/core/bridge'
-import { artifactKindLabel, classifyPreview, fileColor, kindIcon, previewSrc, type PreviewKind } from './classify'
+import { type ArtifactReference, copyText, errCode, errText, openExternal, readArtifact, renderOfficePDF, resolveArtifactPath } from '@/core/bridge'
+import { artifactKindLabel, classifyPreview, fileColor, kindIcon, type PreviewKind } from './classify'
 import { IconBtn } from './icon-btn'
 import { ImperativeDocView, renderDocx } from './viewers/doc-view'
 import { PptxView } from './viewers/pptx-view'
@@ -57,7 +57,10 @@ function fencedCode(text: string, lang?: string): string {
   return `${fence}${lang ?? ''}\n${text}\n${fence}`
 }
 
-export function PreviewPanel({ baseURL, relPath, onClose }: { baseURL: string; relPath: string; onClose: () => void }) {
+export function PreviewPanel({ artifact, relPath, onClose }: { artifact?: ArtifactReference; relPath: string; onClose: () => void }) {
+  const reference = artifact?.reference ?? ''
+  const sourceURL = artifact?.url ?? ''
+  const src = (url: string) => `${url}?v=${bust}`
   const { kind, lang } = classifyPreview(relPath)
   const [bust, setBust] = useState(1)
   const [text, setText] = useState<string | null>(null)
@@ -74,7 +77,7 @@ export function PreviewPanel({ baseURL, relPath, onClose }: { baseURL: string; r
     let ignore = false
     setText(null)
     setErr('')
-    readArtifact(relPath)
+    readArtifact(reference)
       .then((t) => { if (!ignore) setText(t) })
       .catch((e) => {
         if (ignore) return
@@ -86,15 +89,15 @@ export function PreviewPanel({ baseURL, relPath, onClose }: { baseURL: string; r
         setErr(errText(e))
       })
     return () => { ignore = true }
-  }, [relPath, kind, bust, textual])
+  }, [reference, kind, bust, textual])
 
   // Office 文档优先让本机装的 Office 转成 PDF 再看:内嵌的 JS 渲染器在文字度量与
   // 字体回退上和真 Office 差得明显,而用户对照的正是 WPS/PowerPoint 里的样子。
   // 转不了(没装 Office、非 Windows、调用失败)就退回内嵌渲染器——降级方向是安全的。
-  const office = useOfficePDF(relPath, kind, bust, onCloseRef)
+  const office = useOfficePDF(reference, kind, bust, onCloseRef)
 
   const copyPath = async () => {
-    try { await copyText(await resolveArtifactPath(relPath)) } catch { /* non-fatal */ }
+    try { await copyText(await resolveArtifactPath(reference)) } catch { /* non-fatal */ }
   }
 
   return (
@@ -103,16 +106,16 @@ export function PreviewPanel({ baseURL, relPath, onClose }: { baseURL: string; r
         <span className="flex-none" style={{ color: fileColor(relPath) }}><Icon name={kindIcon(kind)} size={15} /></span>
         <span className="flex-none text-[11px] text-faint bg-inset rounded px-1.5 py-0.5 mr-auto">{artifactKindLabel(kind)}</span>
         <IconBtn name="refresh" title="刷新" onClick={() => setBust((v) => v + 1)} />
-        <IconBtn name="external-link" title="用系统默认程序打开" onClick={() => { openExternal(relPath).catch(() => {}) }} />
+        <IconBtn name="external-link" title="用系统默认程序打开" onClick={() => { openExternal(reference).catch(() => {}) }} />
         <IconBtn name="copy" title="复制路径" onClick={copyPath} />
         <IconBtn name="win-close" title="关闭" onClick={onClose} />
       </div>
       <div className="flex-1 min-h-0 overflow-auto">
-        {kind === 'html' && baseURL && (
-          <iframe title={name} src={previewSrc(baseURL, relPath, bust)} className={FRAME} sandbox="allow-scripts allow-forms allow-popups allow-modals" />
+        {kind === 'html' && sourceURL && (
+          <iframe title={name} src={src(sourceURL)} className={FRAME} sandbox="allow-scripts allow-forms allow-popups allow-modals" />
         )}
-        {(kind === 'image' || kind === 'svg') && baseURL && (
-          <div className="p-4 flex items-center justify-center min-h-full bg-inset/30"><img src={previewSrc(baseURL, relPath, bust)} alt={name} className="max-w-full" /></div>
+        {(kind === 'image' || kind === 'svg') && sourceURL && (
+          <div className="p-4 flex items-center justify-center min-h-full bg-inset/30"><img src={src(sourceURL)} alt={name} className="max-w-full" /></div>
         )}
         {kind === 'markdown' && text != null && <div className="p-4"><Markdown>{text}</Markdown></div>}
         {kind === 'code' && text != null && <div className="p-4"><Markdown>{fencedCode(text, lang)}</Markdown></div>}
@@ -125,22 +128,22 @@ export function PreviewPanel({ baseURL, relPath, onClose }: { baseURL: string; r
         {isOfficeKind(kind) && office.state === 'converting' && (
           <PreviewLoading hint="正在用本机 Office 生成高保真预览…" />
         )}
-        {/* 转出来的 PDF 就放在工作区的 .runcode 下，走的仍是既有的 PDF 预览通路。 */}
-        {isOfficeKind(kind) && office.state === 'ready' && baseURL && (
-          <iframe title={name} src={previewSrc(baseURL, office.pdfRel, bust)} className={FRAME} />
+        {/* PDF URL 仍绑定源引用与 live 授权，派生缓存不开放为工作区静态文件。 */}
+        {isOfficeKind(kind) && office.state === 'ready' && sourceURL && (
+          <iframe title={name} src={src(office.pdfRel)} className={FRAME} />
         )}
-        {isOfficeKind(kind) && office.state === 'ready' && !baseURL && <div className="p-6 text-[13px] text-muted">预览服务不可用。</div>}
-        {office.state === 'fallback' && kind === 'docx' && <ImperativeDocView relPath={relPath} reloadKey={bust} load={renderDocx} busyHint=" Word" onMissing={onClose} />}
-        {office.state === 'fallback' && kind === 'pptx' && <PptxView relPath={relPath} reloadKey={bust} onMissing={onClose} />}
-        {office.state === 'fallback' && kind === 'xlsx' && <XlsxView relPath={relPath} reloadKey={bust} onMissing={onClose} />}
-        {kind === 'pdf' && baseURL && (
-          <iframe title={name} src={previewSrc(baseURL, relPath, bust)} className={FRAME} />
+        {isOfficeKind(kind) && office.state === 'ready' && !sourceURL && <div className="p-6 text-[13px] text-muted">预览服务不可用。</div>}
+        {office.state === 'fallback' && kind === 'docx' && <ImperativeDocView relPath={relPath} reference={reference} reloadKey={bust} load={renderDocx} busyHint=" Word" onMissing={onClose} />}
+        {office.state === 'fallback' && kind === 'pptx' && <PptxView relPath={relPath} reference={reference} reloadKey={bust} onMissing={onClose} />}
+        {office.state === 'fallback' && kind === 'xlsx' && <XlsxView relPath={relPath} reference={reference} reloadKey={bust} onMissing={onClose} />}
+        {kind === 'pdf' && sourceURL && (
+          <iframe title={name} src={src(sourceURL)} className={FRAME} />
         )}
-        {kind === 'pdf' && !baseURL && <div className="p-6 text-[13px] text-muted">预览服务不可用。</div>}
+        {kind === 'pdf' && !sourceURL && <div className="p-6 text-[13px] text-muted">预览服务不可用。</div>}
         {kind === 'unsupported' && (
-          <div className="p-6 text-[13px] text-muted">该文件类型暂不支持预览。<button className="text-primaryink underline ml-1" onClick={() => openExternal(relPath).catch(() => {})}>用系统程序打开</button></div>
+          <div className="p-6 text-[13px] text-muted">该文件类型暂不支持预览。<button className="text-primaryink underline ml-1" onClick={() => openExternal(reference).catch(() => {})}>用系统程序打开</button></div>
         )}
-        {(kind === 'html' || kind === 'image' || kind === 'svg') && !baseURL && (
+        {(kind === 'html' || kind === 'image' || kind === 'svg') && !sourceURL && (
           <div className="p-6 text-[13px] text-muted">预览服务不可用。</div>
         )}
         {err && <InlineError variant="text" className="p-6">{err}</InlineError>}

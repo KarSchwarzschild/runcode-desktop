@@ -121,6 +121,11 @@ describe('diffStats / toolLabel', () => {
 })
 
 describe('failText', () => {
+  it('does not infer safe mode from an unavailable approval', () => {
+    expect(failText(ev({ message: 'denied:approval_unavailable' }))).toBe('审批暂不可用')
+    expect(failText(ev({ message: 'denied:approval_denied' }))).toBe('已拒绝')
+    expect(failText(ev({ message: 'cancelled' }))).toBe('已取消')
+  })
   it('translates a known deny reason', () => {
     expect(failText(ev({ message: 'denied:read_required' }))).toBe('需先读取该文件再写入')
   })

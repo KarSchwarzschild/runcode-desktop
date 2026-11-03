@@ -1,9 +1,12 @@
 package desktop
 
 import (
+	"context"
 	"io/fs"
 	"path/filepath"
 	"sort"
+
+	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
 )
 
 // maxListedFiles caps the workspace file list returned for the @-mention picker,
@@ -25,10 +28,26 @@ func (a *App) ListFiles() []string {
 	a.mu.Lock()
 	ws := a.workspace
 	a.mu.Unlock()
+	return listWorkspaceFiles(ws)
+}
+
+// ListSessionFiles never borrows the focused workspace for an async request.
+func (a *App) ListSessionFiles(sessionID string) ([]string, error) {
+	var files []string
+	if sessionID == "" || a.mgr == nil {
+		return nil, wireError(errNoSession)
+	}
+	err := a.mgr.WithSessionOperation(context.Background(), sessionID, func(_ context.Context, access host.SessionAccess) error {
+		files = listWorkspaceFiles(access.Workspace)
+		return nil
+	})
+	return files, wireError(err)
+}
+
+func listWorkspaceFiles(ws string) []string {
 	if ws == "" {
 		return nil
 	}
-
 	out := make([]string, 0, 256)
 	_ = filepath.WalkDir(ws, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {

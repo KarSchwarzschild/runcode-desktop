@@ -21,19 +21,20 @@ type PassportStatus struct {
 //     互相漂移。标记错了的后果是保密数据出内网，所以基座那边要在配置旁写明依据。
 //   - LocalDefault 指定 Local 模型里默认用哪一个。只标 Local 不够:清单顺序一变
 //     就换了模型，而"换哪个模型"必须是显式声明。
-//   - ContextTokens 是该模型的上下文窗口。本地模型的窗口通常远小于云端模型，
-//     切过去时要按它重设会话预算，否则历史一长第一次请求就超限。0 = 未声明，
-//     沿用会话原值。
+//   - ContextTokens / MaxOutputTokens / MaxHistoryMessages 是逐模型默认预算。
+//     新 Bridge 同时声明三项；缺失输出/历史字段表示旧目录，不能沿用其他模型的值。
 //
 // VisionDefault is the unique tenant-authorized platform image fallback, not OA.
 type PassportModel struct {
-	VisionDefault  bool   `json:"visionDefault,omitempty"`
-	SupportsImages *bool  `json:"supportsImages,omitempty"`
-	ID             string `json:"id"`
-	OwnedBy        string `json:"ownedBy"`
-	Local          bool   `json:"local,omitempty"`
-	LocalDefault   bool   `json:"localDefault,omitempty"`
-	ContextTokens  int    `json:"contextTokens,omitempty"`
+	MaxOutputTokens    *int   `json:"maxOutputTokens,omitempty"`
+	MaxHistoryMessages *int   `json:"maxHistoryMessages,omitempty"`
+	VisionDefault      bool   `json:"visionDefault,omitempty"`
+	SupportsImages     *bool  `json:"supportsImages,omitempty"`
+	ID                 string `json:"id"`
+	OwnedBy            string `json:"ownedBy"`
+	Local              bool   `json:"local,omitempty"`
+	LocalDefault       bool   `json:"localDefault,omitempty"`
+	ContextTokens      int    `json:"contextTokens,omitempty"`
 }
 
 // PassportTenant 是当前用户可用的租户（Bridge /api/tenants）。

@@ -23,6 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"gitlab.ouc-online.com.cn/aibase/agentloop/netorigin"
+
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tools/websearch"
 )
@@ -77,17 +79,28 @@ func New(cfg Config) tool.Tool {
 	if cfg.Client == nil {
 		cfg.Client = &http.Client{Timeout: defaultTimeout}
 	}
+	cfg.Client = netorigin.Restrict(cfg.Client)
 	return Tool{cfg: cfg}
+}
+
+// AuthorizationBinding exposes the Bridge destination, never a fictitious search host.
+func (t Tool) AuthorizationBinding(json.RawMessage) (tool.AuthorizationBinding, error) {
+	origin, err := netorigin.Parse(t.cfg.Endpoint)
+	return tool.AuthorizationBinding{Kind: "platform-search", Endpoint: t.cfg.Endpoint, Identity: tool.BindingFingerprint("platform-search", origin)}, err
 }
 
 // Name 返回 "WebSearch"——必须与内置同名，否则引擎在装配时就会拒掉。
 func (Tool) Name() string { return websearch.ToolName }
 
 // Description 告诉模型这条工具返回什么。刻意与内置那条保持同一形状(标题/网址/
-// 摘要、需要授权)，只补上本后端多给的来源与时间，免得换后端引起调用习惯变化。
+// 摘要、需要授权)，补上来源与时间，以及区别于本机公网工具的服务端排障边界。
 func (Tool) Description() string {
 	return "Search the web and return the top results (title, URL, summary, source site and " +
-		"publish time when available). This is a network operation and requires approval."
+		"publish time when available). This is a network operation and requires approval." + `
+
+Network troubleshooting: this is platform search through the Bridge; the upstream web search runs on the server, not on this computer. The desktop web-proxy setting and RUNCODE_WEB_PROXY do not control this replacement tool, and a local proxy cannot fix server-side outbound connectivity.
+On failure, do not blindly repeat requests or assume regional blocking. Distinguish client-to-Bridge DNS/connection/timeout failures from HTTP 401/403 (account/access), 429 (rate limit), and server/upstream failures (including 5xx or a reported upstream timeout). If the failing hop is unclear, say so. For client connectivity, use only bounded, read-only local DNS/proxy/listener checks with credentials redacted; do not change system settings. Inspect a configured proxy or NO_PROXY mismatch for an intranet Bridge, but never copy Passport tokens into shell commands or route Bridge/OA requests through a discovered public-web proxy. For server/upstream failures, ask the platform administrator to check the service and its outbound network; local port probing does not verify the server's network. Do not disable TLS verification or bypass approval, cancellation, disabled tools, or session data-access restrictions.
+Report the failed stage, checks actually performed, uncertainty, and an actionable next step in the user's language (network administrator for connectivity, account/access check for 401/403, retry later for 429, platform administrator for server/upstream faults). If an alternative public source would help, use it only when the user permits it and session restrictions allow it, with no private query/context; label it as a fallback, not a successful platform search.`
 }
 
 // InputSchema 与内置 WebSearch 完全一致：必填 query，可选 max_results(1-10，默认 5)。

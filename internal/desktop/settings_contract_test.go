@@ -26,13 +26,12 @@ func TestSettingsLegacyStorageAndOwnedFields(t *testing.T) {
 	}
 	before := loadRawConfig()
 	app := New(&recordingSink{})
-	if _, err := app.SaveSettings(SaveSettingsRequest{PermissionMode: "judge", SkipLogin: true, MaxTokens: 0, MaxContextTokens: 0, MaxHistoryMessages: 0, HarmJudgeModel: "judge-model", HarmJudgeVotes: 3}); err != nil {
+	if _, err := app.SaveSettings(SaveSettingsRequest{PermissionMode: "judge", SkipLogin: true, HarmJudgeModel: "judge-model", HarmJudgeVotes: 3}); err != nil {
 		t.Fatal(err)
 	}
 	got := loadRawConfig()
 	want := before
 	want.PermissionMode, want.SkipLogin = "judge", true
-	want.MaxTokens, want.MaxContextTokens, want.MaxHistoryMessages = 0, 0, 0
 	want.HarmJudgeModel, want.HarmJudgeVotes = "judge-model", 3
 	if !reflect.DeepEqual(got, want) {
 		t.Fatal("settings changed fields outside its ownership")
@@ -41,7 +40,7 @@ func TestSettingsLegacyStorageAndOwnedFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, forbidden := range []string{"apiKey", "authToken", "apiKeyProtected", "authTokenProtected", "customModels", "opaque-key", "opaque-token", "profile-secret"} {
+	for _, forbidden := range []string{"apiKey", "authToken", "apiKeyProtected", "authTokenProtected", "customModels", "opaque-key", "opaque-token", "profile-secret", "maxTokens", "maxContextTokens", "maxHistoryMessages"} {
 		if strings.Contains(string(data), forbidden) {
 			t.Fatalf("view exposed %s", forbidden)
 		}
@@ -49,17 +48,23 @@ func TestSettingsLegacyStorageAndOwnedFields(t *testing.T) {
 	saveConfig(StartSessionRequest{CWD: "next", Provider: "openai", Model: "next"})
 	got = loadRawConfig()
 	if !got.ContextAudit || !got.SkipLogin || got.TenantID != before.TenantID || got.WebProxy != before.WebProxy || !reflect.DeepEqual(got.CustomModels, before.CustomModels) {
-		t.Fatal("session save clobbered application config")
+		t.Fatalf("session save clobbered application config: audit=%v login=%v tenant=%v proxy=%v custom=%v", got.ContextAudit, got.SkipLogin, got.TenantID == before.TenantID, got.WebProxy == before.WebProxy, reflect.DeepEqual(got.CustomModels, before.CustomModels))
 	}
-	if got.MaxContextTokens != 0 || got.MaxTokens != 0 || got.MaxHistoryMessages != 0 {
-		t.Fatal("explicit zero settings did not survive session save")
+	data, err = os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"maxTokens", "maxContextTokens", "maxHistoryMessages"} {
+		if strings.Contains(string(data), key) {
+			t.Fatalf("obsolete stored setting survived: %s", key)
+		}
 	}
 }
 
 func TestSaveSettingsFailureDoesNotChangeNextSession(t *testing.T) {
 	isolateConfigDir(t)
 	app := New(&recordingSink{})
-	before := app.config.MaxTokens
+	before := app.config.PermissionMode
 	path, err := desktopConfigPath()
 	if err != nil {
 		t.Fatal(err)
@@ -68,10 +73,10 @@ func TestSaveSettingsFailureDoesNotChangeNextSession(t *testing.T) {
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := app.SaveSettings(SaveSettingsRequest{PermissionMode: "judge", MaxTokens: 1234}); err == nil {
+	if _, err := app.SaveSettings(SaveSettingsRequest{PermissionMode: "judge", HarmJudgeVotes: 3}); err == nil {
 		t.Fatal("failed persistence reported success")
 	}
-	if app.config.MaxTokens != before {
+	if app.config.PermissionMode != before {
 		t.Fatal("failed save mutated next session")
 	}
 }
@@ -79,7 +84,7 @@ func TestSaveSettingsFailureDoesNotChangeNextSession(t *testing.T) {
 func TestSaveSettingsRejectsInvalidInputWithoutWriting(t *testing.T) {
 	isolateConfigDir(t)
 	app := New(&recordingSink{})
-	for _, req := range []SaveSettingsRequest{{PermissionMode: "unknown"}, {PermissionMode: "interactive", MaxTokens: -1}} {
+	for _, req := range []SaveSettingsRequest{{PermissionMode: "unknown"}, {PermissionMode: "interactive", HarmJudgeVotes: -1}} {
 		if _, err := app.SaveSettings(req); err == nil {
 			t.Fatal("invalid settings accepted")
 		}
@@ -97,7 +102,7 @@ func TestSettingsAndOtherConfigWritersPreserveEachOther(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		for i := 0; i < 10; i++ {
-			if _, err := app.SaveSettings(SaveSettingsRequest{PermissionMode: "interactive", MaxTokens: 500, SkipLogin: true}); err != nil {
+			if _, err := app.SaveSettings(SaveSettingsRequest{PermissionMode: "interactive", HarmJudgeVotes: 5, SkipLogin: true}); err != nil {
 				t.Error(err)
 			}
 		}
@@ -112,7 +117,7 @@ func TestSettingsAndOtherConfigWritersPreserveEachOther(t *testing.T) {
 	}()
 	wg.Wait()
 	got := loadRawConfig()
-	if got.TenantID != "tenant" || !got.ContextAudit || got.MaxTokens != 500 || !got.SkipLogin {
+	if got.TenantID != "tenant" || !got.ContextAudit || got.HarmJudgeVotes != 5 || !got.SkipLogin {
 		t.Fatal("concurrent configuration writes lost fields")
 	}
 }

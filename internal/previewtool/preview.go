@@ -1,6 +1,6 @@
 // Package previewtool implements the open_preview tool: the model asks the desktop
-// to open a workspace file in its preview panel. It validates the path is inside the
-// workspace and exists, then emits a structured event the desktop UI acts on. It is
+// to open an authorized local file in its preview panel. It validates the concrete
+// per-call read scope and emits a source-bound reference via the desktop opener. It is
 // registered only in the desktop (via engine.Options.ExtraTools), never the CLI.
 //
 // 名字带 tool 后缀是为了与 internal/desktop 自己的 preview.go(工作区静态预览
@@ -35,11 +35,20 @@ type input struct {
 // session's resolver) without repeating the string.
 const Name = "open_preview"
 
+// Opener registers an actually authorized preview in its owning session.
+type Opener func(context.Context, string, *tool.Context) (any, error)
+
 // Tool is the open_preview tool.
-type Tool struct{}
+type Tool struct{ open Opener }
 
 // New returns the open_preview tool.
-func New() tool.Tool { return Tool{} }
+func New(open ...Opener) tool.Tool {
+	var t Tool
+	if len(open) > 0 {
+		t.open = open[0]
+	}
+	return t
+}
 
 // Name is the tool name the model calls.
 func (Tool) Name() string { return Name }
@@ -51,17 +60,17 @@ func (Tool) InputPresentation() tool.InputPresentation {
 
 // Description tells the model when to reach for this tool.
 func (Tool) Description() string {
-	return "Open a workspace file in the user's desktop preview panel. Call this after you " +
+	return "Open an authorized local file in the user's desktop preview panel. Call this after you " +
 		"produce a document or a website/H5 (e.g. an .html, .md, or image) so the user sees it " +
-		"immediately. The path is a workspace-relative file path."
+		"immediately. Use a workspace-relative path or an authorized absolute path."
 }
 
-// InputSchema declares the single workspace-relative "path" argument.
+// InputSchema declares a workspace-relative or authorized absolute file path.
 func (Tool) InputSchema() tool.Schema {
 	return tool.Schema{
 		Type: tool.SchemaTypeObject,
 		Properties: map[string]tool.Schema{
-			"path": {Type: tool.SchemaTypeString, Description: "Workspace-relative path of the file to preview."},
+			"path": {Type: tool.SchemaTypeString, Description: "Workspace-relative or authorized absolute file path."},
 		},
 		Required:             []string{"path"},
 		AdditionalProperties: false,
@@ -71,9 +80,8 @@ func (Tool) InputSchema() tool.Schema {
 // IsConcurrencySafe reports true: opening a preview only reads and emits an event.
 func (Tool) IsConcurrencySafe() bool { return true }
 
-// Run validates the path stays inside the workspace and exists, then emits the
-// event the desktop acts on.
-func (Tool) Run(_ context.Context, raw json.RawMessage, tctx *tool.Context, out chan<- tool.Event) (tool.Result, error) {
+// Run validates the concrete read target and emits the desktop opener result.
+func (t Tool) Run(ctx context.Context, raw json.RawMessage, tctx *tool.Context, out chan<- tool.Event) (tool.Result, error) {
 	var in input
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return tool.Result{}, fmt.Errorf("parse open_preview input: %w", err)
@@ -89,8 +97,7 @@ func (Tool) Run(_ context.Context, raw json.RawMessage, tctx *tool.Context, out 
 	if err != nil {
 		return tool.Result{}, err
 	}
-	within, err := toolpath.IsWithinResolved(ws, abs)
-	if err != nil || !within {
+	if err := toolpath.RequireReadScope(abs, tctx); err != nil {
 		return tool.Result{}, fmt.Errorf("path is outside the workspace: %s", in.Path)
 	}
 	if info, err := os.Stat(abs); err != nil || info.IsDir() {
@@ -100,10 +107,20 @@ func (Tool) Run(_ context.Context, raw json.RawMessage, tctx *tool.Context, out 
 	if err != nil {
 		rel = in.Path
 	}
+	if within, _ := toolpath.IsWithinResolved(ws, abs); !within {
+		rel = abs
+	}
 	rel = filepath.ToSlash(rel)
+	var data any = previewData{Path: rel}
+	if t.open != nil {
+		data, err = t.open(ctx, abs, tctx)
+		if err != nil {
+			return tool.Result{}, err
+		}
+	}
 	if out != nil {
 		select {
-		case out <- tool.Event{Type: tool.EventTypeProgress, ToolName: "open_preview", Message: "预览 " + rel, Data: previewData{Path: rel}}:
+		case out <- tool.Event{Type: tool.EventTypeProgress, ToolName: "open_preview", Message: "预览 " + rel, Data: data}:
 		default:
 		}
 	}

@@ -98,6 +98,13 @@ func (p *approvalPrompter) writePrompt(req permissions.ApprovalRequest) error {
 			req.SamplingServer, note, allowLine(req.Grantable))
 		return err
 	}
+	for _, detail := range []string{req.InputPreview, req.GrantScope} {
+		if detail != "" {
+			if _, err := fmt.Fprintln(p.err, detail); err != nil {
+				return err
+			}
+		}
+	}
 	summary := req.Summary
 	if req.Command != "" {
 		if _, err := fmt.Fprintf(p.err, "Command to run: %s\n", req.Command); err != nil {
@@ -116,6 +123,11 @@ func (p *approvalPrompter) writePrompt(req permissions.ApprovalRequest) error {
 		summary.TargetExists,
 	); err != nil {
 		return err
+	}
+	if summary.NetworkHost != "" {
+		if _, err := fmt.Fprintln(p.err, "Network origin:", summary.NetworkOrigin, "Host:", summary.NetworkHost, "Route:", summary.NetworkRoute); err != nil {
+			return err
+		}
 	}
 	if summary.CommandSummary != "" {
 		if _, err := fmt.Fprintf(p.err, "Command category: %s\nCommand capabilities: %s\nCommand risk reasons: %s\nCommand summary: %s\n",

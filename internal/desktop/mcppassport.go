@@ -1,7 +1,6 @@
 package desktop
 
 import (
-	"os"
 	"strings"
 
 	"gitlab.ouc-online.com.cn/aibase/agentloop/mcp"
@@ -42,29 +41,6 @@ func withMCPPassport(s settings.MCPServerConfig, on bool) settings.MCPServerConf
 	return s
 }
 
-// passportMCPNames returns the set of MCP server names that opted in to Passport
-// injection, read from the user-level config.toml (the same source the MCP
-// management page uses). It is the single source for both things that follow from
-// opting in — the identity headers and the approval bypass — so the two can never
-// disagree about which servers are ours.
-func passportMCPNames() map[string]bool {
-	dir, err := os.UserConfigDir()
-	if err != nil {
-		return nil
-	}
-	res, err := settings.Load(settings.LoadOptions{UserConfigDir: dir})
-	if err != nil {
-		return nil
-	}
-	out := map[string]bool{}
-	for name, s := range res.Config.MCP.Servers {
-		if mcpPassportEnabled(s) {
-			out[name] = true
-		}
-	}
-	return out
-}
-
 // applyMCPPassport attaches the per-request identity headers to every server named
 // in names. The other half of opting in — skipping the per-call approval an
 // arbitrary external server needs — is applied where the permission service is
@@ -75,6 +51,7 @@ func applyMCPPassport(servers []mcp.ServerConfig, names map[string]bool, headers
 	for i := range servers {
 		if names[servers[i].Name] {
 			servers[i].HeaderSource = headers
+			servers[i].HostTrusted = true
 		}
 	}
 }
@@ -101,11 +78,11 @@ func (a *App) attachMCPPassport(servers []mcp.ServerConfig) {
 	if len(servers) == 0 {
 		return
 	}
-	names := passportMCPNames()
-	if len(names) == 0 {
-		return
+	for i := range servers {
+		if servers[i].HostTrusted {
+			servers[i].HeaderSource = a.mcpPassportHeaders
+		}
 	}
-	applyMCPPassport(servers, names, a.mcpPassportHeaders)
 }
 
 // mcpPassportHeaders is the per-request header source: the token is fetched fresh
@@ -115,4 +92,15 @@ func (a *App) mcpPassportHeaders() (map[string]string, error) {
 	tenant := a.passportTenant
 	a.mu.Unlock()
 	return passportHeaders(a.tokens.Token, tenant)
+}
+
+// trustedMCPBindings and credential injection use one immutable loaded snapshot.
+func trustedMCPBindings(servers []mcp.ServerConfig) map[string]string {
+	out := map[string]string{}
+	for _, cfg := range servers {
+		if cfg.HostTrusted {
+			out[cfg.Name] = mcp.ServerBinding(cfg).Identity
+		}
+	}
+	return out
 }

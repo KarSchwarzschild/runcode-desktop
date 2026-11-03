@@ -60,9 +60,9 @@ func TestHarmScriptAddendumReadsWorkspaceScript(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "build.py"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	app := &App{workspace: ws}
+	app := ws
 
-	add := app.harmScriptAddendum("python build.py")
+	add := scriptAddendum(app, "python build.py")
 	if !strings.Contains(add, body) {
 		t.Fatalf("addendum missing script body: %q", add)
 	}
@@ -79,8 +79,8 @@ func TestHarmScriptAddendumSurfacesHiddenPayload(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "innocuous.py"), []byte("__import__('shutil').rmtree('/')\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	app := &App{workspace: ws}
-	add := app.harmScriptAddendum("python innocuous.py")
+	app := ws
+	add := scriptAddendum(app, "python innocuous.py")
 	if !strings.Contains(add, "rmtree") {
 		t.Fatalf("the hidden destructive call did not reach the judge: %q", add)
 	}
@@ -89,9 +89,9 @@ func TestHarmScriptAddendumSurfacesHiddenPayload(t *testing.T) {
 func TestHarmScriptAddendumRefusesOutsideWorkspace(t *testing.T) {
 	t.Parallel()
 	ws := t.TempDir()
-	app := &App{workspace: ws}
+	app := ws
 	// A relative path escaping the workspace must not be read.
-	if add := app.harmScriptAddendum("python ../../secrets.py"); add != "" {
+	if add := scriptAddendum(app, "python ../../secrets.py"); add != "" {
 		t.Fatalf("read a script outside the workspace: %q", add)
 	}
 	// An ABSOLUTE path outside the workspace must not be read either. This is the
@@ -101,15 +101,15 @@ func TestHarmScriptAddendumRefusesOutsideWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outside, "evil.py"), []byte("secret"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if add := app.harmScriptAddendum("python " + filepath.Join(outside, "evil.py")); add != "" {
+	if add := scriptAddendum(app, "python "+filepath.Join(outside, "evil.py")); add != "" {
 		t.Fatalf("read an absolute script outside the workspace: %q", add)
 	}
 	// Missing file: nothing to add, no error surfaced.
-	if add := app.harmScriptAddendum("python nope.py"); add != "" {
+	if add := scriptAddendum(app, "python nope.py"); add != "" {
 		t.Fatalf("addendum for a missing file should be empty: %q", add)
 	}
 	// No workspace at all.
-	if add := (&App{}).harmScriptAddendum("python build.py"); add != "" {
+	if add := scriptAddendum("", "python build.py"); add != "" {
 		t.Fatalf("addendum without a workspace should be empty: %q", add)
 	}
 }
@@ -124,8 +124,8 @@ func TestHarmScriptAddendumReadsAbsolutePathInsideWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "app.py"), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	app := &App{workspace: ws}
-	add := app.harmScriptAddendum("python " + filepath.Join(ws, "app.py"))
+	app := ws
+	add := scriptAddendum(app, "python "+filepath.Join(ws, "app.py"))
 	if !strings.Contains(add, body) {
 		t.Fatalf("in-workspace absolute script not read: %q", add)
 	}
@@ -137,8 +137,8 @@ func TestHarmScriptAddendumBinaryAndTruncation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "blob.js"), []byte("var x = 1;\x00\x01binary"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	app := &App{workspace: ws}
-	add := app.harmScriptAddendum("node blob.js")
+	app := ws
+	add := scriptAddendum(app, "node blob.js")
 	if !strings.Contains(add, "binary") || strings.Contains(add, "\x00") {
 		t.Fatalf("binary file should be noted, not dumped: %q", add)
 	}
@@ -147,7 +147,7 @@ func TestHarmScriptAddendumBinaryAndTruncation(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "big.py"), []byte(big), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	add = app.harmScriptAddendum("python big.py")
+	add = scriptAddendum(app, "python big.py")
 	if !strings.Contains(add, "truncated") {
 		t.Fatalf("oversized script should be marked truncated: %q", add[len(add)-80:])
 	}
@@ -158,10 +158,27 @@ func TestHarmScriptAddendumBinaryAndTruncation(t *testing.T) {
 
 func TestHarmScriptAddendumIgnoresNonScript(t *testing.T) {
 	t.Parallel()
-	app := &App{workspace: t.TempDir()}
+	app := t.TempDir()
 	for _, cmd := range []string{"go test ./...", "python -c \"print(1)\"", "ls -la"} {
-		if add := app.harmScriptAddendum(cmd); add != "" {
+		if add := scriptAddendum(app, cmd); add != "" {
 			t.Fatalf("harmScriptAddendum(%q) = %q, want empty", cmd, add)
+		}
+	}
+}
+
+func scriptAddendum(ws, command string) string {
+	text, _ := harmScriptEvidence(ws, command)
+	return text
+}
+
+func TestHarmScriptEvidenceIncompleteCannotCertifySafety(t *testing.T) {
+	ws := t.TempDir()
+	if err := os.WriteFile(filepath.Join(ws, "big.py"), []byte(strings.Repeat("x", maxHarmScriptBytes+1)), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, command := range []string{"python big.py", "python missing.py", "python -c print(1)", "echo first\npython missing.py"} {
+		if _, complete := harmScriptEvidence(ws, command); complete {
+			t.Fatal("incomplete script certified", command)
 		}
 	}
 }

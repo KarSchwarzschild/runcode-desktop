@@ -289,13 +289,15 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 	// "没有本地模型"——于是 OA 工具不注册，而不是错把云端模型当成本地的。
 	var payload struct {
 		Data []struct {
-			ID             string `json:"id"`
-			OwnedBy        string `json:"owned_by"`
-			SupportsImages *bool  `json:"supports_images"`
-			VisionDefault  bool   `json:"vision_default"`
-			Local          bool   `json:"local"`
-			LocalDefault   bool   `json:"local_default"`
-			ContextTokens  int    `json:"context_tokens"`
+			ID                 string `json:"id"`
+			OwnedBy            string `json:"owned_by"`
+			SupportsImages     *bool  `json:"supports_images"`
+			VisionDefault      bool   `json:"vision_default"`
+			Local              bool   `json:"local"`
+			LocalDefault       bool   `json:"local_default"`
+			ContextTokens      *int   `json:"context_tokens"`
+			MaxOutputTokens    *int   `json:"max_output_tokens"`
+			MaxHistoryMessages *int   `json:"max_history_messages"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -303,14 +305,23 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 	}
 	models := make([]PassportModel, 0, len(payload.Data))
 	for _, m := range payload.Data {
+		contextTokens := 0
+		if m.ContextTokens != nil {
+			contextTokens = *m.ContextTokens
+		} else {
+			// A partial payload is not a complete set of model defaults.
+			m.MaxOutputTokens, m.MaxHistoryMessages = nil, nil
+		}
 		models = append(models, PassportModel{
-			SupportsImages: m.SupportsImages,
-			VisionDefault:  m.VisionDefault,
-			ID:             m.ID,
-			OwnedBy:        m.OwnedBy,
-			Local:          m.Local,
-			LocalDefault:   m.LocalDefault,
-			ContextTokens:  m.ContextTokens,
+			SupportsImages:     m.SupportsImages,
+			VisionDefault:      m.VisionDefault,
+			ID:                 m.ID,
+			OwnedBy:            m.OwnedBy,
+			Local:              m.Local,
+			LocalDefault:       m.LocalDefault,
+			ContextTokens:      contextTokens,
+			MaxOutputTokens:    m.MaxOutputTokens,
+			MaxHistoryMessages: m.MaxHistoryMessages,
 		})
 	}
 	if a.visionAccountIdentity() != actor {
@@ -319,7 +330,7 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 	if scope != platformModelRef(tenantID, "") {
 		return nil, wireError(errors.New("加载模型期间平台已变化，请重试"))
 	}
-	a.rememberVisionCatalog(scope, actor, models)
+	a.rememberModelCatalog(scope, actor, models)
 	stored := loadRawConfig()
 	for i := range models {
 		if v := imageOverride(stored, platformModelRef(tenantID, models[i].ID)); v != nil {

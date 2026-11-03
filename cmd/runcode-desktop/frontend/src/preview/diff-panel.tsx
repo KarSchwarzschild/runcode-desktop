@@ -7,7 +7,7 @@ import { errText, reviewEdit, type EditDiff } from '@/core/bridge'
 import { IconBtn } from './icon-btn'
 import { InlineError } from '@/ui/feedback'
 
-export function DiffPanel({ snapshotId, relPath, onClose }: { snapshotId: string; relPath: string; onClose: () => void }) {
+export function DiffPanel({ sessionID, snapshotId, relPath, onClose }: { sessionID?: string; snapshotId: string; relPath: string; onClose: () => void }) {
   const [diff, setDiff] = useState<EditDiff | null>(null)
   const [err, setErr] = useState('')
   const name = basename(relPath)
@@ -15,12 +15,12 @@ export function DiffPanel({ snapshotId, relPath, onClose }: { snapshotId: string
     let ignore = false
     setDiff(null)
     setErr('')
-    // 空串 = 聚焦会话：复审面板永远跟着用户正在看的那条对话走。
-    reviewEdit('', snapshotId)
+    // 必须使用标签保存的来源会话；缺失时明确报错，不回退到焦点。
+    void (sessionID ? reviewEdit(sessionID, snapshotId) : Promise.reject(new Error('缺少来源会话')))
       .then((d) => { if (!ignore) setDiff(d) })
       .catch((e) => { if (!ignore) setErr(errText(e)) })
     return () => { ignore = true }
-  }, [snapshotId])
+  }, [sessionID, snapshotId])
   return (
     <div className="flex flex-col h-full min-h-0 bg-surface">
       <div className="flex-none flex items-center gap-1.5 h-[44px] px-2.5 border-b border-line2">

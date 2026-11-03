@@ -17,6 +17,8 @@ import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 
 // CommandKinds 按名字给每条命令分类。
 var CommandKinds = map[string]hostproto.CommandKind{
+	"GetModelContextSettings":    hostproto.CommandQuery,
+	"SaveModelContextSettings":   hostproto.CommandIdempotentSet,
 	"GetVisionSettings":          hostproto.CommandQuery,
 	"SaveVisionSettings":         hostproto.CommandTrigger,
 	"SetPlatformImageCapability": hostproto.CommandTrigger,
@@ -48,6 +50,8 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"PassportStatus":          hostproto.CommandQuery,
 	"PassportValidate":        hostproto.CommandQuery,
 	"PassportTenants":         hostproto.CommandQuery,
+	"ListSessionFiles":        hostproto.CommandQuery,
+	"ListDirectoryAccess":     hostproto.CommandQuery,
 	"ReadArtifact":            hostproto.CommandQuery,
 	"ReadArtifactBytes":       hostproto.CommandQuery,
 	"RenderOfficePDF":         hostproto.CommandQuery,
@@ -112,6 +116,10 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"NewSession":              hostproto.CommandTrigger,
 	"OpenSession":             hostproto.CommandTrigger,
 	"FocusSession":            hostproto.CommandTrigger,
+	"OpenArtifact":            hostproto.CommandTrigger,
+	"ReleaseArtifact":         hostproto.CommandIdempotentSet,
+	"GrantDirectoryAccess":    hostproto.CommandTrigger,
+	"RevokeDirectoryAccess":   hostproto.CommandTrigger,
 	"OpenExternal":            hostproto.CommandTrigger,
 	"CodexAwaitLogin":         hostproto.CommandTrigger,
 	"CodexCancelLogin":        hostproto.CommandTrigger,

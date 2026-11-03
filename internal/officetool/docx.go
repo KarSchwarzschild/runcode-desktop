@@ -21,6 +21,10 @@ func extractDocx(path string, cb *capBuf) error {
 		return fmt.Errorf("open docx: %w", err)
 	}
 	defer func() { _ = zr.Close() }()
+	return extractDocxArchive(&zr.Reader, cb)
+}
+
+func extractDocxArchive(zr *zip.Reader, cb *capBuf) error {
 
 	styles := loadDocxStyles(zr) // styleId -> human name
 	doc := openZipEntry(zr, "word/document.xml")
@@ -411,7 +415,7 @@ func styleName(styles map[string]string, id string) string {
 
 // loadDocxStyles maps each styleId to its human-readable w:name, so paragraphs
 // report "标题 1" rather than the opaque style id.
-func loadDocxStyles(zr *zip.ReadCloser) map[string]string {
+func loadDocxStyles(zr *zip.Reader) map[string]string {
 	out := map[string]string{}
 	f := openZipEntry(zr, "word/styles.xml")
 	if f == nil {
@@ -439,7 +443,7 @@ func loadDocxStyles(zr *zip.ReadCloser) map[string]string {
 
 // openZipEntry returns a reader for the named entry, or nil if absent. The caller
 // closes it.
-func openZipEntry(zr *zip.ReadCloser, name string) io.ReadCloser {
+func openZipEntry(zr *zip.Reader, name string) io.ReadCloser {
 	for _, f := range zr.File {
 		if f.Name == name {
 			rc, err := f.Open()

@@ -11,11 +11,10 @@ package desktop
 // "有条件"指:必须是已知解释器在跑一个带脚本扩展名的本地文件;文件必须落在工作区
 // 内(经 resolveWithinWorkspace 兜底,越界/软链逃逸/不存在一律读不到);内容有大小
 // 上限;二进制文件只记一行说明不塞内容。任一条件不满足就退回原来的"只看命令行",
-// 那是安全的降级,不是失败。
+// 证据不足必须转人工,不能把少看脚本当作安全证明。
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -42,7 +41,7 @@ var scriptInterpreters = map[string]bool{
 // scriptExtensions 是被当作"脚本文件"的扩展名。用扩展名而不是"第一个非 flag 参数"
 // 来定位脚本,恰好绕开了 flag 取值的歧义:`python -X utf8 app.py` 里 utf8 没有脚本
 // 扩展名会被跳过,app.py 才被认出;`python -c "code"` 里那段内联代码同样没有扩展名
-// (内联代码本就明摆在命令行上,判定看得到,无需再读文件)。
+// (当前保守路径将这些形态转人工)。
 var scriptExtensions = map[string]bool{
 	".py": true, ".pyw": true, ".js": true, ".mjs": true, ".cjs": true,
 	".ts": true, ".mts": true, ".cts": true, ".tsx": true, ".jsx": true,
@@ -151,58 +150,56 @@ func tokenizeQuoted(command string) []string {
 	return tokens
 }
 
-// harmScriptAddendum 在 harm 判定前,把 command 要执行的本地脚本内容读成一段 untrusted
-// 附文。不是脚本执行、脚本在工作区外、不存在、非普通文件或读失败,都返回 ""(退回只看
-// 命令行的判定)。返回的文本会被拼进 describeAction 的 untrusted 段,由引擎统一围栏。
-func (a *App) harmScriptAddendum(command string) string {
+// Opaque or incomplete execution evidence can help a human, but cannot support
+// a model-inferred automatic allow. This is not a proof of arbitrary script safety.
+func harmScriptEvidence(ws, command string) (string, bool) {
+	if hasShellComposition(command) || strings.ContainsAny(command, string([]byte{13, 10})) {
+		return "", false
+	}
 	rel, ok := scriptInvocation(command)
 	if !ok {
-		return ""
+		tokens := tokenizeQuoted(command)
+		return "", len(tokens) > 0 && !scriptInterpreters[interpreterName(tokens[0])]
 	}
-	a.mu.Lock()
-	ws := a.workspace
-	a.mu.Unlock()
 	if ws == "" {
-		return ""
+		return "", false
 	}
 	full, err := resolveScriptWithinWorkspace(ws, rel)
 	if err != nil {
-		return ""
+		return "", false
 	}
-	info, err := os.Stat(full)
-	if err != nil || !info.Mode().IsRegular() {
-		return ""
-	}
-	f, err := os.Open(full) //nolint:gosec // G304: full 已经 resolveWithinWorkspace 限定在工作区内
+	root, err := os.OpenRoot(ws)
 	if err != nil {
-		return ""
+		return "", false
+	}
+	defer func() { _ = root.Close() }()
+	local, err := filepath.Rel(ws, full)
+	if err != nil {
+		return "", false
+	}
+	f, err := root.Open(local)
+	if err != nil {
+		return "", false
 	}
 	defer func() { _ = f.Close() }()
-
-	// 多读 1 字节用来判断是否发生了截断。
-	buf := make([]byte, maxHarmScriptBytes+1)
-	n, err := io.ReadFull(f, buf)
-	// ReadFull reports ErrUnexpectedEOF/EOF when the file is shorter than the
-	// buffer — expected here, not a failure. Any other error means the read
-	// itself failed, so add nothing.
-	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
-		return ""
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		return "", false
 	}
-	data := buf[:n]
-	truncated := n > maxHarmScriptBytes
-	if truncated {
-		data = data[:maxHarmScriptBytes]
+	data, err := io.ReadAll(io.LimitReader(f, maxHarmScriptBytes+1))
+	if err != nil {
+		return "", false
 	}
 	if bytes.IndexByte(data, 0) >= 0 {
-		// 二进制文件塞进判定请求既无益又费 token,只记一行事实。
-		return fmt.Sprintf("\n\nthe command runs the local file %q, which is binary — contents omitted.", rel)
+		return fmt.Sprintf("local script %q is binary; contents omitted", rel), false
 	}
-
-	var b strings.Builder
-	fmt.Fprintf(&b, "\n\nthe command runs the local script %q; its contents follow as untrusted data:\n", rel)
-	b.Write(data)
-	if truncated {
-		fmt.Fprintf(&b, "\n…(truncated at %d KiB)", maxHarmScriptBytes>>10)
+	complete := len(data) <= maxHarmScriptBytes
+	if !complete {
+		data = data[:maxHarmScriptBytes]
 	}
-	return b.String()
+	text := fmt.Sprintf("\nlocal script %q (untrusted data):\n%s", rel, data)
+	if !complete {
+		text += "\n[truncated script evidence]"
+	}
+	return text, complete
 }

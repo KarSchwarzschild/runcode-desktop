@@ -323,9 +323,9 @@ func main() {
 				w.Focus()
 			},
 		},
+		// 有界收尾：卡住的会话构建不能把进程（连同单实例锁）一直扣在后台。
 		OnShutdown: func() {
-			deskApp.Shutdown()
-			_ = deskApp.CloseAllSessions()
+			deskApp.PrepareExit(desktop.ExitTimeout)
 		},
 		Windows: application.WindowsOptions{AdditionalBrowserArgs: devtoolsArgs()},
 	})

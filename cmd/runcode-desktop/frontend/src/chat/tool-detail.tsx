@@ -2,6 +2,7 @@
 // 与返回内容(匹配文件树 / 图片 / 输出行)。被顶层执行卡与子代理卡共用。
 import { useMemo, useState, type ReactNode } from 'react'
 import { Icon } from '@/ui/icons'
+import { networkRouteLabel } from '@/core/network-route'
 import { type ToolEvent } from '@/core/bridge'
 import { useStickToBottom } from '@/hooks/use-stick-to-bottom'
 import { buildFileTree, classifyPreview, fileColor, kindIcon, type FileNode } from '@/preview/classify'
@@ -77,7 +78,7 @@ function ToolInputView({ tool }: { tool: ToolEvent }) {
       if (s('path')) return kvRows([['路径', s('path')], tool.toolName === 'Delete' && !!o.permanent && ['方式', '永久删除']])
       break
     case 'WebFetch':
-      if (s('url')) return kvRows([['URL', s('url')]])
+      if (s('url')) return kvRows([['URL', s('url')], ['路线', networkRouteLabel(o.proxy)], o.diagnose_only === true && ['方式', '仅诊断，不抓取正文']])
       break
   }
   return <RawJson value={o} />

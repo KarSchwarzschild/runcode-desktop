@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
 import { toolTargetPath } from '@/chat/tool-text'
 import { extractFilePaths, rankAutoPreview, toWorkspaceRel } from '@/preview/classify'
-import { resolveArtifactPath } from '@/core/bridge'
+import { createActionScope } from './action-scope'
 import type { Block } from '@/chat/blocks'
 
 // 最多验证前几个候选就收手：助手正文里往往会提到一串路径，逐个问后端既慢又没必要
@@ -29,7 +29,8 @@ const maxProbes = 6
 // 在同一回合内被改名或删除（notes/part2.md 就是这么没的），正文里提到的更可能只是
 // 模型的说法。不能改用工作区文件清单来筛——那份清单在回合结束时才异步刷新，此刻
 // 还是上一轮的旧值，本回合刚生成的 .pptx 恰恰不在里面。
-export function useAutoPreview({ busy, blocks, cwd, enabled, opens, open }: {
+export function useAutoPreview({ sessionID, busy, blocks, cwd, enabled, opens, open }: {
+  sessionID: string
   busy: boolean
   blocks: Block[]
   cwd: string
@@ -37,8 +38,12 @@ export function useAutoPreview({ busy, blocks, cwd, enabled, opens, open }: {
   // opens 是预览面板的累计打开次数（任何来源）。回合首尾各采样一次，差值 > 0 就
   // 说明这一轮已经有人开过预览了。
   opens: RefObject<number>
-  open: (relPath: string) => void
+  open: (relPath: string, quiet?: boolean) => Promise<boolean>
 }) {
+  const scope = useRef(createActionScope())
+  scope.current.focus(sessionID)
+  const owner = useRef(sessionID)
+  useEffect(() => { const active = scope.current; active.activate(); return () => active.deactivate() }, [])
   // 事件式逻辑靠 busy 的跳变驱动，所以其余入参走 ref 取最新值，避免把它们写进
   // 依赖数组后每次渲染都重跑。
   const latest = useRef({ blocks, cwd, enabled, opens, open })
@@ -47,6 +52,13 @@ export function useAutoPreview({ busy, blocks, cwd, enabled, opens, open }: {
   const opensAtTurnStart = useRef(0)
   const prevBusy = useRef(false)
   useEffect(() => {
+    if (owner.current !== sessionID) {
+      owner.current = sessionID
+      prevBusy.current = busy
+      turnStartLen.current = latest.current.blocks.length
+      opensAtTurnStart.current = latest.current.opens.current ?? 0
+      return
+    }
     if (!prevBusy.current && busy) {
       // Turn starting: remember where this turn's blocks begin, and how many
       // previews had been opened before it.
@@ -73,11 +85,11 @@ export function useAutoPreview({ busy, blocks, cwd, enabled, opens, open }: {
             for (const token of extractFilePaths(b.text)) paths.push(toWorkspaceRel(token, dir))
           }
         }
-        void openFirstExisting(rankAutoPreview(paths), openFile)
+        void openFirstExisting(rankAutoPreview(paths), openFile, scope.current.capture())
       }
     }
     prevBusy.current = busy
-  }, [busy])
+  }, [busy, sessionID])
 }
 
 // openFirstExisting 按价值顺序验证候选，打开第一个真实存在的。
@@ -85,14 +97,9 @@ export function useAutoPreview({ busy, blocks, cwd, enabled, opens, open }: {
 // 存在性问后端而不是查前端的工作区清单：清单在回合结束时才异步刷新，此刻仍是上一轮
 // 的旧值，本回合刚生成的产物必然缺席。resolveArtifactPath 对不存在的路径会失败（后端
 // 归一化成 not_found），正好当作探针——顺带把越界路径也挡掉。
-async function openFirstExisting(ranked: string[], openFile: (relPath: string) => void) {
+async function openFirstExisting(ranked: string[], openFile: (relPath: string, quiet?: boolean) => Promise<boolean>, current: () => boolean) {
   for (const rel of ranked.slice(0, maxProbes)) {
-    try {
-      await resolveArtifactPath(rel)
-    } catch {
-      continue // 不在了（或不可达）：换下一个，别开一个注定失败的标签页
-    }
-    openFile(rel)
-    return
+    if (!current()) return
+    if (await openFile(rel, true)) return
   }
 }

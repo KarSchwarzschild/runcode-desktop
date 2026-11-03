@@ -24,6 +24,17 @@ describe('fmtTokens', () => {
     expect(fmtTokens(340)).toBe('340')
     expect(fmtTokens(1234)).toBe('1.2k')
     expect(fmtTokens(23000)).toBe('23k')
+    expect(fmtTokens(65536)).toBe('66k')
+    expect(fmtTokens(131072)).toBe('131k')
+    expect(fmtTokens(262144)).toBe('262k')
+  })
+
+  it('百万窗口使用 M，并保留足够精度区分 100 万与 1048576', () => {
+    expect(fmtTokens(1000000)).toBe('1M')
+    expect(fmtTokens(1048576)).toBe('1.05M')
+    expect(fmtTokens(1200000)).toBe('1.2M')
+    expect(fmtTokens(10000000)).toBe('10M')
+    expect(fmtTokens(0)).toBe('0')
   })
 })
 

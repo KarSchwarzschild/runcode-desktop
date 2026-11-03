@@ -4,7 +4,7 @@ import { Icon } from '@/ui/icons'
 import { DRAG, NO_DRAG } from '@/ui/tokens'
 import { ContextMeter } from '@/chat/context-meter'
 
-export function StatusBar({ busy, sidebarCollapsed, onToggleSidebar, waitingElsewhere, onGoWaiting, ctxTokens, ctxBudget, ctxEstimated, compacting, onCompact, onTogglePreview }: {
+export function StatusBar({ busy, sidebarCollapsed, onToggleSidebar, waitingElsewhere, onGoWaiting, ctxTokens, ctxBudget, ctxModel, ctxEstimated, compacting, onCompact, onTogglePreview }: {
   busy: boolean
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
@@ -12,7 +12,8 @@ export function StatusBar({ busy, sidebarCollapsed, onToggleSidebar, waitingElse
   waitingElsewhere: number
   onGoWaiting: () => void
   ctxTokens: number
-  ctxBudget: number
+  ctxBudget: number | null
+  ctxModel?: string
   ctxEstimated: boolean
   compacting: boolean
   onCompact: () => void
@@ -50,7 +51,7 @@ export function StatusBar({ busy, sidebarCollapsed, onToggleSidebar, waitingElse
       </div>
       <div className="flex items-center gap-3">
         <div className="flex items-center gap-[18px] text-muted text-[13px]" style={NO_DRAG}>
-          <ContextMeter used={ctxTokens} budget={ctxBudget} estimated={ctxEstimated} onCompact={onCompact} compacting={compacting} busy={busy} />
+          <ContextMeter used={ctxTokens} budget={ctxBudget} model={ctxModel} estimated={ctxEstimated} onCompact={onCompact} compacting={compacting} busy={busy} />
         </div>
         <button
           style={NO_DRAG}

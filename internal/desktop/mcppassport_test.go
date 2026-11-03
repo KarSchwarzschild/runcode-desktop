@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"gitlab.ouc-online.com.cn/aibase/agentloop/mcp"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/settings"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 )
 
 // TestPassportInjectionEndToEndFromConfig walks the exact chain that decides
@@ -225,13 +227,14 @@ url = 'http://third/mcp'
 	}
 
 	app := &App{}
-	cfg := engine.Config{
-		PermissionMode: "safe", // the strictest mode: nothing interactive can rescue a wrong policy
-		MCPServers: []mcp.ServerConfig{
-			{Name: "platform", Transport: mcp.TransportHTTP, URL: "http://platform/mcp"},
-			{Name: "third", Transport: mcp.TransportHTTP, URL: "http://third/mcp"},
-		},
+	workspace := t.TempDir()
+	servers, _ := loadDesktopMCP(workspace)
+	cfg := engine.Config{CWD: workspace, PermissionMode: "safe", MCPServers: servers}
+	bindings := map[string]tool.AuthorizationBinding{}
+	for _, server := range servers {
+		bindings[server.Name] = mcp.ServerBinding(server)
 	}
+
 	opts := engine.Options{}
 	app.configureSession(host.SessionContext{ID: "s1", Emit: func(string, any) {}}, &cfg, &opts)
 	if opts.Permissions == nil {
@@ -241,6 +244,7 @@ url = 'http://third/mcp'
 	call := func(tool string) permissions.Decision {
 		_, d := opts.Permissions.AuthorizeTool(context.Background(), permissions.ResolveRequest{
 			ToolName: tool,
+			Binding:  bindings[strings.Split(tool, "__")[1]],
 			Input:    json.RawMessage(`{}`),
 		})
 		return d
@@ -254,6 +258,35 @@ url = 'http://third/mcp'
 	if got := call("mcp__third__run"); got.FinalEffect == permissions.EffectAllow {
 		t.Fatal("a third-party MCP call must not be auto-allowed")
 	}
+	unbound := permissions.ResolveRequest{ToolName: "mcp__platform__list", Input: json.RawMessage(`{}`)}
+	if _, d := opts.Permissions.AuthorizeTool(context.Background(), unbound); d.FinalEffect == permissions.EffectAllow {
+		t.Fatal("unbound same-name tool inherited trust")
+	}
+	replacement := bindings["platform"]
+	replacement.Identity = "different-endpoint"
+	unbound.Binding = replacement
+	if _, d := opts.Permissions.AuthorizeTool(context.Background(), unbound); d.FinalEffect == permissions.EffectAllow {
+		t.Fatal("replacement endpoint inherited same-name trust")
+	}
+	// Mutating the file after loading must not cause credential injection to
+	// re-read a different name set than the policy's captured configuration.
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(`[mcp.servers.platform]
+transport='http'
+url='http://replacement/mcp'
+passport=false
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	app.attachMCPPassport(servers)
+	for _, server := range servers {
+		if server.Name == "platform" && server.HeaderSource == nil {
+			t.Fatal("credential injection reread a newer names-only config")
+		}
+		if server.Name == "third" && server.HeaderSource != nil {
+			t.Fatal("third-party server acquired credentials")
+		}
+	}
+
 }
 
 // TestReloadMCPServersGuards covers the two cases where applying MCP changes to a

@@ -4,6 +4,8 @@ package protocol
 // package streams during a turn. They are stable strings the UI subscribes to;
 // payload types are documented alongside each constant.
 const (
+	// EventDirectoryAccessChanged carries DirectoryAccessChanged.
+	EventDirectoryAccessChanged = "directory:changed"
 	// EventSessionRenamed carries a SessionRenamed when a turn's generated title is
 	// ready, so the sidebar can refresh that session's name.
 	EventSessionRenamed = "session:renamed"

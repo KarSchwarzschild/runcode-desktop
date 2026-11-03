@@ -45,7 +45,7 @@ func TestPersistConnectionChoiceCustomModel(t *testing.T) {
 		cfg.TenantID = "tenant-old"
 		cfg.APIKeyProtected = "stale-ciphertext"
 		cfg.PermissionMode = "judge"
-		cfg.MaxContextTokens = 200_000
+		cfg.HarmJudgeVotes = 3
 		return nil
 	}); err != nil {
 		t.Fatal(err)
@@ -69,8 +69,8 @@ func TestPersistConnectionChoiceCustomModel(t *testing.T) {
 	if got.APIKeyProtected != "" || got.BaseURL != "" {
 		t.Fatalf("custom switch must clear inline credentials/endpoint: %+v", got)
 	}
-	if got.PermissionMode != "judge" || got.MaxContextTokens != 200_000 {
-		t.Fatalf("unrelated settings clobbered: mode=%q ctx=%d", got.PermissionMode, got.MaxContextTokens)
+	if got.PermissionMode != "judge" || got.HarmJudgeVotes != 3 {
+		t.Fatalf("unrelated settings clobbered: mode=%q votes=%d", got.PermissionMode, got.HarmJudgeVotes)
 	}
 }
 

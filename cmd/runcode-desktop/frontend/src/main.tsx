@@ -8,6 +8,8 @@ import '@fontsource/ibm-plex-mono/600.css'
 import 'highlight.js/styles/github.css'
 import App from './App'
 import { ToolPreview, ThinkingPreview } from '@/dev/previews'
+import { DirectoryAccessPreview } from '@/dev/directory-access-preview'
+import { AuthorizationPreview } from '@/dev/authorization-preview'
 import { UIGallery } from '@/dev/ui-gallery'
 import './styles.css'
 
@@ -45,7 +47,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { err
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <ErrorBoundary>
-      {previewTools ? <ToolPreview /> : previewThinking ? <ThinkingPreview /> : previewUI ? <UIGallery /> : <App />}
+      {previewTools ? <ToolPreview /> : previewThinking ? <ThinkingPreview /> : previewUI ? <UIGallery /> : preview === 'directory-access' ? <DirectoryAccessPreview /> : preview === 'authorization' ? <AuthorizationPreview /> : <App />}
     </ErrorBoundary>
   </React.StrictMode>,
 )

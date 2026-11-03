@@ -22,6 +22,11 @@ func extractPptx(path string, cb *capBuf) error {
 		return fmt.Errorf("open pptx: %w", err)
 	}
 	defer func() { _ = zr.Close() }()
+	extractPptxArchive(&zr.Reader, cb)
+	return nil
+}
+
+func extractPptxArchive(zr *zip.Reader, cb *capBuf) {
 
 	sw, sh := pptSlideSize(zr)
 	slides := pptSlideNames(zr)
@@ -40,10 +45,9 @@ func extractPptx(path string, cb *capBuf) error {
 			cb.writef("（解析失败：%v）\n", err)
 		}
 	}
-	return nil
 }
 
-func renderSlide(cb *capBuf, zr *zip.ReadCloser, entry string) error {
+func renderSlide(cb *capBuf, zr *zip.Reader, entry string) error {
 	f := openZipEntry(zr, entry)
 	if f == nil {
 		return fmt.Errorf("%s missing", entry)
@@ -275,7 +279,7 @@ func emuToCm(v string) string {
 }
 
 // pptSlideSize reads the presentation's slide dimensions (EMU → cm).
-func pptSlideSize(zr *zip.ReadCloser) (w, h string) {
+func pptSlideSize(zr *zip.Reader) (w, h string) {
 	f := openZipEntry(zr, "ppt/presentation.xml")
 	if f == nil {
 		return "", ""
@@ -298,7 +302,7 @@ func pptSlideSize(zr *zip.ReadCloser) (w, h string) {
 
 // pptSlideNames returns the slide part names in slide order (slide1, slide2, …),
 // sorted by the numeric suffix rather than lexically so slide10 follows slide9.
-func pptSlideNames(zr *zip.ReadCloser) []string {
+func pptSlideNames(zr *zip.Reader) []string {
 	type sl struct {
 		name string
 		n    int

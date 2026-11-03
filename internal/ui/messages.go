@@ -87,8 +87,10 @@ type toolEventMsg struct {
 // authorization. The model renders a modal and returns the user's choice on
 // Reply, which unblocks the waiting turn goroutine.
 type approvalRequestMsg struct {
-	Summary permissions.ApprovalSummary
-	Targets []string
+	InputPreview string
+	GrantScope   string
+	Summary      permissions.ApprovalSummary
+	Targets      []string
 	// ExternalTargets are the affected paths outside the workspace, absolute and
 	// shown in full — the modal must never hide where an out-of-project action lands.
 	// ExternalRoots are the directories an allow-session/allow-project would remember.

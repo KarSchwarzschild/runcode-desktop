@@ -49,12 +49,12 @@ var officeAutomations = map[string]officeAutomation{
 
 // convertOfficeToPDF 把 src 转成 dst 处的 PDF。没有可用的 Office 组件时返回
 // errOfficeUnavailable,调用方据此让前端退回内嵌渲染器。
-func convertOfficeToPDF(src, dst string) error {
+func convertOfficeToPDF(parent context.Context, src, dst string) error {
 	auto, ok := officeAutomations[officeKind(src)]
 	if !ok {
 		return errOfficeUnavailable
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), officeConvertTimeout)
+	ctx, cancel := context.WithTimeout(parent, officeConvertTimeout)
 	defer cancel()
 
 	script := officeConvertScript(auto, src, dst)

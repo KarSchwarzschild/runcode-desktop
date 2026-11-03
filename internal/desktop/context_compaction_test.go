@@ -102,9 +102,10 @@ func TestDesktopContextCompactionContinuesWithThinking(t *testing.T) {
 	}
 	sink := &recordingSink{}
 	app := New(sink)
+	saveContextFixture(t, app, "context-fixture-profile", "context-fixture", model.URL+"/v1", ModelContextValues{MaxContextTokens: 32768, MaxOutputTokens: 81920})
 	info, err := app.StartSession(StartSessionRequest{
 		CWD: workspace, Provider: "openai", Model: "context-fixture", BaseURL: model.URL + "/v1", APIKey: "synthetic",
-		PermissionMode: "safe", MaxContextTokens: 32768, MaxTokens: 81920,
+		PermissionMode: "safe", CustomModelName: "context-fixture-profile",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -166,5 +167,35 @@ func TestDesktopContextCompactionContinuesWithThinking(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("full original thinking not retained in the persisted JSONL")
+	}
+
+	// Reopen through the actual desktop/host/provider assembly. The UI still
+	// replays raw history, while the model starts from the persisted projection.
+	beforeSummaries := summaryCalls.Load()
+	resumed, err := app.StartSession(StartSessionRequest{
+		CWD: workspace, Provider: "openai", Model: "context-fixture", BaseURL: model.URL + "/v1", APIKey: "synthetic",
+		PermissionMode: "safe", CustomModelName: "context-fixture-profile", Resume: info.SessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.CloseSession(resumed.SessionID)
+	current, err := app.engineSession()
+	if err != nil {
+		t.Fatal(err)
+	}
+	persistedView := current.History()
+	if len(persistedView) >= len(history) {
+		t.Fatal("desktop reopened raw history instead of compacted context")
+	}
+	if summaryCalls.Load() != beforeSummaries {
+		t.Fatal("reopen itself invoked summary inference")
+	}
+	if err := app.SendMessage(resumed.SessionID, "继续保留既有核验结论"); err != nil {
+		t.Fatal(err)
+	}
+	waitForTurns(t, sink, 2, time.Now().Add(20*time.Second))
+	if summaryCalls.Load() != beforeSummaries {
+		t.Fatal("desktop paid for duplicate compaction after reopen")
 	}
 }

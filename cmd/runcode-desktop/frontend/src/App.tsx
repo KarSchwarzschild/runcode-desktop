@@ -1,3 +1,5 @@
+import { useDirectoryAccess } from '@/session/use-directory-access'
+import { ArtifactActionsContext } from '@/chat/artifact-actions'
 import { useChatDrafts } from '@/session/use-chat-drafts'
 import { useQuestionRetry } from '@/session/use-question-retry'
 // App 只做两件事：把各个 hook 接起来（会话 / 对话 / 权限队列 / 预览栏 / 文件），
@@ -68,8 +70,9 @@ export default function App() {
   const permissions = usePermissionQueue(focusedId)
   // sudo 密码框：请求可能来自任何一条会话（不只是当前聚焦的），所以挂在最外层。
   const askpass = useAskpass()
-  const workspace = useWorkspaceFiles(() => infoRef.current?.cwd ?? '')
-  const preview = usePreviewPanel(focusedId)
+  const workspace = useWorkspaceFiles(focusedId, () => infoRef.current?.cwd ?? '')
+  const preview = usePreviewPanel(focusedId, toast.show)
+  const directoryAccess = useDirectoryAccess(focusedId)
   // 登录用户的通行证状态：欢迎语称呼（经 passportDisplayName）与侧栏用户区
   // （头像/用户名/退出登录）共用同一份订阅。未登录时名字为空串、头像为 undefined。
   const passport = usePassportStatus()
@@ -114,7 +117,7 @@ export default function App() {
     showToast: toast.show,
     onFilesChanged: workspace.refresh,
     // 模型调用 open_preview 时给的是绝对路径（或工作区相对路径），统一换算后再开。
-    onOpenPreview: (p) => preview.openFile(toWorkspaceRel(p, infoRef.current?.cwd ?? '')),
+    onOpenPreview: preview.openReference,
   })
 
 
@@ -157,6 +160,7 @@ export default function App() {
   }, [session.started, session.info?.sessionId, reloadFiles])
 
   useAutoPreview({
+    sessionID: focusedId,
     busy: conversation.busy,
     blocks: conversation.blocks,
     cwd: session.info?.cwd ?? '',
@@ -227,9 +231,10 @@ export default function App() {
             if (session.switching) return
             // 这条会话的界面态跟着它一起走：预览标签（存着它的编辑快照 id）、
             // 输入草稿。对话状态由 closeOne 里的 dropSession 负责。
-            preview.dropSession(id)
-            drafts.update(id, () => ({ text: '', attachments: [] }))
-            void session.closeOne(id)
+            void session.closeOne(id, () => {
+              preview.dropSession(id)
+              drafts.update(id, () => ({ text: '', attachments: [] }))
+            })
           }}
           currentId={session.info?.sessionId}
           cwd={session.info?.cwd}
@@ -272,7 +277,8 @@ export default function App() {
               void session.focusOn(first)
             }}
             ctxTokens={conversation.ctxTokens}
-            ctxBudget={session.info?.maxContextTokens ?? 0}
+            ctxBudget={session.info?.maxContextTokens ?? null}
+            ctxModel={session.info?.model}
             ctxEstimated={conversation.ctxEstimated}
             compacting={conversation.compacting}
             onCompact={() => void conversation.compact()}
@@ -311,12 +317,12 @@ export default function App() {
           ) : view === 'market' ? (
             <MarketPage />
           ) : view === 'permissions' ? (
-            <PermissionsPage mode={session.info?.permissionMode} onPickMode={session.pickMode} />
+            <PermissionsPage sessionID={focusedId} directoryAccess={directoryAccess} mode={session.info?.permissionMode} onPickMode={session.pickMode} />
           ) : view === 'memory' ? (
             <MemoryPage />
           ) : (
             <>
-              <ChatPane
+              <ArtifactActionsContext.Provider value={preview.actions}><ChatPane
                 onRetryQuestion={(id) => void questionRetry.retry(id)}
                 onEditQuestion={(id) => void questionRetry.edit(id)}
                 questionActionsDisabled={questionRetry.disabled}
@@ -342,7 +348,7 @@ export default function App() {
                 resolveFile={workspace.resolve}
                 recorderCard={<LiveRecorderCard rec={recorder} onOpenWindow={() => void showRecorderWindow()} />}
                 onGenerateMinutes={(m) => void sendRecordingRequest(m, 'doc')}
-              />
+              /></ArtifactActionsContext.Provider>
 
               {permissions.pending && (
                 <PermissionModal

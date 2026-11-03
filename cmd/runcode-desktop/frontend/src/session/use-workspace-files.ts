@@ -1,5 +1,6 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
-import { listFiles } from '@/core/bridge'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { listSessionFiles } from '@/core/bridge'
+import { createActionScope } from './action-scope'
 import { toWorkspaceRel } from '@/preview/classify'
 
 export type WorkspaceFiles = ReturnType<typeof useWorkspaceFiles>
@@ -16,22 +17,30 @@ export type WorkspaceFiles = ReturnType<typeof useWorkspaceFiles>
 // 之所以传取值函数而不是字符串：本钩子在会话状态建立之前就要创建（会话依赖它的
 // refresh），拿不到当时还不存在的 cwd；存进 ref 后按调用时读，既拿得到最新值，
 // 又不会让下面那个 memo 每次渲染都重算整份清单。
-export function useWorkspaceFiles(getCwd: () => string) {
+export function useWorkspaceFiles(sessionID: string, getCwd: () => string) {
+  const scope = useRef(createActionScope())
+  scope.current.focus(sessionID)
+  useEffect(() => { const active = scope.current; active.activate(); return () => active.deactivate() }, [])
   const [files, setFiles] = useState<string[]>([])
   const cwdRef = useRef(getCwd)
   cwdRef.current = getCwd
 
   const reload = useCallback(() => {
-    listFiles()
-      .then((f) => setFiles(f ?? []))
-      .catch(() => setFiles([]))
-  }, [])
+    const current = scope.current.capture()
+    setFiles([])
+    if (!sessionID) return
+    listSessionFiles(sessionID)
+      .then((f) => { if (current()) setFiles(f ?? []) })
+      .catch(() => { if (current()) setFiles([]) })
+  }, [sessionID])
 
   const refresh = useCallback(() => {
-    listFiles()
-      .then((f) => setFiles(f ?? []))
+    const current = scope.current.capture()
+    if (!sessionID) return
+    listSessionFiles(sessionID)
+      .then((f) => { if (current()) setFiles(f ?? []) })
       .catch(() => {})
-  }, [])
+  }, [sessionID])
 
   // resolve maps a token written by the model (an absolute path, a bare name, or a
   // partial path) onto an actual workspace file, so a reply's file mention can

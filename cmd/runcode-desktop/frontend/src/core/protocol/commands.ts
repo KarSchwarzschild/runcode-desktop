@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CustomModel, EditDiff, EditRecord, Info, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionInfo, SessionSummary, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, Info, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionInfo, SessionSummary, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -187,6 +187,12 @@ export function forkQuestion(ref: QuestionReference): Promise<ResumedSession> {
   return call<ResumedSession>('ForkQuestion', ref);
 }
 
+// GetModelContextSettings reads defaults and local overrides for one model.
+// kind: query
+export function getModelContextSettings(ref: ModelReference): Promise<ModelContextView> {
+  return call<ModelContextView>('GetModelContextSettings', ref);
+}
+
 // GetProtocolInfo reports the wire-protocol version this host implements, so a frontend built against a different protocol can detect the mismatch instead of failing on a missing field.
 // kind: query
 export function getProtocolInfo(): Promise<Info> {
@@ -203,6 +209,12 @@ export function getQuestion(ref: QuestionReference): Promise<QuestionDraft> {
 // kind: query
 export function getVisionSettings(): Promise<VisionSettings> {
   return call<VisionSettings>('GetVisionSettings');
+}
+
+// GrantDirectoryAccess grants the explicitly selected directory and scope.
+// kind: trigger
+export function grantDirectoryAccess(req: DirectoryAccessRequest): Promise<DirectoryAccessView> {
+  return call<DirectoryAccessView>('GrantDirectoryAccess', req);
 }
 
 // ImportAgent opens a file picker for an existing agent .md and copies it into the given scope's agents directory under its declared name.
@@ -265,6 +277,12 @@ export function listCustomModels(): Promise<CustomModel[] | null> {
   return call<CustomModel[] | null>('ListCustomModels');
 }
 
+// ListDirectoryAccess lists the named session and project directory rules.
+// kind: query
+export function listDirectoryAccess(sessionID: string): Promise<DirectoryAccessView> {
+  return call<DirectoryAccessView>('ListDirectoryAccess', sessionID);
+}
+
 // ListEdits returns every recorded edit for the active session, so a resumed session can re-render its "已编辑" cards (Wails binding).
 // kind: query
 export function listEdits(sessionID: string): Promise<EditRecord[] | null> {
@@ -287,6 +305,12 @@ export function listMCPServers(): Promise<MCPServerInfo[] | null> {
 // kind: query
 export function listRecordings(): Promise<RecordingInfo[] | null> {
   return call<RecordingInfo[] | null>('ListRecordings');
+}
+
+// ListSessionFiles never borrows the focused workspace for an async request.
+// kind: query
+export function listSessionFiles(sessionID: string): Promise<string[] | null> {
+  return call<string[] | null>('ListSessionFiles', sessionID);
 }
 
 // ListSessions returns the workspace's saved sessions, newest first, for the recent-conversations list.
@@ -325,10 +349,16 @@ export function newSession(): Promise<SessionInfo> {
   return call<SessionInfo>('NewSession');
 }
 
-// OpenExternal opens the workspace file with the OS default application.
+// OpenArtifact resolves a UI request in its named session, never the focus.
 // kind: trigger
-export function openExternal(relPath: string): Promise<void> {
-  return call<void>('OpenExternal', relPath);
+export function openArtifact(sessionID: string, path: string): Promise<ArtifactReference> {
+  return call<ArtifactReference>('OpenArtifact', sessionID, path);
+}
+
+// OpenExternal hands the authorized source file to the OS default application.
+// kind: trigger
+export function openExternal(reference: string): Promise<void> {
+  return call<void>('OpenExternal', reference);
 }
 
 // OpenSession **再开**一条会话，不关掉已经开着的那些。 workspace 为空是"就在当前工作区再开一条"；给了目录就在那个目录开——这是 **多工作区并行**的唯一入口。每条会话记着自己的目录（sessionEntry.workspace）， 工作区寻址的那批命令跟着聚焦走（见 focusLocked），预览服务器按目录共享并计数 （见 previewRef）。 它同时取代了原来的 SwitchWorkspace（关掉当前那条、在新目录重开一条）：换目录 不再意味着丢掉手上正在跑的会话。真要丢，从「打开中」里关掉它——那是一个明确的 动作，而不是换目录的副作用。 复用当前会话的 provider / 模型 / 凭据（与 NewSession 同一套 a.config），所以 并行的几条会话共用同一条连接——每会话独立连接不在本期范围内，见 docs/multi-session.md。模型倒是每会话可以不同：SetModel 本来就按会话生效。
@@ -427,16 +457,16 @@ export function planUpdate(sessionID: string, doc: PlanDoc): Promise<PlanRun> {
   return call<PlanRun>('PlanUpdate', sessionID, doc);
 }
 
-// ReadArtifact returns the UTF-8 text of a workspace file for React-rendered previews (Markdown/code/text).
+// ReadArtifact returns UTF-8 text through a live source-session reference.
 // kind: query
-export function readArtifact(relPath: string): Promise<string> {
-  return call<string>('ReadArtifact', relPath);
+export function readArtifact(reference: string): Promise<string> {
+  return call<string>('ReadArtifact', reference);
 }
 
-// ReadArtifactBytes returns a workspace file's raw bytes as base64, for previews the renderer needs the binary of — Office documents (docx/pptx/xlsx), which are zip archives.
+// ReadArtifactBytes returns base64 bytes through the same source-session guard.
 // kind: query
-export function readArtifactBytes(relPath: string): Promise<string> {
-  return call<string>('ReadArtifactBytes', relPath);
+export function readArtifactBytes(reference: string): Promise<string> {
+  return call<string>('ReadArtifactBytes', reference);
 }
 
 // ReadMemory returns the agent's persistent memory (user + project scopes) for display.
@@ -475,6 +505,12 @@ export function recorderStatus(): Promise<RecordingInfo> {
   return call<RecordingInfo>('RecorderStatus');
 }
 
+// ReleaseArtifact invalidates a closed preview capability without touching files.
+// kind: idempotent-set
+export function releaseArtifact(reference: string): Promise<void> {
+  return call<void>('ReleaseArtifact', reference);
+}
+
 // ReloadMCPServers applies MCP config changes to the running session right away, by rebuilding it on its own id so the conversation is restored from the store and every server reconnects from the current config.toml.
 // kind: trigger
 export function reloadMCPServers(): Promise<boolean> {
@@ -487,10 +523,10 @@ export function removeRuntime(id: string): Promise<void> {
   return call<void>('RemoveRuntime', id);
 }
 
-// RenderOfficePDF 把工作区里的一份 Office 文档转成 PDF,返回**工作区相对**的 PDF 路径,前端拿它走既有的 PDF 预览(经预览服务器的 URL 塞进 iframe)。 同一份文件重复打开命中缓存直接返回;源文件改了(大小或修改时间变了)键就变了, 于是自然重转,不需要额外的失效逻辑。
+// RenderOfficePDF 将来源引用的授权快照转成 PDF，返回绑定同一引用的受控 URL。 私有转换文件不对外服务；缓存命中与 HTTP 读取仍须检查源权限。 同一份文件重复打开命中缓存直接返回;源文件改了(大小或修改时间变了)键就变了, 于是自然重转,不需要额外的失效逻辑。
 // kind: query
-export function renderOfficePDF(relPath: string): Promise<string> {
-  return call<string>('RenderOfficePDF', relPath);
+export function renderOfficePDF(reference: string): Promise<string> {
+  return call<string>('RenderOfficePDF', reference);
 }
 
 // Reset clears the in-memory working history (the on-disk log is untouched).
@@ -499,10 +535,10 @@ export function reset(sessionID: string): Promise<void> {
   return call<void>('Reset', sessionID);
 }
 
-// ResolveArtifactPath returns the absolute path of a workspace file, for the UI's "copy path" action.
+// ResolveArtifactPath returns the authorized source path for the UI copy action.
 // kind: idempotent-set
-export function resolveArtifactPath(relPath: string): Promise<string> {
-  return call<string>('ResolveArtifactPath', relPath);
+export function resolveArtifactPath(reference: string): Promise<string> {
+  return call<string>('ResolveArtifactPath', reference);
 }
 
 // ResolvePermission delivers the user's decision for a pending approval request.
@@ -523,10 +559,10 @@ export function resumeSession(id: string): Promise<ResumedSession> {
   return call<ResumedSession>('ResumeSession', id);
 }
 
-// RevealInFolder shows the workspace file in the OS file manager.
+// RevealInFolder shows the authorized source file in the OS file manager.
 // kind: trigger
-export function revealInFolder(relPath: string): Promise<void> {
-  return call<void>('RevealInFolder', relPath);
+export function revealInFolder(reference: string): Promise<void> {
+  return call<void>('RevealInFolder', reference);
 }
 
 // RevealUpdate opens the downloaded package's directory as a manual fallback.
@@ -545,6 +581,12 @@ export function revertEdit(sessionID: string, snapshotID: string): Promise<void>
 // kind: trigger
 export function reviewEdit(sessionID: string, snapshotID: string): Promise<EditDiff> {
   return call<EditDiff>('ReviewEdit', sessionID, snapshotID);
+}
+
+// RevokeDirectoryAccess removes only the selected scoped allow rule.
+// kind: trigger
+export function revokeDirectoryAccess(req: DirectoryAccessRequest): Promise<DirectoryAccessView> {
+  return call<DirectoryAccessView>('RevokeDirectoryAccess', req);
 }
 
 // RuntimeStatus 返回运行时环境的当前状态（纯读，不联网）。
@@ -569,6 +611,12 @@ export function saveCustomModel(req: SaveCustomModelRequest): Promise<CustomMode
 // kind: idempotent-set
 export function saveMCPServer(in_: MCPServerInput): Promise<void> {
   return call<void>('SaveMCPServer', in_);
+}
+
+// SaveModelContextSettings only persists a preference; it never interrupts a turn.
+// kind: idempotent-set
+export function saveModelContextSettings(req: SaveModelContextSettingsRequest): Promise<ModelContextView> {
+  return call<ModelContextView>('SaveModelContextSettings', req);
 }
 
 // SavePastedFile 把前端从剪贴板读出的字节落盘,返回附件的绝对路径。 name 只用来给文件起名,一律当**不可信输入**处理:目录成分、控制字符与 Windows 的 保留字符全部剔掉,清不出东西来就退回 attachment。每次粘贴各自落进一个带时间戳的 子目录,于是文件名可以保持原样(界面上附件芯片显示的就是它),同名文件也不会互相 覆盖。
@@ -655,7 +703,7 @@ export function setMCPServerEnabled(name: string, enabled: boolean): Promise<voi
   return call<void>('SetMCPServerEnabled', name, enabled);
 }
 
-// SetModel switches the model used for subsequent turns.
+// SetModel uses the same budget-aware rebuild as the model picker.
 // kind: idempotent-set
 export function setModel(sessionID: string, model: string): Promise<void> {
   return call<void>('SetModel', sessionID, model);
@@ -745,7 +793,7 @@ export function submitQuestion(req: SubmitQuestionRequest): Promise<QuestionRece
   return call<QuestionReceipt>('SubmitQuestion', req);
 }
 
-// SwitchModel changes the model for the running session, spanning both platform (passport) and custom direct-connection models so the in-chat picker can offer either.
+// SwitchModel rebuilds the target session so model, tools and context budgets change together.
 // kind: trigger
 export function switchModel(sessionID: string, kind: string, name: string): Promise<SessionInfo> {
   return call<SessionInfo>('SwitchModel', sessionID, kind, name);

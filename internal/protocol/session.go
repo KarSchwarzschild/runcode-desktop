@@ -32,16 +32,9 @@ type StartSessionRequest struct {
 	HarmJudgeModel string `json:"harmJudgeModel"`
 	// HarmJudgeVotes runs the harm check as a majority vote across N samples when > 1
 	// (more robust to a single fooled verdict, at N× the token cost). 0/1 = single.
-	HarmJudgeVotes int `json:"harmJudgeVotes"`
-	MaxTokens      int `json:"maxTokens"`
-	// MaxContextTokens is the context budget that arms automatic compaction: once a
-	// turn's input tokens approach it, older turns are summarized. 0 disables it.
-	MaxContextTokens int `json:"maxContextTokens"`
-	// MaxHistoryMessages hard-caps how many messages are kept across turns (a blunt
-	// trim, no summarization). 0 disables it.
-	MaxHistoryMessages int    `json:"maxHistoryMessages"`
-	Resume             string `json:"resume"`
-	Continue           bool   `json:"continue"`
+	HarmJudgeVotes int    `json:"harmJudgeVotes"`
+	Resume         string `json:"resume"`
+	Continue       bool   `json:"continue"`
 }
 
 // SessionRenamed announces a session's freshly generated title.

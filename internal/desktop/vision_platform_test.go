@@ -178,7 +178,7 @@ func TestVisionCatalogRefreshAndFrozenTarget(t *testing.T) {
 	actor := app.visionAccountIdentity()
 	scope := platformModelRef("tenant-A", "")
 	first := PassportModel{ID: "first", SupportsImages: visionBool(true), VisionDefault: true}
-	app.rememberVisionCatalog(scope, actor, []PassportModel{first})
+	app.rememberModelCatalog(scope, actor, []PassportModel{first})
 	source := platformModelRef("tenant-A", "text")
 	target, err := app.visionTarget(context.Background(), "session", scope.Bridge, actor, source, desktopConfig{})
 	if err != nil || target.Name != "first" || calls.Load() != 0 {
@@ -186,10 +186,10 @@ func TestVisionCatalogRefreshAndFrozenTarget(t *testing.T) {
 	}
 	expire := func() {
 		app.mu.Lock()
-		key := visionCatalogKey(scope, actor)
-		entry := app.visionModels[key]
-		entry.at = time.Now().Add(-2 * visionCatalogTTL)
-		app.visionModels[key] = entry
+		key := modelCatalogKey(scope, actor)
+		entry := app.modelCatalogs[key]
+		entry.at = time.Now().Add(-2 * modelCatalogTTL)
+		app.modelCatalogs[key] = entry
 		app.mu.Unlock()
 	}
 	expire()
@@ -203,12 +203,12 @@ func TestVisionCatalogRefreshAndFrozenTarget(t *testing.T) {
 		t.Fatal("expired default reused after failed refresh")
 	}
 	fail.Store(false)
-	app.rememberVisionCatalog(scope, actor, []PassportModel{})
+	app.rememberModelCatalog(scope, actor, []PassportModel{})
 	previous := calls.Load()
 	if _, err = app.visionTarget(context.Background(), "session", scope.Bridge, actor, source, desktopConfig{}); err == nil || calls.Load() != previous {
 		t.Fatal("negative result not cached")
 	}
-	app.rememberVisionCatalog(scope, actor, []PassportModel{first, {ID: "text", SupportsImages: visionBool(false)}})
+	app.rememberModelCatalog(scope, actor, []PassportModel{first, {ID: "text", SupportsImages: visionBool(false)}})
 	app.pendingVisionRef = source
 	opts := engine.Options{}
 	app.configureImages(host.SessionContext{ID: "session"}, engine.Config{Model: "text", CWD: t.TempDir()}, &opts)
@@ -216,7 +216,7 @@ func TestVisionCatalogRefreshAndFrozenTarget(t *testing.T) {
 	if err != nil || original.Model != "first" {
 		t.Fatalf("original=%v err=%v", original.Model, err)
 	}
-	app.rememberVisionCatalog(scope, actor, []PassportModel{{ID: "second", SupportsImages: visionBool(true), VisionDefault: true}, {ID: "text", SupportsImages: visionBool(false)}})
+	app.rememberModelCatalog(scope, actor, []PassportModel{{ID: "second", SupportsImages: visionBool(true), VisionDefault: true}, {ID: "text", SupportsImages: visionBool(false)}})
 	next, err := opts.Images.Snapshot(context.Background(), "text", "turn-2")
 	if err != nil || next.Model != "second" || original.Model != "first" || original.Key == next.Key {
 		t.Fatal("target or cache key not frozen per turn")
@@ -256,11 +256,11 @@ func TestVisionLateCatalogDoesNotCrossAccounts(t *testing.T) {
 	}
 	scope := platformModelRef("tenant-A", "")
 	// Even a publish racing after the account check must retain its old key.
-	app.rememberVisionCatalog(scope, oldActor, []PassportModel{{ID: "old-account-private", VisionDefault: true, SupportsImages: visionBool(true)}})
-	if _, ok := app.visionModels[visionCatalogKey(scope, newActor)]; ok {
+	app.rememberModelCatalog(scope, oldActor, []PassportModel{{ID: "old-account-private", VisionDefault: true, SupportsImages: visionBool(true)}})
+	if _, ok := app.modelCatalogs[modelCatalogKey(scope, newActor)]; ok {
 		t.Fatal("old identity contaminated new cache")
 	}
-	if _, ok := app.visionModels[visionCatalogKey(platformModelRef("tenant-B", ""), oldActor)]; ok {
+	if _, ok := app.modelCatalogs[modelCatalogKey(platformModelRef("tenant-B", ""), oldActor)]; ok {
 		t.Fatal("tenant cache mixed")
 	}
 }

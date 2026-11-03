@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/frontmatter"
 )
 
 // isBuiltinAgentName reports whether name is one of the compiled-in agents, which
@@ -68,8 +69,8 @@ func (a *App) SaveAgent(req AgentSaveRequest) (AgentList, error) {
 	if old := strings.TrimSpace(req.OriginalName); old != "" && isBuiltinAgentName(old) {
 		return AgentList{}, wireError(errors.New("内置子代理不可修改；如需自定义，请在用户/项目级新建同名子代理来覆盖它"))
 	}
-	description := strings.TrimSpace(collapseLine(req.Description))
-	if description == "" {
+	description := req.Description
+	if strings.TrimSpace(description) == "" {
 		return AgentList{}, wireError(errors.New("子代理描述不能为空"))
 	}
 	prompt := strings.TrimRight(req.Prompt, "\n")
@@ -82,13 +83,13 @@ func (a *App) SaveAgent(req AgentSaveRequest) (AgentList, error) {
 	}
 	var b strings.Builder
 	b.WriteString("---\n")
-	fmt.Fprintf(&b, "name: %s\n", name)
-	fmt.Fprintf(&b, "description: %s\n", description)
+	fmt.Fprintf(&b, "name: %s\n", frontmatter.Quote(name))
+	fmt.Fprintf(&b, "description: %s\n", frontmatter.Quote(description))
 	if tools := strings.TrimSpace(collapseLine(req.Tools)); tools != "" {
-		fmt.Fprintf(&b, "tools: %s\n", tools)
+		fmt.Fprintf(&b, "tools: %s\n", frontmatter.Quote(tools))
 	}
 	if model := strings.TrimSpace(req.Model); model != "" {
-		fmt.Fprintf(&b, "model: %s\n", model)
+		fmt.Fprintf(&b, "model: %s\n", frontmatter.Quote(model))
 	}
 	b.WriteString("---\n\n")
 	b.WriteString(prompt)

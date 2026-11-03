@@ -4,46 +4,49 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
-// previewServer serves the active workspace read-only over loopback HTTP, so the
-// preview panel can load HTML (with its relative assets) and images by URL. It is
-// bound to 127.0.0.1 only, so no other host can reach it.
+// previewServer shares a loopback listener, never authority. Its injected handler
+// checks source references and individual resources; no handler serves no files.
 type previewServer struct {
-	srv *http.Server
-	ln  net.Listener
+	handler http.Handler
+	srv     *http.Server
+	ln      net.Listener
 }
 
 func newPreviewServer() *previewServer { return &previewServer{} }
 
-// start serves workspace on 127.0.0.1:<os-assigned-port> and returns the base URL
-// (ending with "/"). It is read-only (GET/HEAD) and refuses to serve outside the
-// workspace.
+// start opens a GET/HEAD listener; the handler owns all file authority.
 func (p *previewServer) start(workspace string) (string, error) {
-	root, err := filepath.Abs(workspace)
-	if err != nil {
+	if _, err := filepath.Abs(workspace); err != nil {
 		return "", err
 	}
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return "", err
 	}
-	fs := http.FileServer(http.Dir(root))
+	slots := make(chan struct{}, 4)
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		if !previewPathWithinRoot(root, r.URL.Path) {
-			http.Error(w, "forbidden", http.StatusForbidden)
+		if p.handler == nil {
+			http.NotFound(w, r)
 			return
 		}
-		fs.ServeHTTP(w, r)
+		select {
+		case slots <- struct{}{}:
+			defer func() { <-slots }()
+		default:
+			http.Error(w, "preview busy", http.StatusServiceUnavailable)
+			return
+		}
+		p.handler.ServeHTTP(w, r)
 	})
 	p.ln = ln
-	p.srv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	p.srv = &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second, WriteTimeout: 35 * time.Second, IdleTimeout: 20 * time.Second}
 	srv := p.srv
 	go func() { _ = srv.Serve(ln) }()
 	return "http://" + ln.Addr().String() + "/", nil
@@ -55,14 +58,4 @@ func (p *previewServer) stop() {
 		p.srv = nil
 		p.ln = nil
 	}
-}
-
-// previewPathWithinRoot reports whether the request path stays inside root. It
-// applies http-style dot-segment cleaning to the URL first (so /a/../../b clamps to
-// /b at the root, matching a browser/ServeMux), then delegates the symlink/junction
-// fail-closed check to the shared containment helper.
-func previewPathWithinRoot(root, urlPath string) bool {
-	clean := filepath.Clean("/" + strings.TrimPrefix(urlPath, "/"))
-	_, err := resolveWithinWorkspace(root, strings.TrimPrefix(clean, "/"))
-	return err == nil
 }

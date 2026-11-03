@@ -117,8 +117,8 @@ func TestApplyLocalModelConfigClosesEveryPath(t *testing.T) {
 	if got.Model != "qwen3.6-27b" {
 		t.Errorf("Model = %q", got.Model)
 	}
-	if got.MaxContextTokens != 65536 {
-		t.Errorf("MaxContextTokens = %d, want the local model's window", got.MaxContextTokens)
+	if got.MaxContextTokens != cfg.MaxContextTokens {
+		t.Errorf("OA gate configuration must not bypass the per-model budget resolver: %d", got.MaxContextTokens)
 	}
 	if got.HarmJudgeModel != "" {
 		t.Errorf("HarmJudgeModel = %q, want cleared so it falls back to the local model", got.HarmJudgeModel)
@@ -131,7 +131,7 @@ func TestApplyLocalModelConfigClosesEveryPath(t *testing.T) {
 	}
 }
 
-// 基座没声明窗口大小时不要瞎改预算:0 意味着"未声明",不是"窗口为零"。
+// OA 边界装配本身不决定预算；统一解析器在随后合并服务端默认与本机覆盖。
 func TestApplyLocalModelConfigKeepsBudgetWhenUndeclared(t *testing.T) {
 	cfg := engine.Config{Model: "glm-5.1", MaxContextTokens: 200000}
 	got := applyLocalModelConfig(cfg, PassportModel{ID: "qwen3.6-27b", Local: true}, nil)
@@ -276,12 +276,17 @@ func TestOAStateSurvivesRebuild(t *testing.T) {
 	app := New(&recordingSink{})
 	ws := t.TempDir()
 	app.mu.Lock()
-	// 模拟重建后的样子：全新条目，三个字段都是零值。
+	// 模拟重建后的样子：全新条目，三个字段都是零值。它在后台——过继按 id 找，
+	// 不能落到聚焦的那条身上。
 	app.sessions["rebuilt"] = &sessionEntry{id: "rebuilt", workspace: ws}
-	app.focused = "rebuilt"
+	app.sessions["other"] = &sessionEntry{id: "other", workspace: t.TempDir()}
+	app.focused = "other"
 	app.mu.Unlock()
 
-	app.adoptOAStateAfterRebuild("qwen3.6-27b")
+	app.adoptOAStateAfterRebuild("rebuilt", "qwen3.6-27b")
+	if got := app.oaLockedModel("other"); got != "" {
+		t.Fatalf("OA 锁落到了聚焦的另一条会话上: %q", got)
+	}
 
 	app.mu.Lock()
 	e := app.sessions["rebuilt"]
@@ -308,7 +313,7 @@ func TestAdoptKeepsExistingLock(t *testing.T) {
 	app.focused = "s"
 	app.mu.Unlock()
 
-	app.adoptOAStateAfterRebuild("另一个模型")
+	app.adoptOAStateAfterRebuild("s", "另一个模型")
 
 	if got := app.oaLockedModel("s"); got != "已锁定的模型" {
 		t.Fatalf("已有的锁被改成了 %q", got)

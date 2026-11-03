@@ -24,8 +24,9 @@ export async function renderDocx(buf: ArrayBuffer, host: HTMLDivElement) {
 // that draws into a host node, owning the loading / error shell and an
 // open-externally fallback. It re-runs when the file or the refresh key changes and
 // cancels cleanly so a stale render never lands in the wrong file's host.
-export function ImperativeDocView({ relPath, reloadKey, load, busyHint, onMissing }: {
+export function ImperativeDocView({ relPath: _relPath, reference, reloadKey, load, busyHint, onMissing }: {
   relPath: string
+  reference: string
   reloadKey: number
   load: (buf: ArrayBuffer, host: HTMLDivElement) => Promise<void>
   busyHint: string
@@ -44,7 +45,7 @@ export function ImperativeDocView({ relPath, reloadKey, load, busyHint, onMissin
     setErr('')
     void (async () => {
       try {
-        const buf = await readArtifactBytes(relPath)
+        const buf = await readArtifactBytes(reference)
         const host = hostRef.current
         if (cancelled || !host) return
         host.replaceChildren() // drop any prior file's render before drawing this one
@@ -59,11 +60,11 @@ export function ImperativeDocView({ relPath, reloadKey, load, busyHint, onMissin
       }
     })()
     return () => { cancelled = true }
-  }, [relPath, reloadKey, load])
+  }, [reference, reloadKey, load])
   return (
     <div className="min-h-full bg-inset/40 flex flex-col items-center">
       {state === 'loading' && <PreviewLoading hint={`正在加载${busyHint}预览…`} />}
-      {state === 'error' && <ViewerError relPath={relPath} message={err} />}
+      {state === 'error' && <ViewerError reference={reference} message={err} />}
       {/* Host stays mounted (not hidden) so a renderer that measures its width — pptx —
           sees the real laid-out width rather than 0. flex + items-center 让固定宽度的
           docx 页面在面板里水平居中（窄于面板时居中，宽时正常横向滚动）。 */}

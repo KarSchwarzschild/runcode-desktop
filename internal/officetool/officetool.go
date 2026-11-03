@@ -15,6 +15,7 @@
 package officetool
 
 import (
+	"archive/zip"
 	"context"
 	"encoding/json"
 	"errors"
@@ -22,6 +23,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/xuri/excelize/v2"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/toolpath"
@@ -86,7 +90,7 @@ func (Tool) Description() string {
 		"When it does not, the result ends with the exact offset to pass back — call again with that offset " +
 		"to get the next page, and repeat until the header says 已到末尾. " +
 		"Never treat a page as the whole document. " +
-		"Paths are workspace-relative; an absolute path the user handed you (a pasted attachment, say) works too."
+		"Use a workspace-relative path or an authorized absolute path (such as a pasted attachment)."
 }
 
 // InputSchema declares the file path plus the line window.
@@ -96,7 +100,7 @@ func (Tool) InputSchema() tool.Schema {
 		Properties: map[string]tool.Schema{
 			// 绝对路径这一句是给"粘贴进来的附件"用的：它落在应用数据目录，不在
 			// 工作区里，只说 workspace-relative 会让模型不敢把那条路径递进来。
-			"path": {Type: tool.SchemaTypeString, Description: "Path of the .docx/.xlsx/.pptx file to read: workspace-relative, or an absolute path the user gave you (such as a pasted attachment)."},
+			"path": {Type: tool.SchemaTypeString, Description: "Path of the .docx/.xlsx/.pptx file to read: workspace-relative or an authorized absolute path (such as a pasted attachment)."},
 			"offset": {
 				Type: tool.SchemaTypeInteger,
 				Description: "1-based line to start from, using the line numbers in this tool's own output. " +
@@ -117,7 +121,7 @@ func (Tool) IsConcurrencySafe() bool { return true }
 
 // Run resolves the workspace-relative path, dispatches by extension, and returns
 // the extracted structured text.
-func (t Tool) Run(_ context.Context, raw json.RawMessage, tctx *tool.Context, _ chan<- tool.Event) (tool.Result, error) {
+func (t Tool) Run(ctx context.Context, raw json.RawMessage, tctx *tool.Context, _ chan<- tool.Event) (tool.Result, error) {
 	var in input
 	if err := json.Unmarshal(raw, &in); err != nil {
 		return tool.Result{}, fmt.Errorf("parse ReadOffice input: %w", err)
@@ -131,15 +135,38 @@ func (t Tool) Run(_ context.Context, raw json.RawMessage, tctx *tool.Context, _ 
 		return tool.Result{}, err
 	}
 
+	f, err := t.openReadable(ctx, abs, tctx)
+	if err != nil {
+		return tool.Result{}, err
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return tool.Result{}, err
+	}
 	ext := strings.ToLower(filepath.Ext(abs))
 	cb := newCapBuf(in.Offset, in.Limit)
+	cb.ctx = ctx
 	switch ext {
 	case ".docx":
-		err = extractDocx(abs, cb)
+		var archive *zip.Reader
+		archive, err = zip.NewReader(f, info.Size())
+		if err == nil {
+			err = extractDocxArchive(archive, cb)
+		}
 	case ".xlsx":
-		err = extractXlsx(abs, cb)
+		var workbook *excelize.File
+		workbook, err = excelize.OpenReader(f)
+		if err == nil {
+			extractXlsxWorkbook(workbook, cb)
+			_ = workbook.Close()
+		}
 	case ".pptx":
-		err = extractPptx(abs, cb)
+		var archive *zip.Reader
+		archive, err = zip.NewReader(f, info.Size())
+		if err == nil {
+			extractPptxArchive(archive, cb)
+		}
 	case ".doc", ".xls", ".ppt":
 		return tool.Result{}, fmt.Errorf("legacy binary %s is not supported; save it as .docx/.xlsx/.pptx first", ext)
 	default:
@@ -147,6 +174,14 @@ func (t Tool) Run(_ context.Context, raw json.RawMessage, tctx *tool.Context, _ 
 	}
 	if err != nil {
 		return tool.Result{}, err
+	}
+	if err := ctx.Err(); err != nil {
+		return tool.Result{}, err
+	}
+	if tctx != nil && tctx.ReadAccess != nil {
+		if err := toolpath.RequireReadScope(abs, tctx); err != nil {
+			return tool.Result{}, err
+		}
 	}
 	cb.flush()
 
@@ -199,14 +234,15 @@ func (c *capBuf) header(name string) string {
 // this tool exists.
 const continuationMarker = "…[未完：文档在此之后仍有内容。用 offset=%d 再次调用 ReadOffice 继续读取。]"
 
-// resolveReadable resolves the given path to an absolute one and verifies it
-// exists, is a regular file, and sits somewhere this tool may read — the same
-// containment guard previewtool applies, since ReadOffice is authorized as
-// side-effect-free management rather than through the read-path resolver.
-//
-// "可读"= 工作区内,或者宿主明确交代过的额外只读根之一(见 Tool.extraRoots)。
+// resolveReadable checks executor-issued scope for the concrete target. Legacy
+// direct integrations without evidence remain limited to workspace/extraRoots;
+// extraRoots cannot widen an executor-authorized call.
 func (t Tool) resolveReadable(path string, tctx *tool.Context) (string, error) {
 	abs, err := toolpath.Resolve(path, tctx)
+	if err != nil {
+		return "", err
+	}
+	abs, err = toolpath.Canonical(abs)
 	if err != nil {
 		return "", err
 	}
@@ -229,6 +265,9 @@ func (t Tool) resolveReadable(path string, tctx *tool.Context) (string, error) {
 // resolved on both sides, which is what stops a link planted under a root from
 // pointing the standing access somewhere else entirely.
 func (t Tool) readable(abs string, tctx *tool.Context) bool {
+	if tctx != nil && tctx.ReadAccess != nil {
+		return toolpath.RequireReadScope(abs, tctx) == nil
+	}
 	roots := t.extraRoots
 	// 工作区取不到不算错:那多半是会话还没配好,而绝对路径的附件本来就不需要它。
 	if ws, err := toolpath.WorkspaceRoot(tctx); err == nil {
@@ -245,6 +284,26 @@ func (t Tool) readable(abs string, tctx *tool.Context) bool {
 	return false
 }
 
+func (t Tool) openReadable(ctx context.Context, path string, tctx *tool.Context) (*os.File, error) {
+	if tctx != nil && tctx.ReadAccess != nil {
+		permit, err := permissions.ReadPermitFor(tctx, path)
+		if err != nil {
+			return nil, err
+		}
+		return permit.Open(ctx)
+	}
+	// Direct integrations without the executor retain only their static roots.
+	if !t.readable(path, tctx) {
+		return nil, toolpath.ErrOutsideWorkspace
+	}
+	root, err := os.OpenRoot(filepath.Dir(path))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = root.Close() }()
+	return root.Open(filepath.Base(path))
+}
+
 // capBuf collects the extracted text as numbered lines, keeping only the window
 // the caller asked for. Extraction always runs from the document's start — an
 // OOXML part must be parsed in order, there is no seeking to paragraph 900 —
@@ -257,6 +316,7 @@ func (t Tool) readable(abs string, tctx *tool.Context) bool {
 // the window), so the number a caller sees in the output is the number it passes
 // back as offset to continue.
 type capBuf struct {
+	ctx     context.Context
 	kept    strings.Builder // lines inside the window, joined by "\n"
 	partial strings.Builder // the line currently being written
 
@@ -357,7 +417,7 @@ func (c *capBuf) flush() {
 // full reports that the window is closed, so an extractor can stop early. It is
 // the loop guard the extractors use; unlike the old truncated(), stopping here
 // never loses content the caller could not have asked for anyway.
-func (c *capBuf) full() bool { return c.done }
+func (c *capBuf) full() bool { return c.done || c.ctx != nil && c.ctx.Err() != nil }
 
 // truncated reports whether the byte ceiling closed the window.
 func (c *capBuf) truncated() bool { return c.cut }

@@ -55,9 +55,9 @@ func TestMissingArtifactNeverLeaksSyscallError(t *testing.T) {
 		name string
 		call func() error
 	}{
-		{"ReadArtifact", func() error { _, err := a.ReadArtifact("notes/part2.md"); return err }},
-		{"ReadArtifactBytes", func() error { _, err := a.ReadArtifactBytes("notes/part2.md"); return err }},
-		{"ResolveArtifactPath", func() error { _, err := a.ResolveArtifactPath("notes/part2.md"); return err }},
+		{"ReadArtifact", func() error { _, err := readPreviewPath(a, "notes/part2.md"); return err }},
+		{"ReadArtifactBytes", func() error { _, err := readPreviewBytes(a, "notes/part2.md"); return err }},
+		{"ResolveArtifactPath", func() error { _, err := a.OpenArtifact(a.focused, "notes/part2.md"); return err }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.call()

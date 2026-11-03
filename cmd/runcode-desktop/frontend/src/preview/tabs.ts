@@ -1,9 +1,10 @@
+import type { ArtifactReference } from '@/core/bridge'
 // A preview tab is either a workspace file (rendered in PreviewPanel) or an edit
 // review (rendered in DiffPanel). Tabs are keyed by tabKey: the relPath for files,
 // "diff:<snapshotId>" for reviews, so a file and its diff coexist as two tabs.
 export type PreviewTab =
-  | { kind: 'file'; relPath: string }
-  | { kind: 'diff'; snapshotId: string; relPath: string }
+  | { kind: 'file'; relPath: string; artifact?: ArtifactReference }
+  | { kind: 'diff'; snapshotId: string; relPath: string; sessionID?: string }
 
 export function tabKey(t: PreviewTab): string {
   return t.kind === 'diff' ? 'diff:' + t.snapshotId : t.relPath
@@ -13,7 +14,10 @@ export function tabKey(t: PreviewTab): string {
 // already open.
 export function openTab(tabs: PreviewTab[], _active: string | null, tab: PreviewTab): { tabs: PreviewTab[]; active: string } {
   const key = tabKey(tab)
-  if (tabs.some((t) => tabKey(t) === key)) return { tabs, active: key }
+  if (tabs.some((t) => tabKey(t) === key)) {
+    if (tab.kind === 'file' && tab.artifact) return { tabs: tabs.map((t) => tabKey(t) === key ? tab : t), active: key }
+    return { tabs, active: key }
+  }
   return { tabs: [...tabs, tab], active: key }
 }
 

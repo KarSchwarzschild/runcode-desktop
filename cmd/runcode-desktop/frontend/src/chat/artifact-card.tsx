@@ -1,23 +1,15 @@
-import { useState } from 'react'
+import { useContext, useState } from 'react'
 import { Icon } from '@/ui/icons'
 import { classifyPreview, artifactKindLabel, kindIcon } from '@/preview/classify'
-import { openExternal, revealInFolder, resolveArtifactPath, copyText } from '@/core/bridge'
+import { ArtifactActionsContext } from './artifact-actions'
 import { basename } from '@/core/paths'
 import { DiffStat } from '@/ui/badges'
 import { Popover } from '@/ui/popover'
 
-async function copyArtifactPath(relPath: string) {
-  try {
-    const abs = await resolveArtifactPath(relPath)
-    await copyText(abs)
-  } catch {
-    /* best-effort: clipboard/resolve failure is non-fatal */
-  }
-}
-
 // OpenWithMenu is the "打开方式" dropdown: preview (in-panel), open with the OS
 // default app, reveal in the file manager, copy the absolute path.
 function OpenWithMenu({ relPath, previewable, onPreview }: { relPath: string; previewable: boolean; onPreview: () => void }) {
+  const actions = useContext(ArtifactActionsContext)
   const [open, setOpen] = useState(false)
   const item = 'w-full text-left px-3 py-1.5 hover:bg-surface2 whitespace-nowrap'
   return (
@@ -30,9 +22,9 @@ function OpenWithMenu({ relPath, previewable, onPreview }: { relPath: string; pr
       </button>
       <Popover open={open} onClose={() => setOpen(false)} placement="down-right" className="min-w-[168px] text-[13px] text-ink">
         <button className={`${item} ${previewable ? '' : 'text-faint cursor-default'}`} disabled={!previewable} onClick={(e) => { e.stopPropagation(); onPreview(); setOpen(false) }}>预览</button>
-        <button className={item} onClick={(e) => { e.stopPropagation(); openExternal(relPath).catch(() => {}); setOpen(false) }}>用系统默认程序打开</button>
-        <button className={item} onClick={(e) => { e.stopPropagation(); revealInFolder(relPath).catch(() => {}); setOpen(false) }}>在文件夹中显示</button>
-        <button className={item} onClick={(e) => { e.stopPropagation(); copyArtifactPath(relPath); setOpen(false) }}>复制路径</button>
+        <button className={item} onClick={(e) => { e.stopPropagation(); actions.external(relPath).catch(() => {}); setOpen(false) }}>用系统默认程序打开</button>
+        <button className={item} onClick={(e) => { e.stopPropagation(); actions.reveal(relPath).catch(() => {}); setOpen(false) }}>在文件夹中显示</button>
+        <button className={item} onClick={(e) => { e.stopPropagation(); void actions.copyPath(relPath); setOpen(false) }}>复制路径</button>
       </Popover>
     </div>
   )

@@ -1,5 +1,5 @@
 // 设置页：按小节拆分——账号(通行证)、会话、自定义模型、联网工具代理、上下文长度。
-// 拆分原则——进 saveSettings() 载荷的字段（会话/上下文）受控于 SettingsPage 本体；
+// 拆分原则——进 saveSettings() 载荷的字段（会话）受控于 SettingsPage 本体；
 // 各自直接落后端的小节（账号/代理/自定义模型草稿）状态内化，只把共享数据（平台
 // 模型、自定义模型列表，二者合成模型候选）回流给父级。
 import { useEffect, useState } from 'react'
@@ -44,9 +44,6 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   const [harmJudgeModel, setHarmJudgeModel] = useState(initial.harmJudgeModel ?? '')
   const [harmJudgeVotes, setHarmJudgeVotes] = useState(initial.harmJudgeVotes ?? 1)
   const [permissionMode, setPermissionMode] = useState(info?.permissionMode || initial.permissionMode || 'interactive')
-  const [maxTokens, setMaxTokens] = useState(initial.maxTokens ? String(initial.maxTokens) : '')
-  const [maxContextTokens, setMaxContextTokens] = useState(initial.maxContextTokens ?? 260000)
-  const [maxHistoryMessages, setMaxHistoryMessages] = useState(initial.maxHistoryMessages ? String(initial.maxHistoryMessages) : '')
   // 免登录:关闭(默认)时启动强制走登录页;开启后未登录也可直接进表单用本地自定义模型。
   const [skipLogin, setSkipLogin] = useState(initial.skipLogin ?? false)
   const [saving, setSaving] = useState(false)
@@ -78,9 +75,6 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
     try {
       const i = await saveSettings({
         permissionMode,
-        maxTokens: maxTokens.trim() ? parseInt(maxTokens, 10) || 0 : 0,
-        maxContextTokens,
-        maxHistoryMessages: maxHistoryMessages.trim() ? parseInt(maxHistoryMessages, 10) || 0 : 0,
         harmJudgeModel,
         harmJudgeVotes,
         skipLogin,
@@ -134,14 +128,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
         {/* 录音设置跟着「录音纪要」这个功能走：品牌关掉它时这块也不画，否则设置页
             里留着一组调不出任何界面的开关。 */}
         {BRAND.features.recorder && <RecorderSection />}
-        <ContextSection
-          maxTokens={maxTokens}
-          onMaxTokens={setMaxTokens}
-          maxContextTokens={maxContextTokens}
-          onMaxContextTokens={setMaxContextTokens}
-          maxHistoryMessages={maxHistoryMessages}
-          onMaxHistoryMessages={setMaxHistoryMessages}
-        />
+        <ContextSection tenantId={activeTenantId} platform={platformModels} custom={customModels} disabled={accountBusy} />
 
         <ContextAuditSection />
 

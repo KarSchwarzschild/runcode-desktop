@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  buildDigestPrompt, buildMinutesPrompt, digestDisplayText, docDisplayText, minutesDisplayText,
+  buildDigestPrompt, buildMinutesPrompt, compactTranscript, digestDisplayText, docDisplayText, minutesDisplayText,
   minutesFileName, parseRecordingMarker, pickMinutesSkill, recordingMarker, speakerBriefing,
   speakerLabels, type RecordingMark,
 } from './minutes'
@@ -113,10 +113,10 @@ describe('buildMinutesPrompt', () => {
     // head/tail 换着接，手写序号迟早断号。
     const withSkill = buildMinutesPrompt({ mark: info(), transcript, skill: 's', outPath: 'out.md' })
     expect(withSkill).toContain('1. 纪要的格式')
-    expect(withSkill).toContain('4. 按上下文改正')
+    expect(withSkill).toContain('6. 按上下文改正')
     const plain = buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })
     expect(plain).toContain('1. 按议题归纳')
-    expect(plain).toContain('5. 写成 Markdown')
+    expect(plain).toContain('7. 写成 Markdown')
   })
 
   it('带上标题、时间、时长与落盘路径', () => {
@@ -142,6 +142,83 @@ describe('buildMinutesPrompt', () => {
     const p = buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })
     expect(p).toContain('先说结论')
     expect(p).toContain('同意')
+  })
+
+  it('录音时间是现成的，告诉模型直接用，不必回头问', () => {
+    // 国开技能的流程是先把缺的栏目问齐；不点破的话，连录音开始时间也要再问一遍用户。
+    const p = buildMinutesPrompt({ mark: info(), transcript, skill: 'guokai-huiyijiyao-format', outPath: 'out.md' })
+    expect(p).toContain('会议时间就用上面写的录音时间')
+    const noTime = buildMinutesPrompt({ mark: info({ startedAt: undefined }), transcript, skill: 's', outPath: 'out.md' })
+    expect(noTime).not.toContain('会议时间就用')
+  })
+
+  it('不许拿转写里提到的名字去填参会人员和主持人', () => {
+    // 模型最顺手的做法就是把被喊到的名字填进参会人员——喊到不代表在场，更不代表主持。
+    for (const skill of ['guokai-huiyijiyao-format', undefined]) {
+      const p = buildMinutesPrompt({ mark: info(), transcript, skill, outPath: 'out.md' })
+      expect(p).toContain('不要**拿转写里被提到的名字去填参会人员或主持人')
+    }
+    // 没有技能时没有「问齐再生成」的流程，缺的栏目留占位。
+    expect(buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })).toContain('写「待补充」')
+  })
+
+  it('两条支路都要求分清已定和待定', () => {
+    // 需求核对这类会大多是「要不…」「看领导协商」，把倾向写成结论和编造待办一样害人。
+    for (const skill of ['s', undefined]) {
+      const p = buildMinutesPrompt({ mark: info(), transcript, skill, outPath: 'out.md' })
+      expect(p).toContain('分清已经定了的和还没定的')
+      expect(p).toContain('不要把倾向写成定论')
+    }
+  })
+})
+
+describe('compactTranscript', () => {
+  const rows = (...xs: string[]) => xs.join('\n\n')
+
+  it('去掉加粗、空行与标题行，每段一行', () => {
+    const t = '# 季度评审\n\n' + rows('**[00:03] S1**：先说结论', '**[00:11] S2**：同意') + '\n'
+    expect(compactTranscript(t)).toBe('[00:03] S1：先说结论\n[00:11] S2：同意')
+  })
+
+  it('同一说话人紧挨着的段落合并，保留第一段的时间戳', () => {
+    // 分段常切在词中间（「视觉分」「析」），中文直接相连不加空格。
+    const t = rows('**[09:07] S13**：现在应该没有视觉分', '**[09:16] S13**：析，嗯', '**[09:20] S11**：对')
+    expect(compactTranscript(t)).toBe('[09:07] S13：现在应该没有视觉分析，嗯\n[09:20] S11：对')
+  })
+
+  it('隔了别人的发言不合并', () => {
+    const t = rows('**[00:01] S1**：甲', '**[00:02] S2**：乙', '**[00:03] S1**：丙')
+    expect(compactTranscript(t).split('\n')).toHaveLength(3)
+  })
+
+  it('合并有上限，长发言里的时间戳留得住', () => {
+    // 不封顶的话一个人连说十分钟就成了一行，速览大纲标不出议题起止。
+    const long = '字'.repeat(150)
+    const t = rows(...[0, 1, 2, 3].map((i) => `**[00:0${i}] S1**：${long}`))
+    const out = compactTranscript(t).split('\n')
+    expect(out).toHaveLength(2)
+    expect(out[1].startsWith('[00:02] S1：')).toBe(true)
+  })
+
+  it('英文词跨段相接时补空格，免得粘成一个词', () => {
+    const t = rows('**[00:01] S1**：调用 OCR', '**[00:02] S1**：API 就行')
+    expect(compactTranscript(t)).toBe('[00:01] S1：调用 OCR API 就行')
+  })
+
+  it('说话人标签原样保留，不重新编号', () => {
+    // 用户在预览栏看的是落盘原文，纪要里写的编号得能在原文里找到。
+    const t = rows('**[00:01] S92**：甲', '**[00:02] 马文涛**：乙')
+    expect(compactTranscript(t)).toBe('[00:01] S92：甲\n[00:02] 马文涛：乙')
+  })
+
+  it('认不出格式就原样返回，不能把转写弄丢', () => {
+    // Go 侧 Transcript.Markdown 改了格式而这里没跟上时，宁可多花 token。
+    expect(compactTranscript('  S1: 别的格式\n第二行  ')).toBe('S1: 别的格式\n第二行')
+  })
+
+  it('格式里夹着认不出的行也照样带上', () => {
+    const t = rows('**[00:01] S1**：甲', '（此处有缺失）', '**[00:05] S1**：乙')
+    expect(compactTranscript(t)).toBe('[00:01] S1：甲\n（此处有缺失）\n[00:05] S1：乙')
   })
 })
 
@@ -188,6 +265,13 @@ describe('speakerBriefing', () => {
     const b = speakerBriefing(mixed).join('\n')
     expect(b).toContain('不能')
     expect(b).toContain('喊名字的和被喊的从来不是同一个人')
+  })
+
+  it('编号多于一个时说明聚类会把同一个人拆开', () => {
+    // 实测一场会出了 15 个编号、最大到 S92。不说这句，模型会写「共 15 人参会」。
+    expect(speakerBriefing(mixed).join('\n')).toContain('编号的个数不等于参会人数')
+    // 只有一个编号时没有拆分可言。
+    expect(speakerBriefing('**[00:03] S1**：甲').join('\n')).not.toContain('拆成几个编号')
   })
 
   it('全是编号时不提显示名那一行', () => {
@@ -249,7 +333,7 @@ describe('buildDigestPrompt', () => {
     // 「一眼能看完」靠的就是结构固定。模型自由发挥时最爱按发言人分段复述，
     // 那读起来和转写本身没区别。
     const p = buildDigestPrompt({ mark: info(), transcript })
-    for (const section of ['**主题**', '**总结**', '**大纲**', '**待办**']) {
+    for (const section of ['**主题**', '**总结**', '**大纲**', '**待办**', '**待确认**']) {
       expect(p).toContain(section)
     }
   })
@@ -257,6 +341,30 @@ describe('buildDigestPrompt', () => {
   it('限长，否则两段式白做', () => {
     // 不限长模型照样写一大篇，用户仍旧要等一篇长文、仍旧没有「先看一眼再决定」的机会。
     expect(buildDigestPrompt({ mark: info(), transcript })).toContain('600 字以内')
+  })
+
+  it('长会放宽上限，但仍远短于正式纪要', () => {
+    // 一个半小时七八个议题挤进 600 字，大纲每条只剩几个字，待确认也放不下。
+    expect(buildDigestPrompt({ mark: info({ audioMs: 30 * 60_000 }), transcript })).toContain('600 字以内')
+    expect(buildDigestPrompt({ mark: info({ audioMs: 45 * 60_000 }), transcript })).toContain('900 字以内')
+    expect(buildDigestPrompt({ mark: info({ audioMs: 97 * 60_000 }), transcript })).toContain('1200 字以内')
+  })
+
+  it('按议题写，不按说话人写', () => {
+    // 编号的归属本身就不可靠（分段切口附近尤甚），速览又没篇幅交代这层不确定。
+    expect(buildDigestPrompt({ mark: info(), transcript })).toContain('不要写「S1 认为」')
+  })
+
+  it('交代分段会切在词中间、同一名词有多种写法', () => {
+    const p = buildDigestPrompt({ mark: info(), transcript })
+    expect(p).toContain('切在词语中间')
+    expect(p).toContain('同一个专有名词')
+  })
+
+  it('发给模型的是压过的转写', () => {
+    const p = buildDigestPrompt({ mark: info(), transcript })
+    expect(p).toContain('[00:03] 我：先说结论')
+    expect(p).not.toContain('**[00:03] 我**')
   })
 
   it('不落盘、不调工具', () => {

@@ -1,13 +1,6 @@
-// ContextMeter shows how full the model's context window is, against the compaction
-// budget, with a bar that turns amber as it nears the 80% threshold where the engine
-// automatically condenses and carries on — plus a manual "压缩" button. With no
-// budget set (auto-compaction off) it just shows the raw occupancy.
-//
-// The figure updates on every model round-trip, not once per turn: a turn is where
-// context fills up (one can span dozens of tool rounds), so a per-turn meter showed
-// a number that was already stale. It is a calibrated estimate rather than a
-// provider-exact count — the same estimate the automatic thresholds act on, so what
-// the bar shows and what the engine does always agree.
+// The budget is the current session's effective auto-compaction setting, not a
+// catalog draft or a claim about the model's physical window. null means there
+// is no session; zero explicitly disables automatic compaction.
 import { Icon } from '@/ui/icons'
 import { NO_DRAG } from '@/ui/tokens'
 import { fmtTokens } from '@/core/format'
@@ -15,52 +8,74 @@ import { fmtTokens } from '@/core/format'
 export function ContextMeter({
   used,
   budget,
+  model,
   estimated,
   onCompact,
   compacting,
   busy,
 }: {
   used: number
-  budget: number
+  budget: number | null
+  model?: string
   estimated?: boolean
   onCompact: () => void
   compacting: boolean
   busy: boolean
 }) {
-  const pct = budget > 0 ? Math.min(100, Math.round((used / budget) * 100)) : 0
-  const near = budget > 0 && pct >= 80
+  const limited = budget !== null && budget > 0
+  const pct = limited ? Math.floor((used / budget) * 100) : 0
+  const near = limited && used / budget >= 0.8
   const bar = pct >= 100 ? 'bg-red' : near ? 'bg-amber' : 'bg-primary'
-  // A leading "≈" marks the figure as not yet calibrated against this model's real
-  // token usage — the state a resumed session starts in, before any round-trip has
-  // been observed.
+  const tone = pct >= 100 ? 'text-red' : near ? 'text-amberink' : 'text-ink'
   const approx = estimated ? '≈' : ''
+  const title = [
+    model ? `当前会话模型：${model}` : '',
+    budget === null
+      ? '尚未建立会话，建立后显示实际生效的上下文预算'
+      : limited
+        ? `本会话上下文占用 ${used.toLocaleString()} / ${budget.toLocaleString()} tokens
+达到预算 80% 自动压缩（约 ${Math.ceil(budget * 0.8).toLocaleString()} tokens），目标约 60%`
+        : `本会话上下文占用 ${used.toLocaleString()} tokens · 自动压缩关闭
+未启用应用预算，不代表模型上下文无限`,
+    budget !== null && estimated ? '占用为校准估算值，每次模型请求实时刷新，并非供应商精确计数' : '',
+    limited ? '此处为本会话已生效的应用预算，不是厂商硬容量；修改配置后需新建、重开或重新选择模型生效' : '',
+  ].filter(Boolean).join('\n')
+
   return (
-    <div className="inline-flex items-center gap-2" style={NO_DRAG}>
-      <span
-        className="inline-flex items-center gap-1.5"
-        title={
-          (estimated ? '（尚未按当前模型校准，完成一次往返后自动校准）\n' : '') +
-          (budget > 0
-            ? `上下文占用 ${used.toLocaleString()} / ${budget.toLocaleString()} tokens\n每次模型往返实时刷新 · 达 80% 自动整理并总结后继续`
-            : `上下文占用 ${used.toLocaleString()} tokens · 未设预算，自动压缩关闭`)
-        }
-      >
+    <div className="inline-flex items-center gap-2 whitespace-nowrap" style={NO_DRAG}>
+      <span className="inline-flex items-center gap-1.5" title={title}>
         <span>上下文</span>
-        {budget > 0 ? (
+        {budget === null ? (
+          <span className="text-faint">待建立会话</span>
+        ) : limited ? (
           <>
-            <span className="w-[62px] h-[6px] rounded-full bg-surface2 border border-line2 overflow-hidden inline-block align-middle">
-              <span className={`block h-full ${bar} transition-[width]`} style={{ width: pct + '%' }} />
+            <span className={`tabular-nums ${tone}`}>
+              <b className="font-semibold">{approx}{fmtTokens(used)}</b>
+              <span className="text-faint"> / {fmtTokens(budget)}</span>
             </span>
-            <b className={`font-semibold tabular-nums ${near ? 'text-[#b26a1f]' : 'text-ink'}`}>{approx}{pct}%</b>
-            <span className="text-faint tabular-nums">{approx}{fmtTokens(used)}/{fmtTokens(budget)}</span>
+            <span
+              role="progressbar"
+              aria-label="上下文占用比例"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.min(100, pct)}
+              aria-valuetext={`${approx}${pct}% · ${used.toLocaleString()} / ${budget.toLocaleString()} tokens`}
+              className="w-[52px] h-[6px] rounded-full bg-surface2 border border-line2 overflow-hidden inline-block align-middle"
+            >
+              <span className={`block h-full ${bar} transition-[width]`} style={{ width: Math.min(100, pct) + '%' }} />
+            </span>
+            <span className={`text-[11px] tabular-nums ${tone}`}>{pct}%</span>
           </>
         ) : (
-          <span className="text-ink font-semibold tabular-nums">{approx}{fmtTokens(used)} <span className="text-faint font-normal">· 未限</span></span>
+          <span className="tabular-nums">
+            <b className="text-ink font-semibold">{approx}{fmtTokens(used)}</b>
+            <span className="text-faint"> · 自动压缩关闭</span>
+          </span>
         )}
       </span>
       <button
         onClick={onCompact}
-        disabled={busy || compacting}
+        disabled={budget === null || busy || compacting}
         title="压缩上下文：把较早的对话总结成摘要、保留最近几轮原文（磁盘记录保持完整）"
         className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-line2 text-[12px] text-muted hover:text-ink hover:bg-surface2 transition cursor-pointer disabled:opacity-40 disabled:cursor-default"
       >

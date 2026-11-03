@@ -11,7 +11,7 @@ import { PreviewLoading } from '../loading'
 
 // onMissing fires when the file is gone rather than unreadable, so the panel can
 // close the tab instead of showing an error for something the user cannot fix.
-export function PptxView({ relPath, reloadKey, onMissing }: { relPath: string; reloadKey: number; onMissing?: () => void }) {
+export function PptxView({ relPath: _relPath, reference, reloadKey, onMissing }: { relPath: string; reference: string; reloadKey: number; onMissing?: () => void }) {
   const hostRef = useRef<HTMLDivElement | null>(null)
   const slidesRef = useRef<HTMLElement[]>([])
   const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading')
@@ -30,7 +30,7 @@ export function PptxView({ relPath, reloadKey, onMissing }: { relPath: string; r
     slidesRef.current = []
     void (async () => {
       try {
-        const buf = await readArtifactBytes(relPath)
+        const buf = await readArtifactBytes(reference)
         const { init } = await import('pptx-preview')
         const host = hostRef.current
         if (cancelled || !host) return
@@ -53,7 +53,7 @@ export function PptxView({ relPath, reloadKey, onMissing }: { relPath: string; r
       }
     })()
     return () => { cancelled = true }
-  }, [relPath, reloadKey])
+  }, [reference, reloadKey])
 
   // Navigation toggles DOM visibility directly (the slides are the library's nodes,
   // not React's) and mirrors the position into state for the indicator.
@@ -63,7 +63,7 @@ export function PptxView({ relPath, reloadKey, onMissing }: { relPath: string; r
     setIdx(clamped)
   }
 
-  if (state === 'error') return <ViewerError relPath={relPath} message={err} />
+  if (state === 'error') return <ViewerError reference={reference} message={err} />
   return (
     <div
       className="relative flex flex-col h-full min-h-0 bg-inset/40 outline-none"

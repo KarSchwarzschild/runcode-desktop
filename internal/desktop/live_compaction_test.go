@@ -30,33 +30,18 @@ func preserveDesktopConfig(t *testing.T) {
 	})
 }
 
-// TestReopenCarriesConfiguredContextBudget mirrors reopening XRUN: it loads the
-// persisted start request (as the form does) and starts a session from it, then
-// asserts the session's reported budget equals the persisted one — so a restored
-// 200k config yields a 200k session (no network; skipped when no config exists).
+// Reopening resolves the saved profile's budget, not the abandoned global value.
 func TestReopenCarriesConfiguredContextBudget(t *testing.T) {
-	path := filepath.Join(os.Getenv("APPDATA"), "runcode", "desktop.json")
-	if _, err := os.Stat(path); err != nil {
-		t.Skip("no desktop.json to reopen")
-	}
-	preserveDesktopConfig(t)
+	isolateConfigDir(t)
 	app := New(&recordingSink{})
-	req := loadRawConfig().startRequest()
-	if strings.EqualFold(req.Provider, "passport") {
-		// A passport session requires a live login (StartSession refuses without
-		// one); this self-contained test can't provide that, so skip.
-		t.Skip("persisted config is a passport session (needs live login)")
-	}
-	want := req.MaxContextTokens
-	req.CWD = t.TempDir() // start in a scratch workspace, not the user's project
-	info, err := app.StartSession(req)
+	saveContextFixture(t, app, "reopen", "m", "https://example.invalid/v1", ModelContextValues{MaxOutputTokens: 1024, MaxContextTokens: 18000})
+	info, err := app.StartSession(StartSessionRequest{CWD: t.TempDir(), CustomModelName: "reopen", Model: "m", Provider: "openai"})
 	if err != nil {
-		t.Fatalf("StartSession: %v", err)
+		t.Fatal(err)
 	}
-	defer app.CloseSession("")
-	t.Logf("persisted budget %d → session reports %d", want, info.MaxContextTokens)
-	if info.MaxContextTokens != want {
-		t.Fatalf("session budget = %d, want persisted %d", info.MaxContextTokens, want)
+	defer app.CloseSession(info.SessionID)
+	if info.MaxContextTokens != 18000 {
+		t.Fatalf("budget = %d", info.MaxContextTokens)
 	}
 }
 
@@ -110,25 +95,27 @@ func TestLiveDesktopAutoCompaction(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read desktop.json: %v", err)
 	}
-	var saved StartSessionRequest
-	if err := json.Unmarshal(raw, &saved); err != nil {
+	var stored desktopConfig
+	if err := json.Unmarshal(raw, &stored); err != nil {
 		t.Fatalf("parse desktop.json: %v", err)
 	}
 
+	saved := stored.startRequest()
 	sink := &recordingSink{}
 	app := New(sink)
+	saveContextFixture(t, app, "live-compaction-probe", saved.Model, saved.BaseURL, ModelContextValues{MaxOutputTokens: 1024, MaxContextTokens: 2000})
 	// A tiny budget forces compaction: real input tokens (system prompt + history)
 	// dwarf 2000, so every turn is over the 0.8 threshold; once >4 turns exist the
 	// oldest are summarized.
 	_, err = app.StartSession(StartSessionRequest{
-		CWD:              t.TempDir(),
-		Provider:         saved.Provider,
-		Model:            saved.Model,
-		BaseURL:          saved.BaseURL,
-		APIKey:           saved.APIKey,
-		AuthToken:        saved.AuthToken,
-		PermissionMode:   "flight",
-		MaxContextTokens: 2000,
+		CWD:             t.TempDir(),
+		Provider:        saved.Provider,
+		Model:           saved.Model,
+		BaseURL:         saved.BaseURL,
+		APIKey:          saved.APIKey,
+		AuthToken:       saved.AuthToken,
+		PermissionMode:  "flight",
+		CustomModelName: "live-compaction-probe",
 	})
 	if err != nil {
 		t.Fatalf("StartSession: %v", err)

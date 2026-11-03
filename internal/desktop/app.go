@@ -121,9 +121,16 @@ type sessionEntry struct {
 // methods never block the UI thread: long work (a turn) runs on host-owned
 // goroutines and reports back through events.
 type App struct {
+	artifactMu sync.Mutex
+	artifacts  map[string]*artifactAccess
+	artifactIO chan struct{}
+
 	configModelRef   modelReference
 	pendingVisionRef modelReference
-	visionModels     map[string]visionCatalog
+	modelCatalogs    map[string]modelCatalog
+	// modelCatalogFailures remembers the last failed fetch per catalog key so
+	// session builds during an outage skip straight to the fallback.
+	modelCatalogFailures map[string]modelCatalogFailure
 	// out is the shell's raw sink; host envelopes are forwarded to it verbatim
 	// (hostSinkAdapter). sink wraps the same sink for process-level events
 	// (passport:changed, ...) that belong to no session — see envelopeSink for
@@ -153,6 +160,8 @@ type App struct {
 	privGate   *privilegeGate
 	askpass    *askpassBroker
 	askpassSrv atomic.Pointer[askpassServer]
+
+	exit exitState
 
 	// rec 是录音纪要的状态（一次只允许一场）。它自带锁，与 mu / startMu
 	// 没有嵌套关系——录音与对话是两条互不相干的线。
@@ -622,8 +631,9 @@ func (a *App) SetQuitter(q Quitter) { a.quit = q }
 // management: allowed without approval, and past plan mode's mutation block.
 //   - plan_write writes to this process's plan store and one file under .runcode,
 //     recording the plan the user is about to approve — exactly TodoWrite's shape.
-//   - open_preview only opens a panel in this window.
-//   - ReadOffice reads one document and enforces workspace containment itself.
+//   - open_preview and ReadOffice keep their class declaration for integrations;
+//     desktop fileReadResolver takes precedence and supplies real file resources
+//     plus executor-issued read evidence, rather than a manage/read-only shortcut.
 //
 // install_runtime is ClassMutating: it downloads tens of MB and puts new programs on
 // every later command's PATH, which is the user's call each time. The engine treats
@@ -690,12 +700,30 @@ const harmAutoAllowLimit = 1000
 func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opts *engine.Options) {
 	// Audit uses the request observer; turn results need no retained snapshots.
 	opts.OmitRequestSnapshots = true
+	account := ""
+	if cfg.TokenSource != nil && a.tokens != nil {
+		account = a.tokens.loginEpoch()
+		source := cfg.TokenSource
+		cfg.TokenSource = func() (string, error) {
+			if a.tokens.loginEpoch() != account {
+				return "", fmt.Errorf("会话账号已变化，请重新打开会话")
+			}
+			token, err := source()
+			if err != nil {
+				return "", err
+			}
+			if a.tokens.loginEpoch() != account {
+				return "", fmt.Errorf("会话账号已变化，请重新打开会话")
+			}
+			return token, nil
+		}
+	}
 	store, err := engine.NewAllowStore(cfg.CWD)
 	if err != nil {
 		// A corrupt allow file must not block the session: degrade to an
 		// in-memory store (project-scope allows won't persist) and say so.
-		sctx.Emit(EventWarning, Warning{Message: fmt.Sprintf("权限允许清单不可用（本次会话仅内存记忆）: %v", err)})
-		store = permissions.NewMemorySessionAllowStore()
+		sctx.Emit(EventWarning, Warning{Message: fmt.Sprintf("权限清单不可用，请修复后重新打开会话: %v", err)})
+		store = permissions.UnavailableStore(err)
 	}
 	// Always mode-aware (interactive authorizer installed even in safe mode) so
 	// the UI can switch modes at runtime.
@@ -712,14 +740,14 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		// runtimeResolver 只做展示：给 install_runtime 的审批弹窗配一句"装的是什么、
 		// 多大、装到哪"（见 runtimetool.go）。
 		Resolver: privilegeResolver{inner: runtimeResolver{
-			inner: browserResolver{inner: permissions.WithToolClasses(nil, hostToolClasses)},
+			inner: browserResolver{inner: fileReadResolver{inner: permissions.WithToolClasses(nil, hostToolClasses)}},
 			rt:    a.rt,
 			trust: a.ensureRuntimeTrust,
 		}},
 		// Which servers we vouch for is ours to know, not the engine's: the same
 		// opt-in that earns a server the user's identity headers also lets its calls
 		// skip the per-call approval an arbitrary external endpoint always needs.
-		// Both read the one name set (passportMCPNames), so they cannot disagree.
+		// Both use the same loaded server-configuration snapshot and its binding.
 		//
 		// Same shape for the app's own directories: which paths are "this
 		// application" is host knowledge the engine cannot have, so the shell wraps
@@ -734,7 +762,7 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		// "询问"，OA 锁想挡的出网就漏了。
 		Policy: newOALockPolicy(
 			privilegePolicy{
-				inner:   newAppDirPolicy(permissions.DefaultPolicy{TrustedMCPServers: passportMCPNames()}),
+				inner:   newAppDirPolicy(permissions.DefaultPolicy{TrustedMCPBindings: trustedMCPBindings(cfg.MCPServers)}),
 				enabled: a.privilegeReady,
 			},
 			func() string { return a.oaLockedModel(sctx.ID) },
@@ -747,7 +775,7 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 			// Model harm gate: auto-allow actions the model judges safe; only
 			// prompt for ones it flags as potentially harmful (or when the check
 			// fails).
-			HarmJudge: modelHarmJudge{app: a},
+			HarmJudge: modelHarmJudge{app: a, sessionID: sctx.ID, generation: sctx.Generation, passport: cfg.TokenSource != nil, account: account},
 			// Session-scoped audit + circuit breaker: surface every smart-mode
 			// auto-allow to the UI, and stop auto-allowing once the session
 			// budget is spent so a fooled judge can't silently wave through an
@@ -769,7 +797,7 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 	// ReadOffice 额外收下本应用自己的可读目录:粘贴进输入框的附件落在那儿(见
 	// attachments.go 的 SavePastedFile),而 Office 文件除了 ReadOffice 没别的读法——
 	// Read 对它只会吐二进制垃圾。根的口径与 appDirPolicy 放行读的那份完全一致。
-	opts.ExtraTools = append(opts.ExtraTools, previewtool.New(), officetool.New(appDirsOnce().readRoots...), plantool.New(plans))
+	opts.ExtraTools = append(opts.ExtraTools, previewtool.New(a.previewOpener(sctx.ID, sctx.Generation)), officetool.New(appDirsOnce().readRoots...), plantool.New(plans))
 	// install_runtime：缺 Python/Node/Git 时模型自己装，走的就是设置页那个安装器（见
 	// runtimetool.go）。每次调用都要用户批准（ClassMutating，见 hostToolClasses）。
 	// 只进主会话：子代理拿不到 ExtraTools，提示词里给了它们"请用户去设置页装"的退路。
@@ -837,7 +865,6 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 func (a *App) StartSession(req StartSessionRequest) (SessionInfo, error) {
 	// 设置页独占的那三项上下文限制以落盘的为准：起始页不渲染它们、只发零值，不填
 	// 回来的话用户在设置里填的最大输出 tokens 对这条新会话不生效（见 store.go）。
-	req = withStoredContextLimits(req)
 	originalReq := req
 	var err error
 	req, err = a.resolveCustomModelRequest(req)
@@ -961,6 +988,20 @@ func (a *App) buildSessionHeld(cfg engine.Config, passport bool, tenantID string
 
 // Background branches are registered before the frontend chooses to focus them.
 func (a *App) buildSessionModeHeld(ctx context.Context, cfg engine.Config, passport bool, tenantID string, focus bool, refs ...modelReference) (SessionInfo, error) {
+	return a.buildSessionResolvedHeld(ctx, cfg, passport, tenantID, focus, true, refs...)
+}
+
+func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, passport bool, tenantID string, focus, restoreModel bool, refs ...modelReference) (SessionInfo, error) {
+	requested := cfg.Model
+	cfg, err := restoredContextModel(ctx, cfg, restoreModel)
+	if err != nil {
+		return SessionInfo{}, err
+	}
+	if passport && requested != "" && cfg.Model != requested && !a.keepRestoredPlatformModel(ctx, tenantID, cfg.Model) {
+		debugLog("resume: sidecar model %q is not a platform model; using %q", cfg.Model, requested)
+		cfg.Model = requested
+	}
+
 	// Refresh the web-tool proxy from the persisted setting so "生效于下个会话"
 	// holds even when cfg is a reused a.config snapshot from an earlier build.
 	cfg.WebProxy = loadRawConfig().WebProxy
@@ -973,7 +1014,11 @@ func (a *App) buildSessionModeHeld(ctx context.Context, cfg engine.Config, passp
 	//
 	cfg.MCPServers, cfg.AllowMCPSampling = loadDesktopMCP(cfg.CWD)
 	if passport {
-		applyMCPPassport(cfg.MCPServers, passportMCPNames(), func() (map[string]string, error) { return passportHeaders(a.tokens.Token, tenantID) })
+		for i := range cfg.MCPServers {
+			if cfg.MCPServers[i].HostTrusted {
+				cfg.MCPServers[i].HeaderSource = func() (map[string]string, error) { return passportHeaders(a.tokens.Token, tenantID) }
+			}
+		}
 	} else {
 		a.attachMCPPassport(cfg.MCPServers)
 	}
@@ -983,10 +1028,28 @@ func (a *App) buildSessionModeHeld(ctx context.Context, cfg engine.Config, passp
 	cfg = a.restoreOALockHeld(cfg)
 
 	modelRef := a.referenceForBuild(cfg, passport, tenantID, refs)
+	cfg, err = a.applyModelContext(ctx, cfg, modelRef)
+	if err != nil {
+		return SessionInfo{}, err
+	}
 	a.mu.Lock()
 	a.pendingVisionRef = modelRef
 	a.mu.Unlock()
 	id, st, err := a.mgr.Create(ctx, cfg)
+	// Explicit switches and OA locks take precedence over the old sidecar model.
+	// Always persist, even when the restored engine already reports this model:
+	// a newly created history may not have a model field in its sidecar yet.
+	if err == nil && cfg.Model != "" {
+		if err = a.mgr.SetModel(id, cfg.Model); err == nil {
+			if session, lookupErr := a.mgr.Session(id); lookupErr == nil {
+				st = session.Status()
+			}
+		} else {
+			closeCtx, cancel := context.WithTimeout(context.Background(), sessionCloseTimeout)
+			_ = a.mgr.Close(closeCtx, id)
+			cancel()
+		}
+	}
 	a.mu.Lock()
 	pendingEdits, pendingPlans, pendingEmit := a.pendingEdits, a.pendingPlans, a.pendingEmit
 	a.pendingEdits, a.pendingPlans, a.pendingEmit = nil, nil, nil
@@ -1024,18 +1087,6 @@ func (a *App) buildSessionModeHeld(ctx context.Context, cfg engine.Config, passp
 		}
 	}
 	a.mu.Unlock()
-
-	// 锁着的会话:把模型再钉一次,并写回 sidecar。
-	//
-	// 上面 restoreOALockHeld 已经把 cfg.Model 设成锁定的本地模型了,但引擎恢复会话时
-	// 会拿 sidecar 里存的运行时设置回灌(host/manager.go 的 applyMeta → SetModel),
-	// 把它覆盖回用户上次手动选的那个——于是"关掉重开"就绕过了 OA 锁,而且毫无迹象。
-	// Manager.SetModel 同时改引擎与 sidecar,从此两处一致。
-	if oaLocked {
-		if err := a.mgr.SetModel(id, oaLock.LocalModel); err != nil {
-			debugLog("oa: 恢复会话后重新钉住本地模型失败 session=%s: %v", id, err)
-		}
-	}
 
 	// Restart the workspace preview server for this session (non-fatal on error).
 	a.startPreview(cfg.CWD)
@@ -1104,6 +1155,7 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 		}
 	}
 	a.mu.Unlock()
+	a.dropArtifacts(e.id)
 	a.stopPreview(previewWorkspaceOf(e))
 	return nil
 }

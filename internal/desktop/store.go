@@ -39,14 +39,6 @@ func defaultRequest() StartSessionRequest {
 		// 执行脚本的内容读进判定的那条（harm_script.go）。要用得上，用户得自己切到
 		// 智能模式。这是有意的取舍，不是漏接线。
 		PermissionMode: "interactive",
-		// Arm automatic compaction by default so long sessions don't overflow the
-		// context window. The user can change it (or pick 关闭) in the start form.
-		//
-		// 260k assumes the connected model's window is larger than that — compaction
-		// fires when usage approaches this budget, so a budget above the window means
-		// the request is rejected for length before compaction ever runs. Models with
-		// a 200k window need one of the smaller options.
-		MaxContextTokens: 260_000,
 	}
 }
 
@@ -91,7 +83,7 @@ func saveConfig(req StartSessionRequest) {
 // carry-forward read below and the write form one read-modify-write cycle).
 func saveConfigHeld(input StartSessionRequest) {
 	// 从现有存储出发，只写启动命令拥有的字段。以后增加应用级设置，不必再来补一行沿用。
-	cfg, hadPrev := loadRawConfigOK()
+	cfg, _ := loadRawConfigOK()
 	req := protectConfigSecrets(configFromRequest(input))
 	cfg.CWD = req.CWD
 	cfg.Provider = req.Provider
@@ -110,10 +102,6 @@ func saveConfigHeld(input StartSessionRequest) {
 	cfg.APIKeyProtected = req.APIKeyProtected
 	cfg.AuthTokenProtected = req.AuthTokenProtected
 	cfg.RecentWorkspaces = mergeRecentWorkspaces(cfg.RecentWorkspaces, req.CWD)
-	// 上下文设置由设置页拥有；首次启动才采用请求的默认种子。
-	if !hadPrev {
-		cfg.MaxTokens, cfg.MaxContextTokens, cfg.MaxHistoryMessages = req.MaxTokens, req.MaxContextTokens, req.MaxHistoryMessages
-	}
 	// 空租户表示本次会话无关，显式清空只能走 SetActiveTenant。
 	if strings.TrimSpace(req.TenantID) != "" {
 		cfg.TenantID = req.TenantID
@@ -177,23 +165,6 @@ func loadRawConfigOK() (desktopConfig, bool) {
 		return desktopConfig{}, false
 	}
 	return req, true
-}
-
-// withStoredContextLimits 用落盘的那份覆盖请求里的「上下文长度控制」三项。
-//
-// 它们由设置页独占（见 saveConfigHeld 里的沿用规则），所以磁盘上的那份就是事实:
-// 起始页发来的零值不是"用户清空了"，只是"这个表单不管这些字段"。不填回来的话，
-// 设置里填的最大输出 tokens 对新会话根本不生效——丢设置与不生效是同一个根因。
-// 没有配置文件时（首次启动）保留请求自带的值，那是 defaultRequest 播的种子。
-func withStoredContextLimits(req StartSessionRequest) StartSessionRequest {
-	prev, ok := loadRawConfigOK()
-	if !ok {
-		return req
-	}
-	req.MaxTokens = prev.MaxTokens
-	req.MaxContextTokens = prev.MaxContextTokens
-	req.MaxHistoryMessages = prev.MaxHistoryMessages
-	return req
 }
 
 // updateRawConfig applies mutate to a fresh read of the persisted config and

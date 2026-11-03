@@ -1,11 +1,15 @@
 package desktop
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"unicode/utf8"
+
+	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
 
 	"gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 )
@@ -20,33 +24,25 @@ const maxArtifactBytes = 2 << 20 // 2 MiB
 // as base64 (which inflates ~33%) through the Wails bridge and into the renderer.
 const maxArtifactBinaryBytes = 25 << 20 // 25 MiB
 
-// ReadArtifact returns the UTF-8 text of a workspace file for React-rendered
-// previews (Markdown/code/text). It rejects paths outside the workspace (both
-// lexical ".." and symlink/junction escapes), files over maxArtifactBytes, and
-// binary (non-UTF-8) content.
-func (a *App) ReadArtifact(relPath string) (string, error) {
-	a.mu.Lock()
-	ws := a.workspace
-	a.mu.Unlock()
-	resolved, err := resolveWithinWorkspace(ws, relPath)
+// ReadArtifact returns UTF-8 text through a live source-session reference.
+// It checks current read authority and caps output at maxArtifactBytes.
+func (a *App) ReadArtifact(reference string) (string, error) {
+	var text string
+	err := a.withArtifact(context.Background(), reference, func(ctx context.Context, _ host.SessionAccess, e *artifactAccess) error {
+		data, err := readArtifactFile(ctx, e.permit, maxArtifactBytes)
+		if err != nil {
+			return artifactFSError(e.ref.Path, err)
+		}
+		if !utf8.Valid(data) {
+			return errors.New("file is not text")
+		}
+		text = string(data)
+		return nil
+	})
 	if err != nil {
 		return "", wireError(err)
 	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", wireError(artifactFSError(relPath, err))
-	}
-	if info.Size() > maxArtifactBytes {
-		return "", wireError(errors.New("file too large to preview"))
-	}
-	data, err := os.ReadFile(resolved)
-	if err != nil {
-		return "", wireError(artifactFSError(relPath, err))
-	}
-	if !utf8.Valid(data) {
-		return "", wireError(errors.New("file is not text"))
-	}
-	return string(data), nil
+	return text, nil
 }
 
 // artifactFSError turns a filesystem failure on an artifact into something the
@@ -83,40 +79,24 @@ func artifactFSError(relPath string, err error) error {
 	}
 }
 
-// ReadArtifactBytes returns a workspace file's raw bytes as base64, for previews
-// the renderer needs the binary of — Office documents (docx/pptx/xlsx), which are
-// zip archives. It shares ReadArtifact's containment (rejecting paths outside the
-// workspace, lexically or via symlink/junction) but, unlike it, does not require
-// UTF-8 text and allows up to maxArtifactBinaryBytes.
-//
-// Bytes go through the Wails bridge rather than the loopback preview server on
-// purpose: the frontend fetches these with fetch()/arrayBuffer, which is CORS-gated
-// against the server's separate origin, and the bridge is also available even when
-// the preview server failed to start. (The server still backs iframe/img previews,
-// which are not CORS-gated.)
-func (a *App) ReadArtifactBytes(relPath string) (string, error) {
-	a.mu.Lock()
-	ws := a.workspace
-	a.mu.Unlock()
-	resolved, err := resolveWithinWorkspace(ws, relPath)
+// ReadArtifactBytes returns base64 bytes through the same source-session guard.
+// The bridge avoids cross-origin fetch restrictions and works without an HTTP
+// listener, allowing the frontend Office renderer to remain the safe fallback.
+// It accepts a reference, never a bare path, and caps input at 25 MiB.
+func (a *App) ReadArtifactBytes(reference string) (string, error) {
+	var result string
+	err := a.withArtifact(context.Background(), reference, func(ctx context.Context, _ host.SessionAccess, e *artifactAccess) error {
+		data, err := readArtifactFile(ctx, e.permit, maxArtifactBinaryBytes)
+		if err != nil {
+			return artifactFSError(e.ref.Path, err)
+		}
+		result = base64.StdEncoding.EncodeToString(data)
+		return nil
+	})
 	if err != nil {
 		return "", wireError(err)
 	}
-	info, err := os.Stat(resolved)
-	if err != nil {
-		return "", wireError(artifactFSError(relPath, err))
-	}
-	if info.IsDir() {
-		return "", wireError(errors.New("path is a directory"))
-	}
-	if info.Size() > maxArtifactBinaryBytes {
-		return "", wireError(fmt.Errorf("file too large to preview (%d MiB max)", maxArtifactBinaryBytes>>20))
-	}
-	data, err := os.ReadFile(resolved)
-	if err != nil {
-		return "", wireError(artifactFSError(relPath, err))
-	}
-	return base64.StdEncoding.EncodeToString(data), nil
+	return result, nil
 }
 
 // previewRef 是一个工作区的预览服务器加它的引用数。
@@ -142,6 +122,7 @@ func (a *App) startPreview(workspace string) {
 		return
 	}
 	ps := newPreviewServer()
+	ps.handler = http.HandlerFunc(a.serveArtifact)
 	url, err := ps.start(workspace)
 	if err != nil {
 		return

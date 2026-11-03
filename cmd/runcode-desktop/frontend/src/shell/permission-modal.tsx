@@ -40,10 +40,10 @@ export function PermissionModal({ req, onDecide, remaining = 0, onDenyRest }: { 
   const rememberable = canRemember(decisions)
   const primary: PermissionDecision = decisions.includes('allow-session') ? 'allow-session' : 'allow-once'
   return (
-    <div className="fixed inset-0 bg-[rgba(30,33,50,0.32)] backdrop-blur-[2px] flex items-center justify-center z-20 anim-rise">
-      <div className="w-[560px] max-w-[92vw] bg-surface rounded-2xl p-[22px] shadow-modal">
+    <div className="fixed inset-0 bg-ink/30 backdrop-blur-[2px] flex items-center justify-center z-20 anim-rise">
+      <div role="dialog" aria-modal="true" aria-label="权限请求" className="w-[560px] max-w-[92vw] max-h-[90vh] overflow-y-auto bg-surface rounded-2xl p-[22px] shadow-modal">
         <h3 className="m-0 mb-4 text-[16px] font-bold flex items-center gap-2.5">
-          <span className="w-[9px] h-[9px] rounded-[3px] bg-primary" />权限请求
+          <span className="w-[9px] h-[9px] rounded-sm bg-primary" />权限请求
           {remaining > 0 && (
             <span className="ml-auto text-[12px] font-medium text-muted bg-surface2 border border-line2 rounded-full px-2.5 py-0.5">还有 {remaining} 个待处理</span>
           )}
@@ -82,7 +82,7 @@ export function PermissionModal({ req, onDecide, remaining = 0, onDenyRest }: { 
               </Banner>
             )}
             {req.harmReason && (
-              <Banner tone="danger" className="mb-3" icon={<Icon name="shield" size={16} />} title="模型判定可能有害">
+              <Banner tone="warning" className="mb-3" icon={<Icon name="shield" size={16} />} title="需要人工确认">
                 {req.harmReason}
               </Banner>
             )}
@@ -92,11 +92,15 @@ export function PermissionModal({ req, onDecide, remaining = 0, onDenyRest }: { 
                 <pre className="m-0 bg-surface2 border border-line rounded-lg px-3 py-2.5 font-mono text-[13px] text-ink whitespace-pre-wrap break-all max-h-[160px] overflow-auto">{req.command}</pre>
               </div>
             )}
+            {req.inputPreview && <div className="mb-3"><div className="text-[12px] text-muted mb-1.5">调用参数（常见敏感字段已遮盖）</div><pre className="m-0 bg-inset border border-line rounded-lg px-3 py-2.5 font-mono text-[13px] text-ink whitespace-pre-wrap break-all max-h-[160px] overflow-auto">{req.inputPreview}</pre></div>}
+            {req.grantScope && <p className="m-0 mb-3 text-[13px] text-muted leading-relaxed">{req.grantScope}</p>}
             <table className="w-full border-collapse text-[13px]">
               <tbody>
                 <tr><td className={`${td} text-muted w-16`}>工具</td><td className={td}>{s.toolName}</td></tr>
                 <tr><td className={`${td} text-muted`}>操作</td><td className={td}>{s.operation} · 风险 {s.risk}{s.commandCategory ? ` · ${s.commandCategory}` : ''}</td></tr>
+                {s.networkOrigin && <tr><td className={`${td} text-muted`}>目的地</td><td className={`${td} break-all`}>{s.networkOrigin}</td></tr>}
                 {s.networkHost && <tr><td className={`${td} text-muted`}>主机</td><td className={td}>{s.networkHost}</td></tr>}
+                {s.networkRoute && <tr><td className={`${td} text-muted`}>路线</td><td className={td}>{s.networkRoute}</td></tr>}
                 {s.mcpServer && <tr><td className={`${td} text-muted`}>MCP</td><td className={td}>{s.mcpServer}/{s.mcpTool}</td></tr>}
                 {req.targets && req.targets.length > 0 && (
                   <tr><td className={`${td} text-muted`}>目标</td><td className={td}>{req.targets.map((t) => <code key={t} className="bg-inset px-1.5 py-0.5 rounded mr-1.5 mb-1.5 inline-block">{t}</code>)}</td></tr>
@@ -105,17 +109,19 @@ export function PermissionModal({ req, onDecide, remaining = 0, onDenyRest }: { 
             </table>
             <div className="mt-3.5 text-[12px] text-faint">
               {!rememberable ? (
-                <>这次请求<b className="font-semibold text-muted">没有可记住的授权范围</b>，只能逐次决定：允许只放行这一次，下次同样的调用还会再问。同一批并发的相同请求共用这次答复。</>
+                <>这次请求<b className="font-semibold text-muted">没有可记住的授权范围</b>，只能逐次决定：允许只放行这一次，下次同样的调用还会再问。</>
               ) : externalRoots.length > 0 ? (
                 <>
                   「本次会话」/「本项目」记住的是<b className="font-semibold text-muted">目录</b>——
                   {externalRoots.map((root) => (
                     <code key={root} className="bg-inset px-1 py-0.5 rounded mx-0.5 font-mono break-all">{root}</code>
                   ))}
-                  及其子目录内的同类操作都不再询问；「仅此一次」只放行这一次。同一批并发的相同请求共用这次答复。
+                  及其子目录内的同类文件访问可复用；命令仍须满足独立操作授权。「仅此一次」只覆盖具体目标，不开放兄弟文件；只有相同调用可共用一次答复。
                 </>
+              ) : req.grantScope ? (
+                <>「本次会话」/「本项目」仅记住上述范围。「仅此一次」只覆盖当前具体参数，不复用其它调用。同一回合并发且参数完全相同的调用可能共用答复。</>
               ) : (
-                <>「本次会话」后，对本项目文件的增删改、或同类命令在本次会话内都不再询问（推荐）；「仅此一次」每次都会再问。同一批并发的相同请求共用这次答复。</>
+                <>「本次会话」后，对本项目文件的增删改、或此条完整命令及执行壳在本次会话内都不再询问（推荐）；「仅此一次」每次都会再问。同一批并发的相同请求共用这次答复。</>
               )}
             </div>
           </>

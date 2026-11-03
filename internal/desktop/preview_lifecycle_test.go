@@ -12,17 +12,20 @@ func TestStartPreviewServesThenStops(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "x.txt"), []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a := New(&recordingSink{})
+	a, id := previewFixture(t, ws)
 	// previewBaseURL 报的是**聚焦会话**那个工作区的地址,所以这里要有个会话条目。
 	// 生产路径上它由 openSessionWithConnectionHeld 建,测试里直接摆一个。
-	focusOn(a, "s1", ws)
+	_ = id
 
-	a.startPreview(ws)
 	base := a.previewBaseURL()
 	if base == "" {
 		t.Fatal("previewBaseURL empty after startPreview")
 	}
-	resp, err := http.Get(base + "x.txt")
+	ref, err := a.OpenArtifact(id, "x.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(ref.URL)
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("serve after start = %v %v", resp, err)
 	}
@@ -43,10 +46,9 @@ func TestPreviewServerSharedPerWorkspace(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "x.txt"), []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	a := New(&recordingSink{})
-	focusOn(a, "s1", ws)
+	a, id := previewFixture(t, ws)
+	_ = id
 
-	a.startPreview(ws)
 	first := a.previewBaseURL()
 	if first == "" {
 		t.Fatal("第一次 startPreview 没起来")
@@ -64,7 +66,11 @@ func TestPreviewServerSharedPerWorkspace(t *testing.T) {
 
 	// 关掉其中一个会话:另一个还在用,服务器不能停。
 	a.stopPreview(ws)
-	resp, err := http.Get(first + "x.txt")
+	ref, err := a.OpenArtifact(id, "x.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.Get(ref.URL)
 	if err != nil || resp.StatusCode != 200 {
 		t.Fatalf("还有会话在用时预览就断了: %v %v", resp, err)
 	}

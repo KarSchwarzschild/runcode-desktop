@@ -1,8 +1,9 @@
 // Shared compact formatting for token counts and durations (usage footers,
 // context meter, sub-agent cards).
 
-// fmtTokens renders a token count compactly: 340 → "340", 1234 → "1.2k", 23000 → "23k".
+// fmtTokens renders token counts compactly: 1234 → "1.2k", 23000 → "23k", 1048576 → "1.05M".
 export function fmtTokens(n: number): string {
+  if (n >= 1000000) return Number((n / 1000000).toFixed(2)) + 'M'
   if (n >= 10000) return Math.round(n / 1000) + 'k'
   if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
   return String(n)

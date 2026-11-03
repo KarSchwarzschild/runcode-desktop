@@ -1,8 +1,9 @@
-// 右侧预览栏的全部界面状态：打开的标签页、文件浏览器开合、可拖拽的宽度，以及
-// “写完自动预览”开关。只认工作区相对路径——绝对路径到相对路径的换算由调用方
-// 在有 cwd 的地方完成，这个 hook 不需要知道工作区在哪。
+// 预览标签携带来源会话与后端引用；路径仅用于展示，不从当前焦点猜读取权限。
 import { useEffect, useRef, useState, type PointerEvent } from 'react'
 import { usePersistentBool, usePersistentNumber } from '@/hooks/use-persistent-state'
+import { copyText, errText, openArtifact, openExternal, releaseArtifact, revealInFolder, resolveArtifactPath, type ArtifactReference } from '@/core/bridge'
+import { createActionScope } from './action-scope'
+import type { ArtifactActions } from '@/chat/artifact-actions'
 import { clampPreviewWidth, previewWidthBounds } from '@/preview/classify'
 import { closeTab, openTab, type PreviewTab } from '@/preview/tabs'
 
@@ -10,13 +11,23 @@ export type PreviewPanelState = ReturnType<typeof usePreviewPanel>
 
 // 标签页按会话存。宽度、自动预览开关、浏览器开合是纯界面偏好，几条会话共用。
 //
-// 为什么标签必须分开：diff 标签里存的是 snapshotId，而复审是拿它去问**聚焦会话**
-// 的编辑存储。共用一份的话，从 A 会话打开的 diff 在切到 B 之后会静默失效——
-// 面板还在，内容变成"找不到"，而没有任何东西提示你这属于另一条对话。
+// 文件引用与 diff 快照分别绑定来源实例/会话；切换焦点保留各自标签，不借用另一条会话。
 const EMPTY_TABS: { tabs: PreviewTab[]; active: string | null } = { tabs: [], active: null }
 
-export function usePreviewPanel(sessionID: string) {
+export function usePreviewPanel(sessionID: string, notify: (text: string) => void = () => {}) {
+  const scope = useRef(createActionScope())
+  scope.current.focus(sessionID)
+  useEffect(() => { const active = scope.current; active.activate(); return () => active.deactivate() }, [])
+  const report = useRef(notify)
+  report.current = notify
   const [bySession, setBySession] = useState<Record<string, { tabs: PreviewTab[]; active: string | null }>>({})
+  const references = useRef(new Set<string>())
+  useEffect(() => {
+    const next = new Set(Object.values(bySession).flatMap((s) => s.tabs.flatMap((t) => t.kind === 'file' && t.artifact ? [t.artifact.reference] : [])))
+    for (const ref of references.current) if (!next.has(ref)) void releaseArtifact(ref).catch(() => {})
+    references.current = next
+  }, [bySession])
+  useEffect(() => () => { for (const ref of references.current) void releaseArtifact(ref).catch(() => {}); references.current.clear() }, [])
   const cur = bySession[sessionID] ?? EMPTY_TABS
   const tabs = cur.tabs
   const active = cur.active
@@ -55,15 +66,44 @@ export function usePreviewPanel(sessionID: string) {
 
   const open = (tab: PreviewTab) => {
     opens.current++
-    const r = openTab(tabs, active, tab)
-    patch({ tabs: r.tabs, active: r.active })
+    setBySession((m) => {
+      const cur = m[sessionID] ?? EMPTY_TABS
+      const r = openTab(cur.tabs, cur.active, tab)
+      return { ...m, [sessionID]: r }
+    })
     setBrowseOpen(false)
   }
-  const openFile = (relPath: string) => open({ kind: 'file', relPath })
-  const openDiff = (snapshotId: string, relPath: string) => open({ kind: 'diff', snapshotId, relPath })
+  const openReference = (artifact: ArtifactReference) => {
+    if (artifact.sessionId !== sessionID) { void releaseArtifact(artifact.reference).catch(() => {}); return }
+    open({ kind: 'file', relPath: artifact.path, artifact })
+  }
+  const openFile = async (path: string, quiet = false): Promise<boolean> => {
+    const current = scope.current.capture()
+    try {
+      const artifact = await openArtifact(sessionID, path)
+      if (!current() || artifact.sessionId !== sessionID) { void releaseArtifact(artifact.reference).catch(() => {}); return false }
+      openReference(artifact)
+      return true
+    } catch (e) { if (current() && !quiet) report.current(errText(e)); return false }
+  }
+  const actions: ArtifactActions = {
+    external: (p) => act(p, openExternal),
+    reveal: (p) => act(p, revealInFolder),
+    copyPath: (p) => act(p, async (r) => copyText(await resolveArtifactPath(r))),
+  }
+  async function act(path: string, perform: (ref: string) => Promise<void>) {
+    const current = scope.current.capture()
+    let reference = ''
+    try {
+      const artifact = await openArtifact(sessionID, path)
+      reference = artifact.reference
+      if (current()) await perform(reference)
+    } catch (e) { if (current()) report.current(errText(e)) }
+    finally { if (reference) void releaseArtifact(reference).catch(() => {}) }
+  }
+  const openDiff = (snapshotId: string, relPath: string) => open({ kind: 'diff', snapshotId, relPath, sessionID })
   const close = (key: string) => {
-    const r = closeTab(tabs, active, key)
-    patch({ tabs: r.tabs, active: r.active })
+    patch(closeTab(tabs, active, key))
   }
   // closeAll 清掉**聚焦这条会话**的标签，别人的不动——它对应面板上的「关闭全部」。
   //
@@ -72,7 +112,7 @@ export function usePreviewPanel(sessionID: string) {
   // 多工作区并行之后这个前提没了——换目录是**加开**一条会话（OpenSession(workspace)），
   // 留在旧目录的那几条还开着，它们的标签依然有效。会话与目录一一对应且终生不变，
   // 于是"标签失效"这件事只会随会话一起消失（dropSession），不再需要全局清空。
-  const closeAll = () => patch({ tabs: [], active: null })
+  const closeAll = () => { patch({ tabs: [], active: null }) }
   // dropSession 丢掉一条会话的标签——那条会话被关掉时。
   const dropSession = (id: string) =>
     setBySession((m) => {
@@ -82,25 +122,12 @@ export function usePreviewPanel(sessionID: string) {
       return next
     })
 
-  // 换聚焦会话就把预览面板收起来。
-  //
-  // 面板里放的东西是**上一条对话**的上下文：某个文件、某次编辑的 diff。切过去之后它
-  // 还杵在那儿，说的却是另一回事——而右侧那么大一块，人会默认它跟着左边走。
-  //
-  // 清的是**切过去那条**的标签，不是切走那条的：这样"切完面板是关着的"这个结论只取决
-  // 于这一次切换，不依赖上一次有没有清干净。（后台会话的回合结束时自动预览会开在
-  // 当时聚焦的那条名下，所以标签有可能落到一个你还没去过的会话上；按到达清就连这种
-  // 情况一起兜住了。）
-  //
-  // 挂在 hook 里而不是在切换的那几个调用点各写一遍：开新会话、换工作区、点最近对话、
-  // 关掉一条之后顺位聚焦——每一条都会改 sessionID，将来再加一条切换路径也不用记得
-  // 补这一行。
+  // 切换焦点只收起文件浏览器；各会话标签保留，迟到结果由 action-scope 丢弃。
   const focused = useRef(sessionID)
   useEffect(() => {
     if (focused.current === sessionID) return
     focused.current = sessionID
     setBrowseOpen(false)
-    setBySession((m) => (sessionID in m ? { ...m, [sessionID]: EMPTY_TABS } : m))
   }, [sessionID])
 
   // 拖左边缘调宽：按下记起点，移动时按位移换算(向左拖变宽)，松手才落盘。
@@ -130,6 +157,6 @@ export function usePreviewPanel(sessionID: string) {
   return {
     tabs, active, setActive, browseOpen, setBrowseOpen,
     autoOpen, toggleAutoOpen, width, dragHandlers, opens,
-    openFile, openDiff, close, closeAll, dropSession,
+    openFile, openReference, openDiff, actions, close, closeAll, dropSession,
   }
 }

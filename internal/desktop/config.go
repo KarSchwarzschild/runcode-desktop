@@ -73,35 +73,23 @@ func buildConfig(req StartSessionRequest) (engine.Config, error) {
 	}
 
 	cfg := engine.Config{
-		Provider:       provider,
-		Model:          model,
-		HarmJudgeModel: firstNonEmpty(req.HarmJudgeModel, os.Getenv("RUNCODE_HARM_JUDGE_MODEL")),
-		HarmJudgeVotes: harmVotesFromRequest(req),
-		BaseURL:        baseURL,
-		APIKey:         apiKey,
-		AuthToken:      authToken,
-		CWD:            abs,
-		PermissionMode: mode,
-		// A coding agent often writes whole files in one tool call, and reasoning
-		// models spend output tokens thinking before that. The provider's 4096
-		// default truncates a large file mid-arguments (the tool call's JSON never
-		// closes → "invalid input"), so default to a generous budget; an explicit
-		// request value still wins.
-		MaxTokens:         maxTokensOrDefault(req.MaxTokens),
+		Provider:          provider,
+		Model:             model,
+		HarmJudgeModel:    firstNonEmpty(req.HarmJudgeModel, os.Getenv("RUNCODE_HARM_JUDGE_MODEL")),
+		HarmJudgeVotes:    harmVotesFromRequest(req),
+		BaseURL:           baseURL,
+		APIKey:            apiKey,
+		AuthToken:         authToken,
+		CWD:               abs,
+		PermissionMode:    mode,
 		Thinking:          llm.ThinkingConfig{Effort: effort},
 		ReasoningScenario: strings.TrimSpace(req.ReasoningScenario),
-		// Context control: MaxContextTokens arms automatic compaction (summarize old
-		// turns near the budget); MaxHistoryMessages is a blunt message-count trim.
-		// Both are taken verbatim — 0 means the corresponding lever is off. The start
-		// form defaults the budget to 260k (see defaultRequest).
-		MaxContextTokens:   maxNonNegative(req.MaxContextTokens),
-		MaxHistoryMessages: maxNonNegative(req.MaxHistoryMessages),
-		Resume:             strings.TrimSpace(req.Resume),
-		Continue:           req.Continue,
-		PersistSession:     true,
-		SessionBackend:     sessions.BackendJSONL,
-		Telemetry:          "off",
-		Transcript:         "off",
+		Resume:            strings.TrimSpace(req.Resume),
+		Continue:          req.Continue,
+		PersistSession:    true,
+		SessionBackend:    sessions.BackendJSONL,
+		Telemetry:         "off",
+		Transcript:        "off",
 		// A desktop coding agent typically needs many read/edit/run/fix rounds, and a
 		// large scaffold (dozens of files) blows past any small cap. This high value
 		// is a runaway-loop backstop, not a practical limit, so real tasks finish.
@@ -151,48 +139,11 @@ func loadDesktopMCP(cwd string) ([]mcp.ServerConfig, bool) {
 	if err != nil {
 		return nil, false
 	}
+	for i := range servers {
+		servers[i].HostTrusted = mcpPassportEnabled(mcpCfg.Servers[servers[i].Name])
+	}
 	sampling := mcpCfg.AllowSampling != nil && *mcpCfg.AllowSampling
 	return servers, sampling
-}
-
-// desktopDefaultMaxTokens is the output-token budget used when the request does not
-// set one. It is deliberately far above the provider's own 4096 fallback: a coding
-// agent writes whole files in one tool call, and a truncated call is not a shortened
-// answer — the arguments are cut mid-JSON, so the call is unusable and the work of
-// that turn is wasted.
-//
-// 80k applies to every provider, by product decision. What that trades away, so the
-// next reader does not mistake a 400 for a bug here:
-//
-//   - Overshooting a model's output ceiling is a hard 400, not a clamp. Endpoints
-//     capped lower (16384 is the hard cap of a large class of OpenAI-compatible ones,
-//     GPT-4o's max_completion_tokens among them) reject every request at this default.
-//   - Anthropic bills thinking against the same budget, and this engine *adds* the
-//     thinking budget on top of MaxTokens (see the provider's buildMessageParams), so
-//     the ask is 81920 + the thinking budget — past current Claude models' 64k
-//     output ceiling.
-//
-// The escape hatch in both cases is an explicit value in the start form, which always
-// wins (see maxTokensOrDefault); the settings field says as much.
-const desktopDefaultMaxTokens = 81920
-
-// maxTokensOrDefault takes the request's value when it set one, otherwise the default
-// above. No provider branch on purpose: the budget is one number for every connection,
-// and a per-provider ceiling is handled by setting the field explicitly.
-func maxTokensOrDefault(requested int) int {
-	if requested > 0 {
-		return requested
-	}
-	return desktopDefaultMaxTokens
-}
-
-// maxNonNegative clamps a context/history budget to >= 0, so a stray negative from
-// the form cannot reach the engine (which treats any positive value as the cap).
-func maxNonNegative(v int) int {
-	if v < 0 {
-		return 0
-	}
-	return v
 }
 
 // harmVotesFromRequest resolves the harm-judge vote count: the request field wins,

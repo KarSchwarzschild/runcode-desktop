@@ -32,3 +32,19 @@ describe('preview-tabs union', () => {
     expect(tabKey(diff('7', 'a.md'))).toBe('diff:7')
   })
 })
+
+
+describe('preview reference provenance', () => {
+  it('replaces an old file capability instead of retaining revoked evidence', () => {
+    const artifact = { reference: 'old', sessionId: 'A', generation: 'one', path: 'file.md', url: 'http://127.0.0.1/old' }
+    const previous: PreviewTab = { kind: 'file', relPath: artifact.path, artifact }
+    const replacement: PreviewTab = { kind: 'file', relPath: artifact.path, artifact: { ...artifact, reference: 'new', generation: 'two' } }
+    const result = openTab([previous], 'file.md', replacement)
+    expect(result.tabs).toEqual([replacement])
+    expect(result.tabs[0]).not.toEqual(previous)
+  })
+  it('preserves the source session on diff tabs', () => {
+    const tab: PreviewTab = { kind: 'diff', relPath: 'file.md', snapshotId: 'edit-one', sessionID: 'source-A' }
+    expect(openTab([], null, tab).tabs[0]).toEqual(tab)
+  })
+})

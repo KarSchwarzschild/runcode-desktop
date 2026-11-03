@@ -219,3 +219,6 @@ func persistTokens(ts tokenSet) {
 	}
 	_ = os.WriteFile(path, data, 0o600)
 }
+
+// loginEpoch identifies account login/logout; ordinary refresh preserves it.
+func (m *tokenManager) loginEpoch() string { m.mu.Lock(); defer m.mu.Unlock(); return m.identity }

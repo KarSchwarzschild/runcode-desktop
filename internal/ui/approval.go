@@ -86,8 +86,9 @@ func (a *Approver) Prompt(ctx context.Context, req permissions.ApprovalRequest) 
 		ExternalTargets: externalTargetLabels(req.ExternalTargets),
 		ExternalRoots:   externalTargetLabels(req.ExternalRoots),
 		Command:         req.Command,
-		Grantable:       req.Grantable,
-		Reply:           reply,
+		InputPreview:    req.InputPreview, GrantScope: req.GrantScope,
+		Grantable: req.Grantable,
+		Reply:     reply,
 	}
 	select {
 	case events <- msg:
@@ -164,8 +165,10 @@ func workspaceRelativeLabel(workspace string, target string) (string, bool) {
 
 // pendingApproval is the in-flight modal state for one authorization request.
 type pendingApproval struct {
-	summary permissions.ApprovalSummary
-	targets []string
+	inputPreview string
+	grantScope   string
+	summary      permissions.ApprovalSummary
+	targets      []string
 	// externalTargets are the absolute paths outside the workspace this request
 	// would touch; empty for the ordinary in-project case. externalRoots are the
 	// directories an allow-session/allow-project answer would remember for them.
@@ -190,8 +193,9 @@ func (m *Model) enqueueApproval(msg approvalRequestMsg) {
 		externalTargets: msg.ExternalTargets,
 		externalRoots:   msg.ExternalRoots,
 		command:         msg.Command,
-		grantable:       msg.Grantable,
-		reply:           msg.Reply,
+		inputPreview:    msg.InputPreview, grantScope: msg.GrantScope,
+		grantable: msg.Grantable,
+		reply:     msg.Reply,
 	}
 	if m.approval == nil {
 		m.approval = pending

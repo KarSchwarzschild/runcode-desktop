@@ -12,8 +12,7 @@ import (
 
 func appWithWorkspace(t *testing.T, ws string) *App {
 	t.Helper()
-	a := New(&recordingSink{})
-	a.workspace = ws
+	a, _ := previewFixture(t, ws)
 	return a
 }
 
@@ -23,7 +22,7 @@ func TestReadArtifactReturnsWorkspaceText(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := appWithWorkspace(t, ws)
-	got, err := a.ReadArtifact("a.md")
+	got, err := readPreviewPath(a, "a.md")
 	if err != nil || got != "# hi" {
 		t.Fatalf("ReadArtifact = (%q, %v), want (# hi, nil)", got, err)
 	}
@@ -32,7 +31,7 @@ func TestReadArtifactReturnsWorkspaceText(t *testing.T) {
 func TestReadArtifactRejectsOutsideWorkspace(t *testing.T) {
 	ws := t.TempDir()
 	a := appWithWorkspace(t, ws)
-	if _, err := a.ReadArtifact("../../secret.txt"); err == nil {
+	if _, err := readPreviewPath(a, "../../secret.txt"); err == nil {
 		t.Fatal("ReadArtifact allowed a path outside the workspace")
 	}
 }
@@ -44,7 +43,7 @@ func TestReadArtifactRejectsTooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := appWithWorkspace(t, ws)
-	if _, err := a.ReadArtifact("big.txt"); err == nil {
+	if _, err := readPreviewPath(a, "big.txt"); err == nil {
 		t.Fatal("ReadArtifact returned an over-sized file instead of erroring")
 	}
 }
@@ -55,7 +54,7 @@ func TestReadArtifactRejectsBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := appWithWorkspace(t, ws)
-	if _, err := a.ReadArtifact("b.bin"); err == nil {
+	if _, err := readPreviewPath(a, "b.bin"); err == nil {
 		t.Fatal("ReadArtifact returned binary content instead of erroring")
 	}
 }
@@ -67,7 +66,7 @@ func TestReadArtifactBytesReturnsBase64(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := appWithWorkspace(t, ws)
-	got, err := a.ReadArtifactBytes("d.docx")
+	got, err := readPreviewBytes(a, "d.docx")
 	if err != nil {
 		t.Fatalf("ReadArtifactBytes: %v", err)
 	}
@@ -78,7 +77,7 @@ func TestReadArtifactBytesReturnsBase64(t *testing.T) {
 
 func TestReadArtifactBytesRejectsOutsideWorkspace(t *testing.T) {
 	a := appWithWorkspace(t, t.TempDir())
-	if _, err := a.ReadArtifactBytes("../../secret.docx"); err == nil {
+	if _, err := readPreviewBytes(a, "../../secret.docx"); err == nil {
 		t.Fatal("ReadArtifactBytes allowed a path outside the workspace")
 	}
 }
@@ -90,7 +89,7 @@ func TestReadArtifactBytesRejectsTooLarge(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := appWithWorkspace(t, ws)
-	if _, err := a.ReadArtifactBytes("big.pptx"); err == nil {
+	if _, err := readPreviewBytes(a, "big.pptx"); err == nil {
 		t.Fatal("ReadArtifactBytes returned an over-sized file instead of erroring")
 	}
 }
@@ -105,7 +104,7 @@ func TestReadArtifactRejectsSymlinkEscape(t *testing.T) {
 		t.Skipf("symlinks unsupported here: %v", err)
 	}
 	a := appWithWorkspace(t, ws)
-	if got, err := a.ReadArtifact("escape/secret.txt"); err == nil {
+	if got, err := readPreviewPath(a, "escape/secret.txt"); err == nil {
 		t.Fatalf("symlink escape leaked outside-workspace content: %q", got)
 	}
 }
@@ -123,7 +122,24 @@ func TestReadArtifactRejectsJunctionEscape(t *testing.T) {
 		t.Skipf("mklink /J unavailable: %v (%s)", err, out)
 	}
 	a := appWithWorkspace(t, ws)
-	if got, err := a.ReadArtifact("evil/secret.txt"); err == nil {
+	if got, err := readPreviewPath(a, "evil/secret.txt"); err == nil {
 		t.Fatalf("junction escape leaked outside-workspace content: %q", got)
 	}
+}
+
+func readPreviewPath(a *App, path string) (string, error) {
+	ref, err := a.OpenArtifact(a.focused, path)
+	if err != nil {
+		return "", err
+	}
+	defer a.ReleaseArtifact(ref.Reference)
+	return a.ReadArtifact(ref.Reference)
+}
+func readPreviewBytes(a *App, path string) (string, error) {
+	ref, err := a.OpenArtifact(a.focused, path)
+	if err != nil {
+		return "", err
+	}
+	defer a.ReleaseArtifact(ref.Reference)
+	return a.ReadArtifactBytes(ref.Reference)
 }

@@ -112,7 +112,7 @@ const DENY_REASON: Record<string, string> = {
   write_exists: '当前文件已存在',
   read_stale: '文件已变化，请重新读取',
   approval_denied: '已拒绝',
-  approval_unavailable: '安全模式下不可执行',
+  approval_unavailable: '审批暂不可用',
   outside_workspace: '路径在工作区之外，未获授权',
   denylisted: '已被拒止规则阻止',
   policy_denied: '策略不允许',

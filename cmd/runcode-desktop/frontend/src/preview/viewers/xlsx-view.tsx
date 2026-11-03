@@ -5,14 +5,14 @@
 // rich-text cells, so that path is an XSS vector inside the privileged WebView).
 import { useEffect, useRef, useState } from 'react'
 import { errCode, errText, readArtifactBytes } from '@/core/bridge'
-import { normalizeSheetGrid } from '../classify'
+import type { WorkbookSheet } from './xlsx-workbook'
 import { ViewerError } from './viewer-error'
 import { PreviewLoading } from '../loading'
 
 // onMissing fires when the file is gone rather than unreadable, so the panel can
 // close the tab instead of showing an error for something the user cannot fix.
-export function XlsxView({ relPath, reloadKey, onMissing }: { relPath: string; reloadKey: number; onMissing?: () => void }) {
-  const [sheets, setSheets] = useState<{ name: string; rows: string[][] }[] | null>(null)
+export function XlsxView({ relPath: _relPath, reference, reloadKey, onMissing }: { relPath: string; reference: string; reloadKey: number; onMissing?: () => void }) {
+  const [sheets, setSheets] = useState<WorkbookSheet[] | null>(null)
   const [active, setActive] = useState(0)
   const [err, setErr] = useState('')
   const onMissingRef = useRef(onMissing)
@@ -24,15 +24,11 @@ export function XlsxView({ relPath, reloadKey, onMissing }: { relPath: string; r
     setActive(0)
     void (async () => {
       try {
-        const buf = await readArtifactBytes(relPath)
-        const XLSX = await import('xlsx')
+        const buf = await readArtifactBytes(reference)
+        const { readWorkbook } = await import('./xlsx-workbook')
         if (cancelled) return
-        const wb = XLSX.read(buf, { type: 'array' })
-        const out = wb.SheetNames.map((name) => ({
-          name,
-          rows: normalizeSheetGrid(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: false, defval: '' }) as unknown[][]),
-        }))
-        if (!cancelled) setSheets(out.length ? out : [{ name: 'Sheet1', rows: [] }])
+        const sheets = readWorkbook(buf)
+        if (!cancelled) setSheets(sheets)
       } catch (e) {
         if (!cancelled) {
           if (errCode(e) === 'not_found') { onMissingRef.current?.(); return }
@@ -41,8 +37,8 @@ export function XlsxView({ relPath, reloadKey, onMissing }: { relPath: string; r
       }
     })()
     return () => { cancelled = true }
-  }, [relPath, reloadKey])
-  if (err) return <ViewerError relPath={relPath} message={err} />
+  }, [reference, reloadKey])
+  if (err) return <ViewerError reference={reference} message={err} />
   if (!sheets) return <PreviewLoading hint="正在加载表格预览…" />
   return (
     <div className="min-h-full flex flex-col">

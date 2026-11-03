@@ -51,6 +51,11 @@ func (m Model) approvalDetailLines() []string {
 	summary := m.approval.summary
 	width := maxZero(m.width - 3)
 	lines := []string{}
+	for _, detail := range []string{m.approval.inputPreview, m.approval.grantScope} {
+		if detail != "" {
+			lines = append(lines, mutedStyle.Render(" ↳ "+truncate(detail, width)))
+		}
+	}
 	// Leaving the project is the headline of this prompt, so it goes first and in
 	// full: the external paths, then a note that allowing remembers the directory.
 	for i, target := range m.approval.externalTargets {
@@ -74,8 +79,14 @@ func (m Model) approvalDetailLines() []string {
 	} else if cmd := strings.TrimSpace(summary.CommandSummary); cmd != "" {
 		lines = append(lines, mutedStyle.Render(" ↳ "+truncate(cmd, width)))
 	}
+	if origin := strings.TrimSpace(summary.NetworkOrigin); origin != "" {
+		lines = append(lines, mutedStyle.Render(" ↳ origin "+truncate(origin, width)))
+	}
 	if host := strings.TrimSpace(summary.NetworkHost); host != "" {
 		lines = append(lines, mutedStyle.Render(" ↳ host "+truncate(host, width)))
+	}
+	if route := strings.TrimSpace(summary.NetworkRoute); route != "" {
+		lines = append(lines, mutedStyle.Render(" ↳ route "+truncate(route, width)))
 	}
 	if server := strings.TrimSpace(summary.MCPServer); server != "" {
 		detail := "server " + server
@@ -113,10 +124,14 @@ func (m Model) approvalSessionScopeHint() string {
 		return verb + " " + m.approval.externalRoots[0]
 	}
 	if category := strings.TrimSpace(summary.CommandCategory); category != "" {
-		return category + " commands"
+		return "this exact command and shell (not the category " + category + ")"
 	}
-	if host := strings.TrimSpace(summary.NetworkHost); host != "" {
-		return "fetches from " + host
+	if origin := strings.TrimSpace(summary.NetworkOrigin); origin != "" {
+		hint := "fetches from " + origin
+		if summary.NetworkRoute != "" {
+			hint += " · " + summary.NetworkRoute
+		}
+		return hint
 	}
 	if mcpTool := strings.TrimSpace(summary.MCPTool); mcpTool != "" {
 		return mcpTool + " from " + strings.TrimSpace(summary.MCPServer)

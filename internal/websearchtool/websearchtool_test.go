@@ -7,7 +7,10 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+
+	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tools/websearch"
@@ -298,5 +301,36 @@ func TestNewRequiresEndpointAndToken(t *testing.T) {
 	}
 	if New(Config{Endpoint: "https://example.invalid/v1/websearch"}) != nil {
 		t.Fatal("New accepted a config with no token source")
+	}
+}
+
+func TestPlatformSearchBindingAndRedirectBoundary(t *testing.T) {
+	var targetHits atomic.Int32
+	target := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, _ *http.Request) { targetHits.Add(1) }))
+	defer target.Close()
+	source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL, http.StatusTemporaryRedirect)
+	}))
+	defer source.Close()
+	tl := New(Config{Endpoint: source.URL + "/v1/websearch", Token: func() (string, error) { return "synthetic-passport", nil }})
+	binding, err := tl.(tool.AuthorizationBindingProvider).AuthorizationBinding(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := json.RawMessage(`{"query":"fixture query"}`)
+	action, err := (permissions.DefaultResolver{}).Resolve(context.Background(), permissions.ResolveRequest{ToolName: tl.Name(), Input: raw, Binding: binding, RuntimeBound: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	summary := permissions.NewApprovalSummary(action, permissions.Ask(permissions.ReasonRequiresApproval, "fixture"))
+	if summary.NetworkOrigin != source.URL || strings.Contains(summary.NetworkHost, "duckduckgo") {
+		t.Fatal("display differs from actual destination", summary)
+	}
+	result, _, err := run(t, tl, string(raw))
+	if err == nil && !result.IsError {
+		t.Fatal("redirect unexpectedly succeeded")
+	}
+	if targetHits.Load() != 0 {
+		t.Fatal("platform credentials were sent to redirected destination")
 	}
 }

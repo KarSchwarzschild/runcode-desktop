@@ -281,6 +281,7 @@ func TestSaveSettingsKeepsPassportWiring(t *testing.T) {
 	app := New(&recordingSink{})
 	app.tokens.setInMemory(tokenSet{AccessToken: "AT", Expiry: time.Now().Add(time.Hour)})
 
+	cacheContextModels(app, "", "qwen-max")
 	req := StartSessionRequest{CWD: t.TempDir(), Provider: "passport", Model: "qwen-max"}
 	if _, err := app.StartSession(req); err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -307,6 +308,7 @@ func TestSaveSettingsForNextTenantDoesNotChangeLiveModel(t *testing.T) {
 	app := New(&recordingSink{})
 	app.tokens.setInMemory(tokenSet{AccessToken: "AT", Expiry: time.Now().Add(time.Hour)})
 
+	cacheContextModels(app, "tenant-a", "model-a")
 	start := StartSessionRequest{CWD: t.TempDir(), Provider: "passport", Model: "model-a", TenantID: "tenant-a"}
 	if _, err := app.StartSession(start); err != nil {
 		t.Fatalf("StartSession: %v", err)
@@ -314,7 +316,7 @@ func TestSaveSettingsForNextTenantDoesNotChangeLiveModel(t *testing.T) {
 	if err := app.SetActiveTenant("tenant-b"); err != nil {
 		t.Fatalf("SetActiveTenant: %v", err)
 	}
-	if _, err := app.SaveSettings(SaveSettingsRequest{PermissionMode: "interactive", MaxTokens: 1234}); err != nil {
+	if _, err := app.SaveSettings(SaveSettingsRequest{PermissionMode: "interactive", HarmJudgeVotes: 3}); err != nil {
 		t.Fatalf("SaveSettings: %v", err)
 	}
 
@@ -334,6 +336,7 @@ func TestSaveSettingsForNextTenantDoesNotChangeLiveModel(t *testing.T) {
 func TestStartSessionPassportRequiresLogin(t *testing.T) {
 	isolateConfigDir(t)
 	app := New(&recordingSink{})
+	cacheContextModels(app, "", "qwen-max")
 	req := StartSessionRequest{CWD: t.TempDir(), Provider: "passport", Model: "qwen-max"}
 	if _, err := app.StartSession(req); err == nil {
 		t.Fatal("want error when starting passport session while logged out")

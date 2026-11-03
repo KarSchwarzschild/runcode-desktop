@@ -216,7 +216,7 @@ func TestVisionTenantAndAccountIsolation(t *testing.T) {
 	}
 	app.tokens.setInMemory(tokenSet{AccessToken: "opaque-a"})
 	before := app.visionAccountIdentity()
-	app.rememberVisionCatalog(platformModelRef("tenant-A", ""), before, []PassportModel{{ID: "same-model", SupportsImages: visionBool(false)}})
+	app.rememberModelCatalog(platformModelRef("tenant-A", ""), before, []PassportModel{{ID: "same-model", SupportsImages: visionBool(false)}})
 	app.tokens.mu.Lock()
 	app.tokens.ts.AccessToken = "refreshed-opaque-a"
 	app.tokens.mu.Unlock()

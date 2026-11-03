@@ -33,6 +33,7 @@ package desktop
 // (数据依然不出内网),只是不自动切——用户切到那条会话再问一次即可。
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -140,10 +141,19 @@ func (a *App) maybeSwitchToLocalModel(sctx host.SessionContext) {
 
 // switchToLocalModel 压缩(如有必要)→ 重建 → 重发。
 func (a *App) switchToLocalModel(sctx host.SessionContext, localModel, resendText string) error {
+	// 连接取这条会话自己的,不取聚焦会话的全局快照:回合结束时聚焦的可能是另一条
+	// (别的工作区、MCP、连接),拿它重建就把那条的配置套到了这条身上。
 	a.mu.Lock()
-	cfg := a.liveConfig
-	passport, tenant := a.livePassport, a.livePassportTenant
+	e := a.entryLocked(sctx.ID)
+	var cfg engine.Config
+	passport, tenant := false, ""
+	if e != nil && !e.closed {
+		cfg, passport, tenant = e.connectionConfig, e.passport, e.tenantID
+	}
 	a.mu.Unlock()
+	if e == nil || e.closed {
+		return fmt.Errorf("会话已关闭")
+	}
 	if !passport {
 		// 闸门只在通行证连接上才会装,走到这里说明连接在本回合里被换掉了。
 		return fmt.Errorf("当前连接不是平台连接")
@@ -172,34 +182,34 @@ func (a *App) switchToLocalModel(sctx host.SessionContext, localModel, resendTex
 		}
 	}
 
-	a.shrinkHistoryForLocalModel(sctx.ID, local)
+	target := applyLocalModelConfig(cfg, local, a.foreignModelAgents(local.ID))
+	target, err := a.applyModelContext(context.Background(), target, platformModelRef(tenant, local.ID))
+	if err != nil {
+		return err
+	}
+	a.shrinkHistoryForLocalModel(sctx.ID, target.MaxContextTokens)
 
 	sctx.Emit(EventWarning, Warning{Message: fmt.Sprintf(
 		"检测到 OA 查询：OA 数据属于内部保密数据，已将本会话切换到本地模型 %s 并重新处理你的请求。"+
 			"本会话之后将一直使用该模型。", local.ID)})
 
+	// 不要求这条会话仍在前台:takeOASwitch 已经立了防重入标记,这里拒绝就再也
+	// 不会重试。要求的是它还是上面取配置的那一条——期间被重建或关掉,配置就过期了。
 	a.startMu.Lock()
-	cfg = applyLocalModelConfig(cfg, local, a.foreignModelAgents(local.ID))
-	_, err := a.rebuildResumingWithConnectionHeld(cfg, sctx.ID, true, tenant)
+	a.mu.Lock()
+	current := a.entryLocked(sctx.ID) == e && !e.closed
+	a.mu.Unlock()
+	if !current {
+		a.startMu.Unlock()
+		return fmt.Errorf("会话在切换期间已被重建或关闭，请重试 OA 查询")
+	}
+	rebuilt, err := a.rebuildResumingWithConnectionHeld(target, sctx.ID, true, tenant)
 	a.startMu.Unlock()
 	if err != nil {
 		return err
 	}
-	persistConnectionChoice("passport", local.ID, "")
-
-	// **把会话 sidecar 里记的模型也改掉**，否则这次切换根本不生效。
-	//
-	// 重建走的是 cfg.Resume，而引擎恢复会话时会拿 sidecar 里存的运行时设置回灌
-	// （host/manager.go 的 applyMeta → SetModel），把我们刚设的 cfg.Model 覆盖回
-	// 用户上次手动选的那个。表现极具迷惑性：桌面侧的 liveConfig 显示已经是本地模型
-	// （日志里的 turn submit 也这么写），引擎里却还是旧模型，于是闸门每轮都判失败
-	// ——"切换→重发→再切"的无限循环就是这么来的，而且看上去像闸门误判。
-	//
-	// Manager.SetModel 正好一并做两件事：设引擎模型 + 写 sidecar，两处从此一致。
-	if id := a.focusedSessionID(); id != "" {
-		if err := a.mgr.SetModel(id, local.ID); err != nil {
-			debugLog("oa: 重建后同步模型到会话 meta 失败: %v", err)
-		}
+	if a.focusedSessionID() == rebuilt.SessionID {
+		persistConnectionChoice("passport", local.ID, "")
 	}
 
 	// 告诉前端"模型已经换了"。
@@ -207,7 +217,7 @@ func (a *App) switchToLocalModel(sctx host.SessionContext, localModel, resendTex
 	// 界面上的模型、计划模式这些开关平时都是"前端调后端 → 拿返回值更新自己",
 	// 后端自作主张改掉的东西前端不会知道。少了这一步的表现是:模型确实切了、请求
 	// 也发给新模型了,右下角却还显示旧模型——用户合理地以为切换没生效。
-	if info, err := a.Status(""); err == nil {
+	if info, err := a.Status(rebuilt.SessionID); err == nil {
 		sctx.Emit(EventSessionStatus, info)
 	}
 
@@ -216,22 +226,22 @@ func (a *App) switchToLocalModel(sctx host.SessionContext, localModel, resendTex
 	// 重建 = 新建 sessionEntry,三个字段全部归零:oaSwitchDone(防重入)、oaLocalModel
 	// (出网工具封锁的依据)、以及落盘锁的内存镜像。落盘那份按会话 id 存,而重建后
 	// id 未必相同,所以不能指望它自己恢复——显式搬,才与 id 无关。
-	a.adoptOAStateAfterRebuild(local.ID)
+	a.adoptOAStateAfterRebuild(rebuilt.SessionID, local.ID)
 
-	// 重建之后聚焦的就是这条会话(buildSessionHeld 登记时顺带切聚焦),所以按""重发。
+	// 按重建出的会话 id 重发:它可能在后台,不能按聚焦的那条("")发。
 	if strings.TrimSpace(resendText) == "" {
 		return nil // 没有可重发的原文(理论上不该发生),切换本身已经完成
 	}
-	return a.sendUserTurn("", resendText, nil, false)
+	return a.sendUserTurn(rebuilt.SessionID, resendText, nil, false)
 }
 
-// adoptOAStateAfterRebuild 把 OA 状态过继给重建出来的那条会话(此时它已是聚焦的那条)。
+// adoptOAStateAfterRebuild 把 OA 状态过继给重建出来的那条会话(按 id 找,不假定它在前台)。
 //
 // 少了这一步有两个后果,都不会报错:防重入标记归零 → 下一次闸门误判就无限重建;
 // OA 锁归零 → 出网工具(联网搜索/抓网页)重新放行,而历史里已经有 OA 数据了。
-func (a *App) adoptOAStateAfterRebuild(localModel string) {
+func (a *App) adoptOAStateAfterRebuild(sessionID, localModel string) {
 	a.mu.Lock()
-	e := a.entryLocked(a.focused)
+	e := a.entryLocked(sessionID)
 	if e == nil {
 		a.mu.Unlock()
 		return
@@ -253,10 +263,9 @@ func (a *App) adoptOAStateAfterRebuild(localModel string) {
 
 // applyLocalModelConfig 把一份会话配置改造成"跑在本地模型上"。
 //
-// 四处一起改,少一处就漏一条:
+// 模型和 OA 边界一起改；预算由统一的逐模型解析器装配:
 //
 //   - Model —— 主循环、自动标题、压缩摘要都读它;
-//   - MaxContextTokens —— 本地模型窗口小得多,不跟着改的话第一次请求就可能超限;
 //   - HarmJudgeModel —— 用户可以在设置里单独指定判定模型,那是**会话级固定**的
 //     (引擎没有运行时 setter),清掉它才会回落到 resolveHarmModel(cfg) = 新的
 //     cfg.Model。留着的话,智能模式下每次审批都会把动作描述发给云端判定模型;
@@ -264,9 +273,6 @@ func (a *App) adoptOAStateAfterRebuild(localModel string) {
 //     一条能绕开本地模型的子代理路径(见 foreignModelAgents)。
 func applyLocalModelConfig(cfg engine.Config, local PassportModel, foreignAgents []string) engine.Config {
 	cfg.Model = local.ID
-	if local.ContextTokens > 0 {
-		cfg.MaxContextTokens = local.ContextTokens
-	}
 	cfg.HarmJudgeModel = ""
 	cfg.DisabledAgents = mergeDisabled(cfg.DisabledAgents, foreignAgents)
 	return cfg
@@ -318,15 +324,15 @@ func (a *App) foreignModelAgents(localModel string) []string {
 //
 // 尽力而为:压不动就照常切,让"上下文太长"以一个明确的模型错误暴露出来,而不是在
 // 这里把整条切换取消掉。
-func (a *App) shrinkHistoryForLocalModel(sessionID string, local PassportModel) {
-	if local.ContextTokens <= 0 {
-		return // 基座没声明窗口大小,无从判断
+func (a *App) shrinkHistoryForLocalModel(sessionID string, contextTokens int) {
+	if contextTokens <= 0 {
+		return // 用户或平台明确关闭了预算控制
 	}
 	s, err := a.mgr.Session(sessionID)
 	if err != nil {
 		return
 	}
-	budget := int(float64(local.ContextTokens) * oaCompactHeadroom)
+	budget := int(float64(contextTokens) * oaCompactHeadroom)
 	if s.EstimateContextTokens() <= budget {
 		return
 	}

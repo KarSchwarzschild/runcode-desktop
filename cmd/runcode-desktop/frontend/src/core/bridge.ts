@@ -11,6 +11,8 @@
 
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
+ ArtifactReference, DirectoryAccessRequest, DirectoryAccessGrant, DirectoryAccessView,
+  ModelContextValues, ModelContextOverride, ModelContextView, SaveModelContextSettingsRequest,
   QuestionReference, QuestionImage, QuestionDraft, QuestionReceipt, SubmitQuestionRequest,
   AgentInfo,
   AgentList,
@@ -109,6 +111,7 @@ export type { EventMap } from './protocol/events'
 // ---- commands (generated; same lowerCamel names the old helpers used) ---------
 export {
   getQuestion, forkQuestion, submitQuestion,
+  getModelContextSettings, saveModelContextSettings,
   activeTenant,
   compact,
   contextAuditStatus,
@@ -145,6 +148,7 @@ export {
   openSession,
   openSessions,
   focusSession,
+  listSessionFiles, openArtifact, releaseArtifact, listDirectoryAccess, grantDirectoryAccess, revokeDirectoryAccess,
   closeSession,
   openExternal,
   passportCancelLogin,
@@ -242,11 +246,11 @@ import type { EditRecord, SessionInfo } from './protocol/types'
 export const switchModel = (sessionID: string, kind: 'platform' | 'custom', name: string): Promise<SessionInfo> =>
   switchModelCmd(sessionID, kind, name)
 
-// readArtifactBytes returns a workspace file's raw bytes for renderers that need the
+// readArtifactBytes reads a source-session reference for renderers that need the
 // binary (Office docs). It goes through the bridge (base64) rather than the loopback
 // server to sidestep cross-origin fetch restrictions; see the Go ReadArtifactBytes.
-export const readArtifactBytes = async (relPath: string): Promise<ArrayBuffer> => {
-  const b64 = await readArtifactBytesCmd(relPath)
+export const readArtifactBytes = async (reference: string): Promise<ArrayBuffer> => {
+  const b64 = await readArtifactBytesCmd(reference)
   const bin = atob(b64)
   const bytes = new Uint8Array(bin.length)
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)

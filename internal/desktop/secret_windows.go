@@ -73,8 +73,7 @@ func dpapiTransform(proc *windows.LazyProc, in []byte) ([]byte, bool) {
 	if r == 0 || outBlob.pbData == nil {
 		return nil, false
 	}
-	// G103: 释放 DPAPI 分配的输出缓冲,句柄即其地址。
-	defer func() { _, _ = windows.LocalFree(windows.Handle(uintptr(unsafe.Pointer(outBlob.pbData)))) }() //nolint:gosec
+	defer func() { _, _ = windows.LocalFree(windows.Handle(uintptr(unsafe.Pointer(outBlob.pbData)))) }() //nolint:gosec // G103: 释放 DPAPI 分配的输出缓冲,句柄即其地址
 	out := make([]byte, outBlob.cbData)
 	copy(out, unsafe.Slice(outBlob.pbData, outBlob.cbData)) //nolint:gosec // G103: 按 cbData 长度读取 DPAPI 返回的缓冲
 	return out, true

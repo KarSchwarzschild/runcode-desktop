@@ -304,9 +304,10 @@ export function useSession({ busy, conversation, showToast, onEnterChat }: {
   // 这条对话收掉"，工作区、连接、模型一样都没变，凭什么要他从头再来一遍。这与
   // 浏览器关掉最后一个标签页给你一个新标签页是同一个道理。
   // 只有连新会话都开不出来（没有工作区/没有可用模型，比如还没真正启动过）才回首屏。
-  const closeOne = (id: string) =>
+  const closeOne = (id: string, onClosed?: () => void) =>
     runSwitch(async (isStale) => {
       await closeSession(id)
+      onClosed?.()
       conversation.dropSession(id)
       const list = (await openSessions()) ?? []
       if (isStale()) return

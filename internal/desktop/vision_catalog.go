@@ -4,79 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 )
-
-const visionCatalogTTL = time.Minute
-
-type visionCatalog struct {
-	models   map[string]PassportModel
-	defaults []PassportModel
-	at       time.Time
-}
-
-func visionCatalogKey(scope modelReference, actor string) string {
-	scope.Name = ""
-	return digestVision([]any{scope, actor})
-}
-
-// Catalogs are immutable snapshots. Publish under the requesting identity, never
-// whichever account happens to be logged in when a slow response arrives.
-func (a *App) rememberVisionCatalog(scope modelReference, actor string, models []PassportModel) {
-	next := visionCatalog{models: make(map[string]PassportModel, len(models)), at: time.Now()}
-	for _, m := range models {
-		next.models[m.ID] = m
-		if m.VisionDefault {
-			next.defaults = append(next.defaults, m)
-		}
-	}
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	if a.visionModels == nil || len(a.visionModels) >= 64 {
-		a.visionModels = map[string]visionCatalog{}
-	}
-	a.visionModels[visionCatalogKey(scope, actor)] = next
-}
-
-func (a *App) platformVisionCatalog(ctx context.Context, scope modelReference, actor string) (visionCatalog, error) {
-	if err := ctx.Err(); err != nil {
-		return visionCatalog{}, err
-	}
-	if !a.tokens.LoggedIn() {
-		return visionCatalog{}, errors.New("跟随平台识图需要登录通行证，或手动选择自定义识图模型")
-	}
-	if a.visionAccountIdentity() != actor {
-		return visionCatalog{}, errors.New("加载默认识图模型期间账号已变化，请重试")
-	}
-	if scope != platformModelRef(scope.TenantID, "") {
-		return visionCatalog{}, errors.New("会话所属平台已变化，请重新打开会话")
-	}
-	key := visionCatalogKey(scope, actor)
-	a.mu.Lock()
-	entry, ok := a.visionModels[key]
-	a.mu.Unlock()
-	if ok && time.Since(entry.at) < visionCatalogTTL {
-		return entry, nil
-	}
-	lookupCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
-	defer cancel()
-	if _, err := a.passportModelsContext(lookupCtx, scope.TenantID); err != nil {
-		return visionCatalog{}, fmt.Errorf("获取平台默认识图模型失败: %w", err)
-	}
-	if err := lookupCtx.Err(); err != nil {
-		return visionCatalog{}, err
-	}
-	if a.visionAccountIdentity() != actor {
-		return visionCatalog{}, errors.New("加载默认识图模型期间账号已变化，请重试")
-	}
-	a.mu.Lock()
-	entry, ok = a.visionModels[key]
-	a.mu.Unlock()
-	if !ok {
-		return visionCatalog{}, errors.New("平台模型目录已变化，请重试")
-	}
-	return entry, nil
-}
 
 func selectPlatformVisionModel(defaults []PassportModel) (PassportModel, error) {
 	if len(defaults) == 0 {
@@ -115,11 +43,11 @@ func (a *App) visionTarget(ctx context.Context, sessionID, bridge, actor string,
 		}
 		scope = modelReference{Kind: "platform", Bridge: bridge, TenantID: tenant}
 	}
-	catalog, err := a.platformVisionCatalog(ctx, scope, actor)
+	catalog, err := a.platformModelCatalog(ctx, scope, actor)
 	if err != nil {
 		return modelReference{}, err
 	}
-	model, err := selectPlatformVisionModel(catalog.defaults)
+	model, err := selectPlatformVisionModel(catalog.visionDefaults)
 	if err != nil {
 		return modelReference{}, err
 	}

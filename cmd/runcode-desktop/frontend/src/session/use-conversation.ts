@@ -13,6 +13,7 @@ import {
   listEdits,
   onEnvelope,
   revertEdit,
+  releaseArtifact,
   type PermissionRequest,
   type PlanSnapshot,
   type ResumedSession,
@@ -55,7 +56,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
     clear: (sessionID: string) => void
   }
   onFilesChanged: () => void
-  onOpenPreview: (absPath: string) => void
+  onOpenPreview: (artifact: import('@/core/bridge').ArtifactReference) => void
   showToast: (text: string) => void
 }) {
   // 每会话一份状态。引擎本来就是多会话的，每条信封都带 sessionId；存成一份全局
@@ -161,9 +162,12 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         }
         // 只有**看得见**的那条会话才准打开预览面板:后台会话弹一个面板出来会把
         // 用户正在看的东西顶掉,而他甚至不知道那是哪条会话干的。
-        if (!ev.parentToolUseID && ev.toolName === 'open_preview' && sessionOf(env) === focusedRef.current) {
-          const p = (ev.data as { path?: string } | undefined)?.path
-          if (p) cb.current.onOpenPreview(p)
+        if (ev.toolName === 'open_preview') {
+          const artifact = ev.data as import('@/core/bridge').ArtifactReference | undefined
+          if (artifact?.reference) {
+            if (!ev.parentToolUseID && artifact.sessionId === sessionOf(env) && sessionOf(env) === focusedRef.current) cb.current.onOpenPreview(artifact)
+            else void releaseArtifact(artifact.reference).catch(() => {})
+          }
         }
         blocksOf(sessionOf(env), (prev) => {
           // A sub-agent's child event nests under its parent Task card (live), rather

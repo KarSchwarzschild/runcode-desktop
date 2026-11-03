@@ -29,6 +29,11 @@ func extractXlsx(path string, cb *capBuf) error {
 		return fmt.Errorf("open xlsx: %w", err)
 	}
 	defer func() { _ = f.Close() }()
+	extractXlsxWorkbook(f, cb)
+	return nil
+}
+
+func extractXlsxWorkbook(f *excelize.File, cb *capBuf) {
 
 	sheets := f.GetSheetList()
 	cb.writef("[xlsx] 工作表 %d 个：%s\n", len(sheets), strings.Join(sheets, "、"))
@@ -40,7 +45,6 @@ func extractXlsx(path string, cb *capBuf) error {
 		}
 		renderSheet(cb, f, sheet, styleCache)
 	}
-	return nil
 }
 
 func renderSheet(cb *capBuf, f *excelize.File, sheet string, styleCache map[int]string) {

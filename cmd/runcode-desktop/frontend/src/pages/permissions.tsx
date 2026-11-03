@@ -1,3 +1,5 @@
+import { DirectoryAccessSection } from './directory-access'
+import type { DirectoryAccessState } from '@/session/use-directory-access'
 // PermissionsPage: pick a mode (the hero), then scan the operation × mode matrix for
 // exactly what each mode does. Clicking a mode switches the live session to it.
 import { HIDDEN_PERMISSION_MODES, type PermissionMode } from '@/core/permission-modes'
@@ -56,7 +58,7 @@ const PERM_ROWS: { op: string; q: string; cells: string[] }[] = [
   { op: '命令', q: 'Bash', cells: ['deny', 'ask', 'judge', 'allow'] },
   { op: '联网', q: 'WebFetch · WebSearch', cells: ['deny', 'ask', 'judge', 'allow'] },
   { op: 'MCP 外部工具', q: '独立进程', cells: ['deny', 'ask', 'judge', 'allow'] },
-  { op: '越出工作区 · 读取', q: '项目外的文件 / 目录 / shell 读', cells: ['deny', 'ask', 'judge', 'allow'] },
+  { op: '越出工作区 · 未授权读取', q: 'Read · ReadOffice · open_preview', cells: ['deny', 'ask', 'judge', 'allow'] },
   { op: '越出工作区 · 写改删', q: '项目外落盘，智能模式也必问', cells: ['deny', 'ask', 'ask', 'allow'] },
   { op: '高危命令', q: '提权 · rm -rf · 毁灭性 git', cells: ['deny', 'deny', 'deny', 'allow'] },
 ]
@@ -73,7 +75,7 @@ const PERM_RULES: [string, string, string][] = [
   ['应用自己的目录', 'text-green bg-greenbg', '本应用的数据目录(技能、子代理、MCP 配置、通行证等)读写不再弹"项目外授权";安装目录只放行读——里面是正在运行的程序本体。删除与 shell 命令不在此列,照旧要你点头。'],
   ['危害审查', 'text-amber bg-amber/15', '智能模式对命令 / 联网 / MCP 先判危害:安全放行,有害弹窗并附原因,评估失败也弹窗,绝不静默放行。'],
   ['并发队列', 'text-green bg-greenbg', '只读类工具并行执行;多个授权请求排队逐个弹出、互不覆盖;同一批里问题相同的请求只弹一次、共用答复;批次里任一被拒绝同样停止本回合。'],
-  ['越界授权按目录记', 'text-amber bg-amber/15', '批准一个项目外的文件 = 批准它所在目录及其子目录;读与写分开记,写授权蕴含读,读授权不含写。项目内那条"文件改动"授权永远不会外溢到项目之外。'],
+  ['越界授权按目录记', 'text-amber bg-amber/15', '选择本次会话 / 本项目，记住的是所示目录及子目录；仅此一次只覆盖具体目标，不覆盖兄弟文件。读与写分开记,写授权蕴含读,读授权不含写，也不代替命令执行审批。已有显式目录读授权在安全模式也可读取，明确拒绝优先。项目内那条"文件改动"授权永远不会外溢到项目之外。'],
 ]
 
 // AutonomyMeter renders a mode's "how much it lets through" as four segments filled
@@ -88,7 +90,7 @@ function AutonomyMeter({ level, tone }: { level: number; tone: string }) {
   )
 }
 
-export function PermissionsPage({ mode, onPickMode }: { mode?: string; onPickMode: (m: string) => void }) {
+export function PermissionsPage({ mode, onPickMode, sessionID, directoryAccess }: { mode?: string; onPickMode: (m: string) => void; sessionID?: string; directoryAccess?: DirectoryAccessState }) {
   return (
     <div className="flex-1 overflow-y-auto px-[26px] py-9">
       <div className="max-w-[920px] mx-auto flex flex-col gap-9">
@@ -98,6 +100,8 @@ export function PermissionsPage({ mode, onPickMode }: { mode?: string; onPickMod
             每次 AI 调用工具都走同一套判定:<b className="text-ink font-semibold">策略先看动作本身</b>,给出「允许 / 询问 / 拒绝」;再由你选的<b className="text-ink font-semibold">模式决定「询问」如何落地</b>。所以读工作区文件永远放行、提权命令永远拒绝——真正被模式改写的,只是那些需要询问的动作。
           </p>
         </div>
+
+        {directoryAccess && <DirectoryAccessSection sessionID={sessionID ?? ''} state={directoryAccess} />}
 
         {/* Modes — the hero. The autonomy meter (1–4 bars) reads left→right as a
             spectrum from most guarded (安全) to fully open (飞行). */}

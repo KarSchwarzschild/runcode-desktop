@@ -42,14 +42,14 @@ export function PreviewTabs({ tabs, active, onSelect, onClose }: { tabs: Preview
 }
 
 // PreviewPane composes the tab strip with the active tab's panel (file or diff).
-export function PreviewPane({ tabs, active, baseURL, onSelect, onClose, onCloseTab }: { tabs: PreviewTab[]; active: string | null; baseURL: string; onSelect: (key: string) => void; onClose: () => void; onCloseTab: (key: string) => void }) {
+export function PreviewPane({ tabs, active, baseURL: _baseURL, onSelect, onClose, onCloseTab }: { tabs: PreviewTab[]; active: string | null; baseURL: string; onSelect: (key: string) => void; onClose: () => void; onCloseTab: (key: string) => void }) {
   const activeTab = tabs.find((t) => tabKey(t) === active) ?? null
   return (
     <div className="flex flex-col h-full min-h-0">
       <PreviewTabs tabs={tabs} active={active} onSelect={onSelect} onClose={onCloseTab} />
       <div className="flex-1 min-h-0">
-        {activeTab?.kind === 'file' && <PreviewPanel key={active} baseURL={baseURL} relPath={activeTab.relPath} onClose={onClose} />}
-        {activeTab?.kind === 'diff' && <DiffPanel key={active} snapshotId={activeTab.snapshotId} relPath={activeTab.relPath} onClose={onClose} />}
+        {activeTab?.kind === 'file' && <PreviewPanel key={active} artifact={activeTab.artifact} relPath={activeTab.relPath} onClose={onClose} />}
+        {activeTab?.kind === 'diff' && <DiffPanel key={active} sessionID={activeTab.sessionID} snapshotId={activeTab.snapshotId} relPath={activeTab.relPath} onClose={onClose} />}
       </div>
     </div>
   )

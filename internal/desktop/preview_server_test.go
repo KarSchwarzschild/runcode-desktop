@@ -29,16 +29,16 @@ func TestPreviewServerServesWorkspaceFile(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "index.html"), []byte("<h1>hi</h1>"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ps := newPreviewServer()
-	base, err := ps.start(ws)
+	a, id := previewFixture(t, ws)
+	base := a.previewURLFor(ws)
+	ref, err := a.OpenArtifact(id, "index.html")
 	if err != nil {
-		t.Fatalf("start: %v", err)
+		t.Fatal(err)
 	}
-	defer ps.stop()
 	if !strings.HasPrefix(base, "http://127.0.0.1:") || !strings.HasSuffix(base, "/") {
 		t.Fatalf("baseURL = %q, want http://127.0.0.1:<port>/", base)
 	}
-	resp, body := getPreview(t, base, "index.html")
+	resp, body := getPreview(t, ref.URL, "")
 	if resp.StatusCode != 200 || body != "<h1>hi</h1>" {
 		t.Fatalf("serve = %d %q, want 200 <h1>hi</h1>", resp.StatusCode, body)
 	}
@@ -86,10 +86,12 @@ func TestPreviewServerServesDotDotPrefixedName(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, "..hidden"), []byte("ok"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	ps := newPreviewServer()
-	base, _ := ps.start(ws)
-	defer ps.stop()
-	resp, body := getPreview(t, base, "..hidden")
+	a, id := previewFixture(t, ws)
+	ref, err := a.OpenArtifact(id, "..hidden")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, body := getPreview(t, ref.URL, "")
 	if resp.StatusCode != 200 || body != "ok" {
 		t.Fatalf("file named ..hidden should be served: %d %q", resp.StatusCode, body)
 	}
@@ -113,7 +115,7 @@ func TestPreviewServerRejectsSymlinkEscape(t *testing.T) {
 	}
 }
 
-func TestPreviewServerServesClampedTraversal(t *testing.T) {
+func TestPreviewServerRejectsBareClampedTraversal(t *testing.T) {
 	ws := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(ws, "foo"), 0o755); err != nil {
 		t.Fatal(err)
@@ -136,8 +138,8 @@ func TestPreviewServerServesClampedTraversal(t *testing.T) {
 	fmt.Fprintf(conn, "GET /foo/../../bar HTTP/1.0\r\nHost: %s\r\n\r\n", addr)
 	resp, _ := io.ReadAll(conn)
 	s := string(resp)
-	if !strings.Contains(s, " 200 ") || !strings.Contains(s, "BAR") {
-		t.Fatalf("clamped traversal to in-workspace file not served; response:\n%s", s)
+	if strings.Contains(s, " 200 ") || strings.Contains(s, "BAR") {
+		t.Fatalf("bare traversal must not create a file capability; response:\n%s", s)
 	}
 }
 

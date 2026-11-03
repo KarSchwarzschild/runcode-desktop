@@ -221,6 +221,14 @@ func (a *App) SaveCustomModel(req SaveCustomModelRequest) ([]CustomModel, error)
 		if req.OriginalName != "" && req.OriginalName != req.Name && cfg.CustomModelName == req.OriginalName {
 			cfg.CustomModelName = req.Name
 		}
+		if req.OriginalName != "" && req.OriginalName != req.Name {
+			for i := range cfg.ModelContexts {
+				ref := &cfg.ModelContexts[i].Model
+				if ref.Kind == "custom" && ref.Name == req.OriginalName {
+					ref.Name = req.Name
+				}
+			}
+		}
 		result = publicCustomModels(cfg.CustomModels)
 		return nil
 	})
@@ -278,6 +286,13 @@ func (a *App) DeleteCustomModel(name string) ([]CustomModel, error) {
 				next = append(next, m)
 			}
 		}
+		contexts := cfg.ModelContexts[:0]
+		for _, item := range cfg.ModelContexts {
+			if item.Model.Kind != "custom" || item.Model.Name != name {
+				contexts = append(contexts, item)
+			}
+		}
+		cfg.ModelContexts = contexts
 		cfg.CustomModels = next
 		if ref := cfg.Vision.DefaultModel; ref != nil && ref.Kind == "custom" && ref.Name == name {
 			cfg.Vision.DefaultModel = nil

@@ -40,12 +40,12 @@ func TestPermissionsDenyAllowRemoveRoundTrip(t *testing.T) {
 	if _, err := runPermissions(t, "deny", "blocked.example", "--cwd", dir); err != nil {
 		t.Fatalf("deny: %v", err)
 	}
-	if _, err := runPermissions(t, "allow", "ok.example", "--cwd", dir); err != nil {
+	if _, err := runPermissions(t, "allow", "https://ok.example", "--cwd", dir); err != nil {
 		t.Fatalf("allow: %v", err)
 	}
 
 	// Allowing a denied host is refused (deny wins).
-	if _, err := runPermissions(t, "allow", "blocked.example", "--cwd", dir); err == nil {
+	if _, err := runPermissions(t, "allow", "https://blocked.example", "--cwd", dir); err == nil {
 		t.Fatal("allowing a denied host should error")
 	}
 
@@ -56,7 +56,7 @@ func TestPermissionsDenyAllowRemoveRoundTrip(t *testing.T) {
 	if !strings.Contains(out, "[1] deny  network WebFetch blocked.example") {
 		t.Fatalf("list = %q, want deny rule first", out)
 	}
-	if !strings.Contains(out, "[2] allow network WebFetch ok.example") {
+	if !strings.Contains(out, "[2] allow network WebFetch origin-v2 https://ok.example auto") {
 		t.Fatalf("list = %q, want allow rule second", out)
 	}
 
@@ -91,7 +91,7 @@ func TestPermissionsClearScoped(t *testing.T) {
 		}
 	}
 	mustRun("deny", "d.example", "--cwd", dir)
-	mustRun("allow", "a.example", "--cwd", dir)
+	mustRun("allow", "https://a.example", "--cwd", dir)
 
 	// Clearing only the deny list keeps the allow rule.
 	out, err := runPermissions(t, "clear", "--deny", "--cwd", dir)
@@ -152,5 +152,23 @@ func TestPermissionsListAndRemoveTUIWrittenRules(t *testing.T) {
 	}
 	if !strings.Contains(out, "package-management") {
 		t.Fatalf("list after remove = %q, want command deny still present", out)
+	}
+}
+
+func TestPermissionsAllowRequiresExplicitScope(t *testing.T) {
+	dir := t.TempDir()
+	for _, value := range []string{"bare.example", "https://example.invalid/private", "https://u:synthetic@example.invalid", "https://example.invalid?q=synthetic"} {
+		if _, err := runPermissions(t, "allow", value, "--cwd", dir); err == nil {
+			t.Fatal("ambiguous scope accepted", value)
+		}
+	}
+	if _, err := runPermissions(t, "allow", "https://example.invalid:8443", "--route", "configured", "--cwd", dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runPermissions(t, "deny", "https://example.invalid:8443", "--route", "configured", "--cwd", dir); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runPermissions(t, "allow", "https://example.invalid:8443", "--route", "configured", "--cwd", dir); err == nil {
+		t.Fatal("origin deny did not override allow")
 	}
 }

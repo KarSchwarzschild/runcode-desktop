@@ -158,39 +158,129 @@ function materialBriefing(mark: RecordingMark, transcript: string): string[] {
   if (started) out.push(`- 时间：${started}`)
   out.push(`- 时长：${human(mark.audioMs)}`)
   for (const line of speakerBriefing(transcript)) out.push(line)
-  out.push('- 下面的转写来自自动语音识别，有错别字和断句问题。')
+  for (const line of ASR_CAVEATS) out.push(line)
   if (mark.needsBackfill) {
     out.push('- 这场录音与转写服务断开过，文本有缺口，中间可能整段缺失。发现话题接不上就直接说明可能有缺失，不要脑补衔接。')
   }
   return out
 }
 
-/** transcriptBlock 把转写全文包成代码块，两段共用。 */
+// ASR_CAVEATS 讲清这份文本「错在哪儿」，两段共用。
+//
+// 只说一句「有错别字和断句问题」不够，2026-11 拿一场 97 分钟的真实会议实测，问题是
+// 具体的两类，各自会把纪要带歪：
+//  - **同一个专有名词写成好几种**：「终身／中身／中山／中心教育平台」「基座／机座／
+//    记座」「需规／续规／虚规」是同一个东西。不点破，模型会把它们当成几个不同的系统
+//    分别归纳，或者原样照抄进纪要；
+//  - **分段切在词语中间**：「…现在应该没有视觉分」「析，嗯…」分属前后两个编号，切口
+//    附近几个字的说话人归属基本是错的。不点破，模型会把半句话安到另一个人头上。
+const ASR_CAVEATS = [
+  '- 下面的转写来自自动语音识别：有错别字和同音字，同一个专有名词、人名常被写成好几种样子。',
+  '- 分段是机器切的，常常切在词语中间：一段开头或结尾的几个字可能属于前一位或后一位说话人，切口附近的说话人归属不可靠。',
+]
+
+/**
+ * transcriptBlock 把转写全文包成代码块，两段共用。
+ *
+ * 发给模型的是 compactTranscript 压过的版本，不是落盘的原文——理由见那边。
+ */
 function transcriptBlock(transcript: string): string[] {
-  return ['转写全文：', '', '```', transcript.trim(), '```']
+  return ['转写全文（每行是「[开始时间] 说话人：内容」，同一说话人紧挨着的几段已合并）：', '', '```', compactTranscript(transcript), '```']
+}
+
+// TRANSCRIPT_ROW_RE 认落盘转写里的一行：`**[00:03] S1**：文本`（Go 侧
+// Transcript.Markdown），与 SPEAKER_RE 是同一个格式，两边必须一起改。
+const TRANSCRIPT_ROW_RE = /^\*\*\[([^\]]+)\]\s*([^*]+?)\*\*：(.*)$/
+
+// MERGE_LIMIT 是合并同一说话人连续段落时单行的字数上限。
+//
+// 不封顶的话，一个人连说十分钟会被合成一行，中间的时间戳全没了——而速览的大纲要靠
+// 时间戳标出每个议题的起止。200 字大约是半分钟到一分钟的话，既吃掉了碎段，又留得住
+// 时间轴的颗粒度。
+const MERGE_LIMIT = 200
+
+/**
+ * compactTranscript 把落盘的转写压成发给模型的样子。
+ *
+ * 落盘那份是给人看的 Markdown：每段 `**[mm:ss] Sx**：` 加一个空行，同一个人连着说的
+ * 话还会被机器切成好几段（实测一场 97 分钟的会议切出 634 段，压完是 596 行，提示词少约 9%）。
+ * 这些格式字符对模型没有信息量，却要在速览和正式文档两条请求里各付一遍。这里做两件事：
+ *  - 去掉加粗与空行、去掉标题行（标题已在材料说明里）；
+ *  - 同一说话人紧挨着的段落合并成一行，保留第一段的时间戳，单行不超过 MERGE_LIMIT。
+ *
+ * **说话人标签原样保留**，不重新编号：用户在预览栏里看的是落盘原文，纪要里写的编号
+ * 得能在原文里找到。认不出格式（Go 侧改了格式却没改这里）就原样返回——宁可多花
+ * token，也不能把转写弄丢。
+ */
+export function compactTranscript(transcript: string): string {
+  const rows: { at: string; who: string; text: string }[] = []
+  let recognized = false
+  for (const raw of transcript.split('\n')) {
+    const line = raw.trim()
+    if (!line) continue
+    const m = TRANSCRIPT_ROW_RE.exec(line)
+    if (!m) {
+      // 标题行与「没有转写文本」的占位行之外的未知行照样带上，不丢内容。
+      if (line.startsWith('# ') || line.startsWith('_这场录音没有转写文本')) continue
+      rows.push({ at: '', who: '', text: line })
+      continue
+    }
+    recognized = true
+    const [, at, who, text] = m
+    const last = rows[rows.length - 1]
+    if (last && last.who === who.trim() && last.text.length < MERGE_LIMIT) {
+      last.text = joinText(last.text, text.trim())
+    } else {
+      rows.push({ at, who: who.trim(), text: text.trim() })
+    }
+  }
+  if (!recognized) return transcript.trim()
+  return rows.map((r) => (r.who ? `[${r.at}] ${r.who}：${r.text}` : r.text)).join('\n')
+}
+
+// joinText 拼接同一说话人的两段。中文直接相连（分段常切在词中间，加空格反而把词
+// 拆开）；两边都是拉丁字母或数字时补一个空格，免得两个英文词粘成一个。
+function joinText(a: string, b: string): string {
+  if (/[A-Za-z0-9]$/.test(a) && /^[A-Za-z0-9]/.test(b)) return `${a} ${b}`
+  return a + b
 }
 
 // CONTENT_RULES 是所有支路共用的内容红线：只管写什么，不管长什么样，所以技能在场时
 // 照给不误。第二条是其中最要紧的——纪要会被当作会议记录用，编出来的待办和责任人是
 // 会真害到人的那类错误。
+//
+// 第三条（已定与待定分开）来自真实会议的实测：需求核对、方案讨论这类会，大部分是
+// 「要不…」「看领导怎么协商」，真正拍板的只有几条。不写这条，模型会把讨论中的倾向
+// 当成结论写进纪要——与编造待办是同一类会害人的错，只是更隐蔽。
 const CONTENT_RULES = [
   '先通读全文再落笔，不要逐句复述。',
   '**转写里没有的信息一律不要补**——写出来的东西会被当作会议记录用，编出来的待办和责任人是会真害到人的。',
-  '按上下文改正转写里明显的同音错误；改动大的地方在括号里附上原文。',
+  '**分清已经定了的和还没定的**：明确表态同意、拍了板的才写成结论；还在讨论的、倾向性的意见、要等别人（领导、其他部门、合同相关方）确认的，写明「待确认」和等谁确认，不要把倾向写成定论。',
+  '按上下文改正明显的同音错误，同一个专有名词全文统一成一种写法；拿不准的保留原文，改动大的在括号里附上原文。',
 ]
 
-// DIGEST_LIMIT 是速览的字数上限。
+// digestLimit 是速览的字数上限，随会议时长分三档。
 //
 // 它不是可有可无的修饰：不限长的话模型照样写一大篇，两段式就白做了——用户仍旧要等
-// 一篇长文，仍旧没有「先看一眼再决定」的机会。数字取 600，是「四段结构装得下、
-// 一屏读得完」的折中。
-const DIGEST_LIMIT = 600
+// 一篇长文，仍旧没有「先看一眼再决定」的机会。600 字是「结构装得下、一屏读得完」的
+// 折中，但那是按半小时以内的会定的：一场一个半小时、七八个议题的会挤进 600 字，大纲
+// 每条只剩几个字，待确认事项也放不下。所以长会放宽，最多到 1200 字——仍然是一屏半，
+// 仍然远短于正式纪要。
+function digestLimit(audioMs: number): number {
+  const minutes = audioMs / 60_000
+  if (minutes <= 30) return 600
+  if (minutes <= 60) return 900
+  return 1200
+}
 
 // DIGEST_SHAPE 是速览的骨架，给死不给模型发挥。
 //
 // 腾讯会议、豆包会议那种「一眼能看完」的观感，靠的就是结构固定：主题定位、总结讲
 // 清楚干了什么、大纲带时间戳可回溯、待办单独拎出来。模型自由发挥时最爱做的是按
 // 发言人分段复述，那读起来和转写本身没区别。
+//
+// 「待确认」单列一段，是 CONTENT_RULES 第三条在速览里的落点：没有这个位置，没定的
+// 事要么被塞进待办（变成了要人去做的事），要么被写成大纲里的结论。
 const DIGEST_SHAPE = [
   '**主题**：一句话',
   '**总结**：2–4 句，讲清楚这场会讨论了什么、达成了什么、留下了什么分歧',
@@ -199,19 +289,25 @@ const DIGEST_SHAPE = [
   '- [04:12–11:30] 议题二 —— 一句话结论',
   '**待办**：',
   '- [ ] 事项（责任人 / 时间）',
+  '**待确认**：',
+  '- 事项（等谁确认）',
 ]
 
-// DIGEST_RULES 是速览独有的那几条，排在 CONTENT_RULES 前面。
+// digestRules 是速览独有的那几条，排在 CONTENT_RULES 前面。
 //
 // 第一条的结构样例由 buildDigestPrompt 紧跟着插进去；第三条是防模型顺手去写文件的，
-// 见 buildDigestPrompt 的注释。
-const DIGEST_RULES = [
-  '严格按下面的结构输出，不要增删章节，不要写成正式公文：',
-  `全文控制在 ${DIGEST_LIMIT} 字以内。`,
-  '**直接输出速览本身**：不要写文件、不要调工具，也不要在前后加说明或寒暄。',
-  '大纲每条都要带这段议题在录音里的起止时间，取自转写的时间戳。',
-  '待办只写转写里真正交办过的事；没有就写「本场未提及」。',
-]
+// 见 buildDigestPrompt 的注释。「不按人写」一条：编号本身的归属就不可靠（见
+// ASR_CAVEATS），速览又没有篇幅交代这层不确定，按议题写才不会把话安错人。
+function digestRules(audioMs: number): string[] {
+  return [
+    '严格按下面的结构输出，不要增删章节，不要写成正式公文：',
+    `全文控制在 ${digestLimit(audioMs)} 字以内。`,
+    '**直接输出速览本身**：不要写文件、不要调工具，也不要在前后加说明或寒暄。',
+    '大纲按议题列，相邻的小议题合并，通常 3–8 条；每条都要带这段议题在录音里的起止时间，取自转写的时间戳。',
+    '按议题写，不要写「S1 认为」「S2 提出」这类按说话人的表述。',
+    '待办只写转写里真正交办过的事，责任人只写被明确点名的人（照转写里的称呼写），点不出名的写「待定」；待确认只写会上明确留下没定的事。哪一段没有内容就写「本场未提及」。',
+  ]
+}
 
 /**
  * buildDigestPrompt 组装「速览」那条请求：录完自动发的就是它。
@@ -220,7 +316,7 @@ const DIGEST_RULES = [
  *  - **不挂技能**：技能一加载，整套公文模板就跟着进来了，产出又变成一篇长文；
  *  - **不落盘**：速览是拿来看的，不是拿来存的。不写死这一条，模型会顺手去调写文件
  *    的工具，白白多一个回合，工作区里还多出一个没人要的文件；
- *  - **限长 + 给死结构**：理由见 DIGEST_LIMIT 与 DIGEST_SHAPE。
+ *  - **限长 + 给死结构**：理由见 digestLimit 与 DIGEST_SHAPE。
  */
 export function buildDigestPrompt(opts: { mark: RecordingMark; transcript: string }): string {
   const { mark, transcript } = opts
@@ -233,7 +329,7 @@ export function buildDigestPrompt(opts: { mark: RecordingMark; transcript: strin
   lines.push('')
 
   lines.push('要求：')
-  const rules = [...DIGEST_RULES, ...CONTENT_RULES]
+  const rules = [...digestRules(mark.audioMs), ...CONTENT_RULES]
   rules.forEach((rule, i) => {
     lines.push(`${i + 1}. ${rule}`)
     // 结构样例紧跟在第 1 条后面：它是那条规则的一部分，隔开了模型就不一定照着走。
@@ -292,7 +388,7 @@ export function buildMinutesPrompt(opts: {
   lines.push('')
 
   lines.push('要求：')
-  for (const line of minutesRules(skill, outPath)) lines.push(line)
+  for (const line of minutesRules(skill, outPath, !!mark.startedAt)) lines.push(line)
   lines.push('')
 
   for (const line of transcriptBlock(transcript)) lines.push(line)
@@ -311,15 +407,24 @@ export function buildMinutesPrompt(opts: {
  * 有技能时第一条只做一件事：把格式层整个指给技能，并挡住后面几条——不然「先通读
  * 全文再落笔」这种话也会被当成对产出形式的指示去理解。没有技能时，第一条和最后一条
  * 换成这里自己的结构与落盘要求。
+ *
+ * 会议信息那一条两条支路都给，它管的是「纪要头上那几栏从哪儿来」：
+ *  - 时间是录音自己知道的，明说可以直接用。国开技能的流程是先把缺的栏目问齐再生成，
+ *    不点破的话，连录音开始时间这种现成的东西也要回头问一遍用户；
+ *  - 参会人员、主持人这几栏转写给不出来，而模型最顺手的做法是把转写里被喊到的名字
+ *    填进去——喊到名字不代表在场，更不代表是主持人。这和 speakerBriefing 切断
+ *    「人名 ↔ 编号」是同一道防线，在文档这一段落到了具体的栏目上。
  */
-function minutesRules(skill: string | undefined, outPath: string): string[] {
+function minutesRules(skill: string | undefined, outPath: string, knowsTime: boolean): string[] {
   const head = skill
     ? `纪要的格式、结构、章节编号、产出形式与文件名**一律以「${skill}」技能为准**；下面几条只管内容，不要拿它们去改技能规定的样子。`
     : '按议题归纳，结论、待办、责任人、时间点分别列出。'
+  const known = knowsTime ? '会议时间就用上面写的录音时间，不必再问；' : ''
+  const meta = `${known}地点、主持人、参会人员、记录人这些转写里确认不了的，${skill ? '按技能的流程问我或留占位' : '写「待补充」'}——**不要**拿转写里被提到的名字去填参会人员或主持人。`
   const tail = skill
     ? []
     : [`写成 Markdown，保存到工作区的 \`${outPath}\`，然后简要说明纪要包含哪几部分。`]
-  return [head, ...CONTENT_RULES, ...tail].map((rule, i) => `${i + 1}. ${rule}`)
+  return [head, meta, ...CONTENT_RULES, ...tail].map((rule, i) => `${i + 1}. ${rule}`)
 }
 
 // SPEAKER_RE 从转写里抠出说话人标签。落盘格式是 `**[00:03] S1**：文本`
@@ -358,6 +463,12 @@ export function speakerBriefing(transcript: string): string[] {
       `- ${clustered.join('、')} 是声纹聚类给出的编号，**不是姓名**。` +
       '同一个编号在本场内指同一个人；编号的数字本身没有含义，也不在不同场次之间通用。',
     )
+    // 反过来不成立：聚类常把同一个人拆成几个编号（实测一场会出了 15 个、最大到
+    // S92）。不说这句，模型会写出「共有 15 人参会」，或者把同一个人的前后发言
+    // 当成两个人的分歧。只有一个编号时没有拆分可言，不说。
+    if (clustered.length > 1) {
+      out.push('- 聚类可能把同一个人拆成几个编号，编号的个数不等于参会人数。')
+    }
   }
   if (named.length) {
     out.push(`- ${named.join('、')} 是配置里填的显示名，对应本机麦克风录到的人。`)

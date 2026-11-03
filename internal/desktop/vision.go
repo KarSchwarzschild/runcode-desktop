@@ -70,9 +70,9 @@ func (a *App) modelImageSupport(ctx context.Context, ref modelReference, model s
 	}
 	keyRef := ref
 	keyRef.Name = ""
-	key := digestVision([]any{keyRef, a.visionAccountIdentity()})
+	key := modelCatalogKey(keyRef, a.visionAccountIdentity())
 	a.mu.Lock()
-	models, known := a.visionModels[key]
+	models, known := a.modelCatalogs[key]
 	value := models.models[model].SupportsImages
 	a.mu.Unlock()
 	if !known && ref.Bridge == platformModelRef(ref.TenantID, model).Bridge {
@@ -80,7 +80,7 @@ func (a *App) modelImageSupport(ctx context.Context, ref modelReference, model s
 		_, _ = a.passportModelsContext(lookupCtx, ref.TenantID)
 		cancel()
 		a.mu.Lock()
-		value = a.visionModels[key].models[model].SupportsImages
+		value = a.modelCatalogs[key].models[model].SupportsImages
 		a.mu.Unlock()
 	}
 	return value
