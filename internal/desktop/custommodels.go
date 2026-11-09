@@ -1,0 +1,318 @@
+package desktop
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"gitlab.ouc-online.com.cn/aibase/agentloop/llm"
+)
+
+// supportedCustomModelProvider gates a saved profile's provider against the
+// engine's own registry instead of a list copied here: desktop passes the value
+// straight through to engine.Config.Provider, so the registry is the only
+// authority on what will actually build. A provider added engine-side becomes
+// usable without a second list to update.
+func supportedCustomModelProvider(provider string) bool {
+	// codex 是**外壳层**的服务商，引擎注册表里没有它：解析时被翻译成
+	// openai-responses + 本地代理（见 codex.go）。放行它是这条规则唯一的例外，
+	// 也因此必须写在这里，而不是让调用点各自判一次。
+	if isCodexProfile(provider) {
+		return true
+	}
+	return llm.IsRegistered(provider)
+}
+
+// unsupportedProviderError names what is actually available rather than leaving
+// the user to guess the spelling.
+func unsupportedProviderError(provider string) error {
+	return fmt.Errorf("不支持的服务商 %q（可选：%s、%s）", provider, strings.Join(llm.Registered(), "、"), codexProviderID)
+}
+
+// ListCustomModels 返回脱敏后的自定义模型列表。连接密钥只在后端解析会话时
+// 解密，前端仅知道是否已配置，不能读取明文或落盘密文。
+func (a *App) ListCustomModels() []CustomModel {
+	return publicCustomModels(loadRawConfig().CustomModels)
+}
+
+func publicCustomModels(raw []CustomModel) []CustomModel {
+	out := make([]CustomModel, 0, len(raw))
+	for _, m := range raw {
+		m.Provider = normalizeCustomModelProvider(m.Provider)
+		m.HasAPIKey = m.APIKeyProtected != ""
+		m.APIKey = ""
+		m.APIKeyProtected = ""
+		out = append(out, m)
+	}
+	return out
+}
+
+// resolveCustomModel 按显示名解析一条直连配置。密钥只在这里短暂进入 Go 内存，
+// 供起会话和对话内切换使用，不经过 Wails bridge 返回前端。
+func (a *App) resolveCustomModel(name string) (CustomModel, error) {
+	return resolveCustomModelFrom(loadRawConfig(), name)
+}
+
+func resolveCustomModelFrom(stored desktopConfig, name string) (CustomModel, error) {
+	name = strings.TrimSpace(name)
+	for _, m := range stored.CustomModels {
+		if m.Name != name {
+			continue
+		}
+		m.Provider = normalizeCustomModelProvider(m.Provider)
+		if !supportedCustomModelProvider(m.Provider) {
+			return CustomModel{}, fmt.Errorf("自定义模型 %q：%w", name, unsupportedProviderError(m.Provider))
+		}
+		if m.APIKeyProtected != "" {
+			key, ok := unprotectSecret(m.APIKeyProtected)
+			if !ok {
+				return CustomModel{}, fmt.Errorf("自定义模型 %q 的 API 密钥无法解密，请重新保存密钥", name)
+			}
+			m.APIKey = key
+		}
+		m.HasAPIKey = m.APIKey != ""
+		m.APIKeyProtected = ""
+		return m, nil
+	}
+	return CustomModel{}, fmt.Errorf("自定义模型不存在: %s", name)
+}
+
+// resolveCustomModelRequest expands a saved profile into a session request entirely
+// in the backend. CustomModelName remains set so buildConfig knows empty fields are
+// explicit and must not inherit unrelated ANTHROPIC_* environment credentials.
+func (a *App) resolveCustomModelRequest(req StartSessionRequest) (StartSessionRequest, error) {
+	name := strings.TrimSpace(req.CustomModelName)
+	if name == "" {
+		return req, nil
+	}
+	cm, err := a.resolveCustomModel(name)
+	if err != nil {
+		return StartSessionRequest{}, err
+	}
+	req.CustomModelName = name
+	req.Provider = cm.Provider
+	req.Model = cm.Model
+	req.BaseURL = cm.BaseURL
+	req.APIKey = cm.APIKey
+	req.AuthToken = ""
+	if isCodexProfile(cm.Provider) {
+		// Codex 走本地代理：引擎按 openai-responses 说话，凭据与上游指纹头由代理
+		// 注入（见 codex.go 的 codexConnection）。
+		provider, baseURL, apiKey, err := a.codexConnection(name)
+		if err != nil {
+			return StartSessionRequest{}, err
+		}
+		req.Provider, req.BaseURL, req.APIKey = provider, baseURL, apiKey
+	}
+	return req, nil
+}
+
+// customModelPersistenceRequest reduces a resolved custom connection back to its
+// safe profile reference before writing desktop.json. It also ignores any expanded
+// connection fields an old or untrusted client sent alongside CustomModelName.
+func customModelPersistenceRequest(original, resolved StartSessionRequest) StartSessionRequest {
+	if strings.TrimSpace(original.CustomModelName) == "" {
+		return original
+	}
+	original.CustomModelName = resolved.CustomModelName
+	original.Provider = resolved.Provider
+	original.Model = resolved.Model
+	original.BaseURL = ""
+	original.APIKey = ""
+	original.AuthToken = ""
+	return original
+}
+
+// SaveCustomModel 新增或修改一个自定义模型，返回最新的脱敏列表。编辑时
+// OriginalName 定位原记录；APIKey 留空保留旧密钥，只有 ClearAPIKey 才清除。
+func (a *App) SaveCustomModel(req SaveCustomModelRequest) ([]CustomModel, error) {
+	req.Name = strings.TrimSpace(req.Name)
+	req.OriginalName = strings.TrimSpace(req.OriginalName)
+	req.Provider = normalizeCustomModelProvider(req.Provider)
+	req.Model = strings.TrimSpace(req.Model)
+	req.BaseURL = strings.TrimSpace(req.BaseURL)
+	req.AuthMode = normalizeCodexAuthMode(req.Provider, req.AuthMode)
+	if req.Name == "" {
+		return nil, wireError(errors.New("模型名称不能为空"))
+	}
+	if req.Model == "" {
+		return nil, wireError(errors.New("模型 ID 不能为空"))
+	}
+	if !supportedCustomModelProvider(req.Provider) {
+		return nil, wireError(unsupportedProviderError(req.Provider))
+	}
+	if req.ClearImageSupport && req.SupportsImages != nil {
+		return nil, wireError(errors.New("不能同时设置和清除图片能力标记"))
+	}
+	if req.ClearAPIKey && req.APIKey != "" {
+		return nil, wireError(errors.New("不能同时替换和清除 API 密钥"))
+	}
+
+	var result []CustomModel
+	err := updateRawConfig(func(cfg *desktopConfig) error {
+		source := -1
+		target := -1
+		for i, existing := range cfg.CustomModels {
+			if existing.Name == req.OriginalName {
+				source = i
+			}
+			if existing.Name == req.Name {
+				target = i
+			}
+		}
+
+		if req.OriginalName != "" {
+			if source < 0 {
+				return fmt.Errorf("原自定义模型不存在: %s", req.OriginalName)
+			}
+			if req.Name != req.OriginalName && target >= 0 && target != source {
+				return fmt.Errorf("自定义模型名称已存在: %s", req.Name)
+			}
+		} else {
+			// 保留旧调用方“同名保存即更新”的幂等语义；设置页编辑始终携带
+			// OriginalName，因此重命名绝不会静默覆盖另一条配置。
+			source = target
+		}
+		if req.ClearAPIKey && source < 0 {
+			return errors.New("新建模型时不能清除尚不存在的 API 密钥")
+		}
+
+		persisted := CustomModel{
+			Name:     req.Name,
+			Provider: req.Provider,
+			Model:    req.Model,
+			BaseURL:  req.BaseURL,
+			AuthMode: req.AuthMode,
+		}
+		switch {
+		case req.ClearImageSupport:
+		case req.SupportsImages != nil:
+			supported := *req.SupportsImages
+			persisted.SupportsImages = &supported
+		case source >= 0:
+			persisted.SupportsImages = cfg.CustomModels[source].SupportsImages
+		}
+		if ref := cfg.Vision.DefaultModel; ref != nil && ref.Kind == "custom" && ((req.OriginalName != "" && ref.Name == req.OriginalName) || ref.Name == req.Name) {
+			if persisted.SupportsImages == nil || !*persisted.SupportsImages {
+				return errors.New("此模型正在作为图片识别兜底，请先更换或清除默认识图模型")
+			}
+			ref.Name = req.Name
+		}
+		cfg.VisionRevision++
+		switch {
+		case req.ClearAPIKey:
+			// Explicit clear: leave both secret fields empty.
+		case req.APIKey != "":
+			protected, ok := protectSecret(req.APIKey)
+			if !ok {
+				return errors.New("当前系统无法安全保存 API 密钥，请使用无需密钥的端点或配置系统凭据存储")
+			}
+			persisted.APIKeyProtected = protected
+		case source >= 0:
+			// Preserve the opaque ciphertext without decrypting/re-encrypting it.
+			persisted.APIKeyProtected = cfg.CustomModels[source].APIKeyProtected
+		}
+
+		if source >= 0 {
+			cfg.CustomModels[source] = persisted
+		} else {
+			cfg.CustomModels = append(cfg.CustomModels, persisted)
+		}
+		if req.OriginalName != "" && req.OriginalName != req.Name && cfg.CustomModelName == req.OriginalName {
+			cfg.CustomModelName = req.Name
+		}
+		if req.OriginalName != "" && req.OriginalName != req.Name {
+			for i := range cfg.ModelContexts {
+				ref := &cfg.ModelContexts[i].Model
+				if ref.Kind == "custom" && ref.Name == req.OriginalName {
+					ref.Name = req.Name
+				}
+			}
+		}
+		result = publicCustomModels(cfg.CustomModels)
+		return nil
+	})
+	if err != nil {
+		return nil, wireError(err)
+	}
+
+	a.renameVisionReferences(req.OriginalName, req.Name)
+
+	// If the live session is running the model just edited, its open connection is
+	// still the pre-edit one — rebuild it against the new config so the change takes
+	// effect immediately instead of forcing a manual re-select. Only a custom
+	// (non-passport) connection can be the edited model; the write above already
+	// tracked any rename into CustomModelName, so a match there identifies the live
+	// model. A connection change can't be applied mid-turn (the rebuild would discard
+	// the running turn), so a busy session keeps the saved edit for the next switch.
+	a.mu.Lock()
+	id, busy := "", false
+	if e := a.liveEntryLocked(); e != nil {
+		id, busy = e.id, e.turnActive
+	}
+	livePassport := a.livePassport
+	a.mu.Unlock()
+	liveIsEdited := id != "" && !livePassport && strings.TrimSpace(loadRawConfig().CustomModelName) == req.Name
+	if liveIsEdited && !busy {
+		if _, err := a.SwitchModel("", "custom", req.Name); err != nil {
+			// Best-effort: the edit is already saved. If the live rebuild fails, fall
+			// back to the prior behavior — the change applies on the next manual
+			// re-select — rather than failing the save itself.
+			debugLog("SaveCustomModel live re-apply failed for %q: %v", req.Name, err)
+		}
+	}
+	return result, nil
+}
+
+// normalizeCustomModelProvider canonicalizes the stored provider id. The desktop
+// form offers openai（Chat Completions）、openai-responses（Responses API）和
+// anthropic；whatever it stores must match an engine registry name verbatim.
+func normalizeCustomModelProvider(provider string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "" {
+		return "openai" // compatibility with desktop.json written before Provider existed
+	}
+	return provider
+}
+
+// DeleteCustomModel 按名称删除，返回最新列表。未知名称是幂等 no-op。
+func (a *App) DeleteCustomModel(name string) ([]CustomModel, error) {
+	name = strings.TrimSpace(name)
+	var result []CustomModel
+	if err := updateRawConfig(func(cfg *desktopConfig) error {
+		next := cfg.CustomModels[:0]
+		for _, m := range cfg.CustomModels {
+			if m.Name != name {
+				next = append(next, m)
+			}
+		}
+		contexts := cfg.ModelContexts[:0]
+		for _, item := range cfg.ModelContexts {
+			if item.Model.Kind != "custom" || item.Model.Name != name {
+				contexts = append(contexts, item)
+			}
+		}
+		cfg.ModelContexts = contexts
+		cfg.CustomModels = next
+		if ref := cfg.Vision.DefaultModel; ref != nil && ref.Kind == "custom" && ref.Name == name {
+			cfg.Vision.DefaultModel = nil
+			cfg.Vision.Disabled = true
+		}
+		cfg.VisionRevision++
+		if cfg.CustomModelName == name {
+			cfg.CustomModelName = ""
+			cfg.Provider = ""
+			cfg.Model = ""
+			cfg.BaseURL = ""
+			cfg.APIKey = ""
+			cfg.AuthToken = ""
+			cfg.APIKeyProtected = ""
+			cfg.AuthTokenProtected = ""
+		}
+		result = publicCustomModels(cfg.CustomModels)
+		return nil
+	}); err != nil {
+		return nil, wireError(err)
+	}
+	return result, nil
+}

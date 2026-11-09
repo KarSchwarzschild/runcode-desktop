@@ -1,0 +1,136 @@
+// 内置工具的中文目录：一处定义，两种呈现——
+//   verb  对话流工具行里的短动词（后面紧跟 mono 目标，所以要短）
+//   label/desc  插件管理页里的完整名称与说明
+// 仅用于界面展示：发送给模型的工具定义、名称与描述全部保持原样(英文)，因此模型
+// 的工具调用判断不受影响。MCP / 用户自定义工具不在此表内，按原样显示。
+//
+// 拆分前 chat-view 的 VERB 与 pages 的 TOOL_ZH 是两份各自维护的字典，同一个工具
+// 要改两处；合并到这里后二者只是同一条目的两个字段。
+export type BuiltinTool = { label: string; desc: string; verb?: string }
+
+export const BUILTIN_TOOLS: Record<string, BuiltinTool> = {
+  Read: { verb: '读取文件', label: '读取文件', desc: '读取文件内容。文本返回带行号的内容；图片(png/jpg/jpeg/gif/webp)直接返回图像。' },
+  Write: { verb: '写入文件', label: '写入文件', desc: '创建或覆盖写入一个文件。' },
+  Edit: { verb: '编辑', label: '编辑文件', desc: '在已读取的文件里做精确文本替换。' },
+  Delete: { verb: '删除', label: '删除', desc: '删除工作区里的文件或目录，默认移入回收站(可恢复)，permanent=true 则不可逆删除。' },
+  Glob: { verb: '查找文件', label: '查找文件', desc: '按 glob 通配符查找工作区文件。' },
+  Grep: { verb: '搜索项目代码', label: '搜索代码', desc: '用正则搜索工作区文件内容，支持内容/文件名/计数等输出模式、上下文行与多行匹配。' },
+  Bash: { verb: '运行命令', label: '运行命令', desc: '在工作区执行非交互 shell 命令(需授权，Windows 用 cmd，其余用 bash)。' },
+  ReadToolResult: { verb: '读取原始结果', label: '读取工具原始结果', desc: '按当前会话的引用分段读取已留存的工具输出，不重新运行命令；原文受容量和保留期限制。' },
+  BashOutput: { verb: '后台输出', label: '后台命令输出', desc: '读取后台运行命令的新增输出。' },
+  KillShell: { verb: '终止命令', label: '终止后台命令', desc: '终止一个后台运行的命令。' },
+  TodoWrite: { verb: '规划任务', label: '规划任务', desc: '记录当前任务清单，每次传完整列表并替换上一次。' },
+  WebFetch: { verb: '抓取网页', label: '抓取网页', desc: '抓取公开网页；连接失败时有界诊断本机代理，支持单次代理路线或仅诊断。' },
+  WebSearch: { verb: '联网搜索', label: '联网搜索', desc: '通过搜索引擎联网检索并返回结果(标题、网址、摘要)。' },
+  Wait: { verb: '等待', label: '等待', desc: '暂停指定秒数再继续——等待构建、部署或后台命令等外部操作稳定后再检查。' },
+  GetCurrentTime: { verb: '获取当前时间', label: '获取当前时间', desc: '返回当前日期与时间(本地与 UTC、所在时区及 RFC3339 时间戳)。' },
+  Remember: { verb: '记录记忆', label: '记录记忆', desc: '把跨会话有用的事实写入持久记忆(用户级或项目级)，下次会话自动带上。' },
+  Analyze: { verb: '结构化分析', label: '结构化分析', desc: '为当前思考协议记录结构化分析。' },
+  // AskUser 有意不给 verb：它的工具行以原名显示（提问本身由 AskCard 呈现）。
+  AskUser: { label: '询问用户', desc: '向用户提问并停下等待回复，用于需要用户决策或缺少关键信息时。' },
+  analyze_image: { verb: '识别图片', label: '图片识别', desc: '仅文本模型使用设置中的识图模型分析已授权图片；不改变主模型。' },
+  open_browser: { verb: '打开浏览器', label: '打开本地网页', desc: '经批准在系统浏览器打开本机的确认页或预览页；不会代你点击或确认(仅桌面版)。' },
+  open_preview: { verb: '预览', label: '预览产物', desc: '在桌面预览面板打开工作区文件(仅桌面版)。' },
+  ReadOffice: { verb: '读取文档', label: '读取 Office 文档', desc: '把 .docx/.xlsx/.pptx 读成结构化文本(文字、字体、格式、版式)，按页返回，长文档可续读(仅桌面版)。' },
+  // plan_write 有意不给 verb：它不出现在工具行里，产出直接进计划模式的阶段进度条与
+  // 审批板（见 chat/plan-board）。
+  plan_write: { label: '记录方案', desc: '计划模式下按阶段记录规划产出（需求理解 / 方案设计 / 方案审查），交给用户编辑与审批(仅桌面版)。' },
+  install_runtime: { verb: '安装运行时', label: '安装运行时环境', desc: '缺 Python / Node.js / Git 时安装应用自带的那一份：校验 sha256、装到用户目录、不需要管理员权限，每次都要你批准(仅桌面版)。' },
+  knowledge_search: { verb: '检索知识库', label: '知识库检索', desc: '按需在当前已选知识库中检索相关切片；未选库时不可用，不强制每题检索(仅桌面版)。' },
+  Task: { verb: '委派子代理', label: '委派子代理', desc: '把一个自包含的子任务委派给子代理独立执行。' },
+  Skill: { verb: '加载技能', label: '加载技能', desc: '加载并执行一个已定义的技能。' },
+  // 以下四个由引擎的 mcp 包提供，配了 MCP 服务器时才出现在工具集里。它们不带
+  // mcp__ 前缀，所以走的是这张内置表而不是下面的 MCP_TOOLS。
+  ListMcpResources: { verb: '列出资源', label: '列出 MCP 资源', desc: '列出 MCP 服务器暴露的资源。' },
+  ReadMcpResource: { verb: '读取资源', label: '读取 MCP 资源', desc: '按 URI 读取一个 MCP 资源的内容。' },
+  ListMcpPrompts: { verb: '列出提示词', label: '列出 MCP 提示词', desc: '列出 MCP 服务器提供的提示词。' },
+  GetMcpPrompt: { verb: '取提示词', label: '获取 MCP 提示词', desc: '取出一个 MCP 提示词的内容。' },
+  // OA 办公工具(仅桌面版、且仅通行证连接 + 该租户开通了本地模型时才出现)。全部
+  // 远端只读，附件下载会写本地工作区；身份取自登录令牌。名字带 oa_ 前缀是为了不与技能/MCP/
+  // 其它内置工具撞名——会话内工具名唯一,撞名是装配失败而不是覆盖。
+  oa_attachments: { verb: '列出附件', label: 'OA 附件列表', desc: '列出文档或流程中的可识别附件。' },
+  oa_download_attachment: { verb: '下载附件', label: 'OA 附件下载', desc: '将你有权查看的 OA 附件下载到当前工作区，不覆盖已有文件。' },
+  oa_todo: { verb: '待办事项', label: 'OA 待办', desc: '查询你在 OA 里的待办流程。' },
+  oa_done: { verb: '已办事项', label: 'OA 已办', desc: '查询你在 OA 里的已办流程。' },
+  oa_created: { verb: '我发起的流程', label: 'OA 我发起的', desc: '查询你在 OA 里发起的流程。' },
+  oa_toread: { verb: '待阅事项', label: 'OA 待阅', desc: '查询你在 OA 里的待阅流程。' },
+  oa_processed: { verb: '已办结流程', label: 'OA 办结', desc: '查询你在 OA 里的办结流程。' },
+  oa_request_detail: { verb: '流程详情', label: 'OA 流程详情', desc: '查看某个流程的发起人、审批过程与当前节点。' },
+  oa_request_content: { verb: '流程表单内容', label: 'OA 表单内容', desc: '查看某个流程的表单实际填写内容(任务名称/描述/所属项目等)。' },
+  oa_profile: { verb: '我的名片', label: 'OA 我的名片', desc: '查询你自己的名片(姓名/部门/座机/手机/邮箱)。' },
+  oa_colleague_contact: { verb: '同事联系方式', label: 'OA 同事联系方式', desc: '按姓名查同事的通讯录联系方式(座机/手机/办公室/邮箱/部门)。' },
+  oa_team_contacts: { verb: '部门通讯录', label: 'OA 部门通讯录', desc: '列出同部门同事或你的下属的联系方式。' },
+  oa_search_people: { verb: '搜索全校人员', label: 'OA 搜索人员', desc: '按姓氏或姓名片段搜索全校人员名单(姓名+部门+工号)。' },
+  oa_search_docs: { verb: '搜索文档', label: 'OA 搜索文档', desc: '按关键词搜索 OA 里的文档、规章制度与通知公告。' },
+  oa_doc_content: { verb: '读取文档正文', label: 'OA 文档正文', desc: '读取某个 OA 文档的正文;扫描件公文会用视觉模型识别成文字。' },
+  oa_browse_docs: { verb: '浏览文档栏目', label: 'OA 文档栏目', desc: '按栏目浏览 OA 文档;留空则列出所有栏目。' },
+  oa_messages: { verb: '消息提醒', label: 'OA 消息中心', desc: '查询你在 OA 消息中心的待阅提醒。' },
+}
+
+// 基座自建 MCP 服务器的工具中文短名，按「服务器 → 工具」两级。模型看到的仍是原始
+// 工具名(mcp__oa__my_todo)，这里只影响界面呈现。
+//
+// ⚠️ 下面这张 oa 表是**给老装机兜底的**：OA 已经改成内置工具（上面的 oa_* 条目），
+// 新会话不再经 MCP。但用户本地 config.toml 里可能还留着 MCP 版的那条服务器，
+// 迁移完成前它仍会出现在工具行里，删掉这张表只会让那些行退化成 my_todo 这种裸名。
+//
+// 为什么内置一张表而不是直接用服务端给的描述：MCP 的 description 是给模型看的整句
+// (如「查看某流程的发起人/审批过程/当前节点」)，放进工具行太长；短名要另配。表里
+// 没有的 MCP 工具不会显示成 mcp__x__y，而是退到裸工具名(见 toolVerb)。
+export const MCP_TOOLS: Record<string, Record<string, string>> = {
+  oa: {
+    my_todo: '待办事项',
+    my_done: '已办事项',
+    my_created: '我发起的流程',
+    my_toread: '待阅事项',
+    my_processed: '已办结流程',
+    request_detail: '流程详情',
+    request_content: '流程表单内容',
+    my_profile: '我的名片',
+    colleague_contact: '同事联系方式',
+    team_contacts: '部门通讯录',
+    search_people: '搜索全校人员',
+    search_docs: '搜索文档',
+    doc_content: '读取文档正文',
+    browse_docs: '浏览文档栏目',
+    my_messages: '消息提醒',
+  },
+}
+
+// parseMcpToolName splits the mcp__<server>__<tool> convention. Returns null for
+// anything else, so built-in and custom tools fall through untouched.
+export function parseMcpToolName(full: string): { server: string; tool: string } | null {
+  const rest = full.startsWith('mcp__') ? full.slice(5) : null
+  if (rest === null) return null
+  const i = rest.indexOf('__')
+  if (i <= 0) return null
+  const server = rest.slice(0, i)
+  const tool = rest.slice(i + 2)
+  return server && tool ? { server, tool } : null
+}
+
+// toolVerb is the短动词 for a tool row. Built-ins come from the catalog above; an
+// MCP tool uses its server's Chinese name, falling back to the bare tool name so a
+// row never shows the mcp__server__tool plumbing. A nameless event gets a generic
+// label.
+export function toolVerb(name?: string): string {
+  const builtin = BUILTIN_TOOLS[name || '']?.verb
+  if (builtin) return builtin
+  return mcpOrOwnName(name)
+}
+
+// toolLabel is the full name for a management row (plugins page), following the
+// same rules as toolVerb but using the catalog's label field.
+export function toolLabel(name?: string): string {
+  const builtin = BUILTIN_TOOLS[name || '']?.label
+  if (builtin) return builtin
+  return mcpOrOwnName(name)
+}
+
+// mcpOrOwnName resolves a non-built-in tool: an MCP tool gets its server's
+// Chinese name (or its bare tool name), anything else keeps its own name.
+function mcpOrOwnName(name?: string): string {
+  const mcp = name ? parseMcpToolName(name) : null
+  if (mcp) return MCP_TOOLS[mcp.server]?.[mcp.tool] || mcp.tool
+  return name || '工具'
+}

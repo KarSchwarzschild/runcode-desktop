@@ -1,0 +1,347 @@
+package desktop
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/mcp"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/settings"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
+)
+
+// TestPassportInjectionEndToEndFromConfig walks the exact chain that decides
+// whether a platform MCP server authenticates: the passport flag in the user's
+// config.toml → loadDesktopMCP → attachMCPPassport → the headers the transport
+// puts on every request. A regression here is what makes a platform server answer
+// 401, and it is invisible in the per-function tests above.
+//
+// 样本服务器**故意不叫 oa**：OA 已改为内置工具，那个名字现在是退役条目，会被
+// loadDesktopMCP 直接跳过（见 mcpretire.go）。改回 oa 的表现是本用例只拿到一台
+// 服务器然后失败——那不是回归，是这条注释没人看。
+func TestPassportInjectionEndToEndFromConfig(t *testing.T) {
+	// 配置根用 isolateConfigDir 的返回值，不能按临时目录直接拼：macOS 的
+	// os.UserConfigDir 是 $HOME/Library/Application Support，与 HOME 差着两层，
+	// 按 HOME 拼出来的路径在那边永远读不到。
+	cfgDir := filepath.Join(isolateConfigDir(t), "runcode")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const cfg = `
+[mcp.servers.platform]
+transport = 'http'
+url = 'http://platform.example/mcp'
+passport = true
+
+[mcp.servers.third]
+transport = 'http'
+url = 'http://third.example/mcp'
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	servers, _ := loadDesktopMCP(t.TempDir())
+	if len(servers) != 2 {
+		t.Fatalf("loadDesktopMCP returned %d servers, want 2", len(servers))
+	}
+
+	app := &App{tokens: newTokenManager("", "", nil, nil), passportTenant: "t-9"}
+	app.tokens.ts = tokenSet{AccessToken: "LIVE-TOKEN", Expiry: time.Now().Add(time.Hour)}
+	app.attachMCPPassport(servers)
+
+	byName := map[string]mcp.ServerConfig{}
+	for _, s := range servers {
+		byName[s.Name] = s
+	}
+	platform, third := byName["platform"], byName["third"]
+	if platform.HeaderSource == nil {
+		t.Fatal("platform server has no HeaderSource: passport=true in config.toml never reached the transport (this is the 401)")
+	}
+	h, err := platform.HeaderSource()
+	if err != nil {
+		t.Fatalf("platform HeaderSource: %v", err)
+	}
+	if h["Authorization"] != "Bearer LIVE-TOKEN" {
+		t.Fatalf("Authorization = %q, want Bearer LIVE-TOKEN", h["Authorization"])
+	}
+	if h["X-Tenant-Id"] != "t-9" {
+		t.Fatalf("X-Tenant-Id = %q, want t-9", h["X-Tenant-Id"])
+	}
+	if third.HeaderSource != nil {
+		t.Fatal("a server without passport=true must never receive the user's token")
+	}
+}
+
+func TestApplyMCPPassportOnlyTouchesNamedServers(t *testing.T) {
+	servers := []mcp.ServerConfig{{Name: "platform"}, {Name: "third-party"}}
+	sentinel := func() (map[string]string, error) { return map[string]string{"X": "1"}, nil }
+	applyMCPPassport(servers, map[string]bool{"platform": true}, sentinel)
+
+	if servers[0].HeaderSource == nil {
+		t.Fatal("the platform server should have a HeaderSource attached")
+	}
+	if servers[1].HeaderSource != nil {
+		t.Fatal("third-party must not get a HeaderSource (the token must not leak to it)")
+	}
+	// The other half of opting in — waiving the per-call approval prompt — is no
+	// longer a field on ServerConfig: configureSession derives it from the same
+	// passportMCPNames set when it builds the permission policy. Keeping both halves
+	// on one name set is what stops them from disagreeing.
+	got, err := servers[0].HeaderSource()
+	if err != nil || got["X"] != "1" {
+		t.Fatalf("HeaderSource() = %v, %v; want the sentinel headers", got, err)
+	}
+}
+
+func TestPassportHeadersInjectsTokenAndTenant(t *testing.T) {
+	h, err := passportHeaders(func() (string, error) { return "abc", nil }, "t-1")
+	if err != nil {
+		t.Fatalf("passportHeaders: %v", err)
+	}
+	if h["Authorization"] != "Bearer abc" {
+		t.Fatalf("Authorization = %q, want Bearer abc", h["Authorization"])
+	}
+	if h["X-Tenant-Id"] != "t-1" {
+		t.Fatalf("X-Tenant-Id = %q, want t-1", h["X-Tenant-Id"])
+	}
+}
+
+func TestPassportHeadersOmitsTenantWhenEmpty(t *testing.T) {
+	h, err := passportHeaders(func() (string, error) { return "abc", nil }, "   ")
+	if err != nil {
+		t.Fatalf("passportHeaders: %v", err)
+	}
+	if _, ok := h["X-Tenant-Id"]; ok {
+		t.Fatal("X-Tenant-Id must be omitted for an empty tenant")
+	}
+}
+
+func TestPassportHeadersPropagatesTokenError(t *testing.T) {
+	_, err := passportHeaders(func() (string, error) { return "", errors.New("not logged in") }, "t-1")
+	if err == nil || err.Error() != "not logged in" {
+		t.Fatalf("err = %v, want the token error to propagate (no anonymous request)", err)
+	}
+}
+
+// TestMarketInstallPersistsPassportFlag proves the install path a market click
+// takes (SaveMCPServer with the entry's passport flag) actually lands in
+// config.toml — so a platform-built server authenticates without anyone editing
+// anything by hand.
+//
+// 样本**故意不叫 oa**：OA 已改为内置工具、从市场下架，那个名字现在是退役条目
+// （见 mcpretire.go）。这条测的是"市场安装"这条路本身，它对将来任何一个基座自建
+// MCP 仍然成立。
+func TestMarketInstallPersistsPassportFlag(t *testing.T) {
+	home := t.TempDir()
+	isolateConfigDirAt(t, home)
+
+	app := &App{}
+	// Exactly what the market's 安装 button sends for a platform entry.
+	if err := app.SaveMCPServer(MCPServerInput{
+		Name: "platform", Transport: "http", URL: "http://platform.example/mcp",
+		Passport: true, Enabled: true,
+	}); err != nil {
+		t.Fatalf("SaveMCPServer: %v", err)
+	}
+
+	servers, err := app.loadMCPServers()
+	if err != nil {
+		t.Fatalf("loadMCPServers: %v", err)
+	}
+	installed, ok := servers["platform"]
+	if !ok {
+		t.Fatal("the platform server was not written to config.toml")
+	}
+	if !mcpPassportEnabled(installed) {
+		t.Fatal("install did not persist passport=true — the server would stay anonymous (401)")
+	}
+
+	// And a third-party install must stay anonymous.
+	if err := app.SaveMCPServer(MCPServerInput{
+		Name: "third", Transport: "http", URL: "http://third.example/mcp", Enabled: true,
+	}); err != nil {
+		t.Fatalf("SaveMCPServer(third): %v", err)
+	}
+	servers, _ = app.loadMCPServers()
+	if mcpPassportEnabled(servers["third"]) {
+		t.Fatal("a non-platform server must not be marked for token injection")
+	}
+}
+
+// TestSyncMarketOnceSkipsWhenLoggedOutOrAlreadySynced pins the once-per-run
+// contract: the market decides which servers carry the user's identity, but it
+// changes on the platform's schedule, not per session — so opening a session
+// must never pay for a fetch. A logged-out app fetches nothing at all.
+func TestSyncMarketOnceSkipsWhenLoggedOutOrAlreadySynced(t *testing.T) {
+	// Logged out (no token): must not attempt a fetch, and must not mark synced —
+	// a later login has to be able to retry.
+	app := &App{tokens: newTokenManager("", "", nil, nil)}
+	app.syncMarketOnce()
+	if app.marketSynced {
+		t.Fatal("a logged-out sync must stay unmarked so a later login retries")
+	}
+
+	// Already synced this run: returns without touching the network even when a
+	// token is present (a fetch here would panic on the nil HTTP client).
+	app.tokens.ts = tokenSet{AccessToken: "LIVE", Expiry: time.Now().Add(time.Hour)}
+	app.marketSynced = true
+	app.syncMarketOnce()
+}
+
+// TestConfigureSessionTrustsPlatformMCPServers pins the wiring that actually
+// decides whether the OA server prompts. Two things make this easy to get wrong:
+// the desktop installs its own permissions.Service (to add the harm judge), which
+// bypasses the engine's default policy wiring; and the engine no longer carries
+// any notion of a trusted server, so the set must be derived here — from the same
+// config.toml opt-in that grants the identity headers. Miss it and every platform
+// MCP call prompts for approval, which is invisible in the per-layer tests.
+func TestConfigureSessionTrustsPlatformMCPServers(t *testing.T) {
+	// 配置根用 isolateConfigDir 的返回值，不能按临时目录直接拼：macOS 的
+	// os.UserConfigDir 是 $HOME/Library/Application Support，与 HOME 差着两层，
+	// 按 HOME 拼出来的路径在那边永远读不到。
+	cfgDir := filepath.Join(isolateConfigDir(t), "runcode")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const conf = `
+[mcp.servers.platform]
+transport = 'http'
+url = 'http://platform/mcp'
+passport = true
+
+[mcp.servers.third]
+transport = 'http'
+url = 'http://third/mcp'
+`
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(conf), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	app := &App{}
+	workspace := t.TempDir()
+	servers, _ := loadDesktopMCP(workspace)
+	cfg := engine.Config{CWD: workspace, PermissionMode: "safe", MCPServers: servers}
+	bindings := map[string]tool.AuthorizationBinding{}
+	for _, server := range servers {
+		bindings[server.Name] = mcp.ServerBinding(server)
+	}
+
+	opts := engine.Options{}
+	app.configureSession(host.SessionContext{ID: "s1", Emit: func(string, any) {}}, &cfg, &opts)
+	if opts.Permissions == nil {
+		t.Fatal("configureSession installed no permission service")
+	}
+
+	call := func(tool string) permissions.Decision {
+		_, d := opts.Permissions.AuthorizeTool(context.Background(), permissions.ResolveRequest{
+			ToolName: tool,
+			Binding:  bindings[strings.Split(tool, "__")[1]],
+			Input:    json.RawMessage(`{}`),
+		})
+		return d
+	}
+	if got := call("mcp__platform__list"); got.FinalEffect != permissions.EffectAllow {
+		t.Fatalf("platform MCP call effect = %v (reason %v), want allow without approval",
+			got.FinalEffect, got.Reason)
+	}
+	// A third-party server must still be gated — in safe mode that means denied,
+	// never silently allowed.
+	if got := call("mcp__third__run"); got.FinalEffect == permissions.EffectAllow {
+		t.Fatal("a third-party MCP call must not be auto-allowed")
+	}
+	unbound := permissions.ResolveRequest{ToolName: "mcp__platform__list", Input: json.RawMessage(`{}`)}
+	if _, d := opts.Permissions.AuthorizeTool(context.Background(), unbound); d.FinalEffect == permissions.EffectAllow {
+		t.Fatal("unbound same-name tool inherited trust")
+	}
+	replacement := bindings["platform"]
+	replacement.Identity = "different-endpoint"
+	unbound.Binding = replacement
+	if _, d := opts.Permissions.AuthorizeTool(context.Background(), unbound); d.FinalEffect == permissions.EffectAllow {
+		t.Fatal("replacement endpoint inherited same-name trust")
+	}
+	// Mutating the file after loading must not cause credential injection to
+	// re-read a different name set than the policy's captured configuration.
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte(`[mcp.servers.platform]
+transport='http'
+url='http://replacement/mcp'
+passport=false
+`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	app.attachMCPPassport(servers)
+	for _, server := range servers {
+		if server.Name == "platform" && server.HeaderSource == nil {
+			t.Fatal("credential injection reread a newer names-only config")
+		}
+		if server.Name == "third" && server.HeaderSource != nil {
+			t.Fatal("third-party server acquired credentials")
+		}
+	}
+
+}
+
+// TestReloadMCPServersGuards covers the two cases where applying MCP changes to a
+// live session must not rebuild it: no session at all (nothing to do — the next
+// session reads the new config), and a turn in flight (rebuilding would drop the
+// in-flight tool calls).
+func TestReloadMCPServersGuards(t *testing.T) {
+	idle := &App{}
+	reloaded, err := idle.ReloadMCPServers()
+	if err != nil || reloaded {
+		t.Fatalf("no session: got (%v, %v), want (false, nil)", reloaded, err)
+	}
+
+	busy := &App{}
+	focusOn(busy, "s1", "").turnActive = true
+	busy.config.Model = "m"
+	reloaded, err = busy.ReloadMCPServers()
+	if reloaded || err == nil {
+		t.Fatalf("busy session: got (%v, %v), want (false, error explaining the wait)", reloaded, err)
+	}
+}
+
+// TestMCPPassportExtraRoundTrip pins the storage side of the opt-in: the flag now
+// lives in the engine's untyped Extra map (the engine no longer has a passport
+// field), so reading and writing it is entirely ours to get right.
+func TestMCPPassportExtraRoundTrip(t *testing.T) {
+	// A server with no extras is not opted in.
+	if mcpPassportEnabled(settings.MCPServerConfig{}) {
+		t.Error("a server with no extras must not be treated as ours")
+	}
+
+	// Only a real bool true counts: a stray string must not grant the token.
+	if mcpPassportEnabled(settings.MCPServerConfig{Extra: map[string]any{"passport": "true"}}) {
+		t.Error(`Extra["passport"] = "true" (a string) must not opt a server in`)
+	}
+
+	on := withMCPPassport(settings.MCPServerConfig{}, true)
+	if !mcpPassportEnabled(on) {
+		t.Fatalf("opt-in did not round-trip: %#v", on.Extra)
+	}
+	off := withMCPPassport(on, false)
+	if mcpPassportEnabled(off) {
+		t.Fatalf("opt-out did not round-trip: %#v", off.Extra)
+	}
+
+	// Other host keys in Extra must survive: the market sync rewrites this flag on
+	// every run, and clobbering neighbouring keys would quietly drop them.
+	withOthers := settings.MCPServerConfig{Extra: map[string]any{"tenant_scope": "school"}}
+	kept := withMCPPassport(withOthers, true)
+	if kept.Extra["tenant_scope"] != "school" {
+		t.Errorf("neighbouring extension lost: %#v", kept.Extra)
+	}
+	// The source map must not be mutated in place — callers hold copies of the
+	// loaded config and compare old against new to decide whether to write.
+	if _, leaked := withOthers.Extra["passport"]; leaked {
+		t.Error("withMCPPassport mutated its input instead of copying")
+	}
+}

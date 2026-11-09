@@ -1,0 +1,95 @@
+package desktop
+
+// 会话自动命名:每个回合结束后用这一轮的用户输入生成一个短标题,写进会话的
+// sidecar 并广播,侧栏据此更新。全程尽力而为——生成失败、会话已被替换、写盘出错
+// 都静默放弃,绝不影响对话本身。
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/sessions"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/turn"
+)
+
+// titleGenTimeout bounds the off-turn title-generation request so a slow or stuck
+// model call cannot leak a goroutine.
+const titleGenTimeout = 30 * time.Second
+
+// titleGenerator is the slice of engine.Session auto-title needs (an interface
+// so tests can fake the session through the host's BuildFunc).
+type titleGenerator interface {
+	GenerateTitle(ctx context.Context, userText string) (string, error)
+}
+
+// onTurnEnd is the host's post-turn hook (Options.OnTurnEnd): it fires on the
+// turn goroutine right after the turn:end envelope. Per the hook's contract it
+// must not block, so it only launches the title refresh goroutine.
+func (a *App) onTurnEnd(sctx host.SessionContext, result turn.Result) {
+	// 按信封里的会话 id 取,而不是"是不是当前那个":后台会话的回合也该有标题。
+	// 会话若已被替换,条目在新会话开出来时就被清了,这里取到 nil,自然跳过。
+	a.mu.Lock()
+	text := ""
+	questionID := ""
+	if e := a.entryLocked(sctx.ID); e != nil {
+		text = e.lastUserText
+		if e.knowledgeTurn != nil {
+			questionID = e.knowledgeTurn.snapshot().QuestionID
+		}
+	}
+	a.mu.Unlock()
+	// D01: only successfully completed turns auto-reuse knowledge evidence.
+	outcome := "completed"
+	if result.Stopped {
+		outcome = "cancelled"
+	}
+	if questionID != "" {
+		a.noteKnowledgeTurnOutcome(sctx.ID, questionID, outcome)
+	}
+	// OA 自动切换也挂在这里:闸门只能在回合中途"拦下并排队",真正的重建必须等回合
+	// 结束(重建会把正在跑的回合连根拔掉)。与标题各起一个 goroutine——标题失败不该
+	// 拖住切换,切换耗时也不该拖住标题。
+	go a.maybeSwitchToLocalModel(sctx)
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	go a.refreshTitle(sctx, text)
+}
+
+// refreshTitle generates a short title for the session from userText, persists it
+// to the session's sidecar, and announces it (session:renamed via the session's
+// emitter) so the sidebar can update. It regenerates after every turn so the
+// title tracks the latest request, and is best-effort: any error (model
+// failure, closed session, write error) is ignored.
+func (a *App) refreshTitle(sctx host.SessionContext, userText string) {
+	s, err := a.mgr.Session(sctx.ID)
+	if err != nil {
+		return // session already closed or replaced
+	}
+	tg, ok := s.(titleGenerator)
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), titleGenTimeout)
+	defer cancel()
+	title, err := tg.GenerateTitle(ctx, userText)
+	if err != nil || strings.TrimSpace(title) == "" {
+		return
+	}
+	a.mu.Lock()
+	ws := ""
+	if e := a.entryLocked(sctx.ID); e != nil && !e.closed {
+		ws = e.workspace
+	}
+	a.mu.Unlock()
+	// Skip if the session was replaced (new/resumed/closed) while generating.
+	if ws == "" {
+		return
+	}
+	if err := sessions.SaveTitle(ws, sctx.ID, title); err != nil {
+		return
+	}
+	sctx.Emit(EventSessionRenamed, SessionRenamed{ID: sctx.ID, Title: title})
+}

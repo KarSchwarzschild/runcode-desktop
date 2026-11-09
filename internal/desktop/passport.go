@@ -1,0 +1,482 @@
+package desktop
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"strings"
+	"time"
+
+	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
+)
+
+// Passport（通行证）登录：系统浏览器 + authorization_code + PKCE。
+// redirect_uri 恒为 Bridge 的中转端点，本地端口经 state 传递（Bridge 302 回跳）。
+
+// passportSettings 是登录与 Bridge 访问的端点配置，默认值为 AI 环境实测值，
+// 均可用环境变量覆盖。
+type passportSettings struct {
+	Authority        string // 如 https://passport-ai.ouchn.edu.cn
+	ClientID         string
+	Scopes           string
+	BridgeBaseURL    string // 如 https://bridge-aibase.ouc-online.com.cn（不含 /v1）
+	KnowledgeBaseURL string // Defaults to BridgeBaseURL; a trusted test gateway may override knowledge routes only.
+	RedirectURI      string // Registered OAuth relay; defaults to BridgeBaseURL + /oauth/callback.
+}
+
+func passportConfig() passportSettings {
+	authority := strings.TrimRight(envOr("RUNCODE_PASSPORT_AUTHORITY", "https://passport-ai.ouchn.edu.cn"), "/")
+	bridge := strings.TrimRight(envOr("RUNCODE_BRIDGE_BASE_URL", "https://bridge-aibase.ouc-online.com.cn"), "/")
+	return passportSettings{
+		Authority: authority,
+		ClientID:  envOr("RUNCODE_PASSPORT_CLIENT_ID", "runcode-desktop"),
+		// manageapi 是技能市场那条链路要的：网关拿用户令牌去查租户成员关系，而那个
+		// 接口只认 manageapi 的受众——少了它，任何租户都会被判成 selected tenant is
+		// invalid（网关对"没带租户头"和"租户不认"返回同一句话，所以报错完全指不出
+		// 是这个原因，这一条是实测比对两份令牌的 aud 才找出来的）。
+		//
+		// 授权范围只在**登录**时申请，刷新令牌不会补上。所以升到带 manageapi 的版本
+		// 之后，老的登录态仍然缺它，要退出重登一次——skillmarket.go 的 marketGet 会
+		// 认出这种情况并直说，而不是甩一个看不懂的 403。
+		//
+		// 可覆盖：万一通行证那边没给这个客户端放开 manageapi，登录会直接
+		// invalid_scope 失败；那时用环境变量退回旧的一串即可，不必等新包。
+		Scopes:           envOr("RUNCODE_PASSPORT_SCOPES", "openid profile offline_access passportapi manageapi"),
+		BridgeBaseURL:    bridge,
+		KnowledgeBaseURL: strings.TrimRight(envOr("RUNCODE_KNOWLEDGE_BRIDGE_BASE_URL", bridge), "/"),
+		// Local API testing must not invent a callback that Passport has never
+		// registered. This trusted startup setting changes only the OAuth relay.
+		RedirectURI: envOr("RUNCODE_PASSPORT_REDIRECT_URI", bridge+"/oauth/callback"),
+	}
+}
+
+func (s passportSettings) tokenURL() string { return s.Authority + "/connect/token" }
+
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
+	}
+	return fallback
+}
+
+// tenantPathPrefix 把选定的租户拼进 Bridge 路径前缀：非空 → /t/{tenantId}，
+// 空 → ""（走令牌自带租户/兜底）。租户 ID 已由 Bridge 侧白名单校验，这里原样拼。
+func tenantPathPrefix(tenantID string) string {
+	if strings.TrimSpace(tenantID) == "" {
+		return ""
+	}
+	return "/t/" + tenantID
+}
+
+// loginTimeout 是等待用户在浏览器完成登录的上限。
+const loginTimeout = 5 * time.Minute
+
+// PassportStatus 返回当前登录态；已登录且未缓存用户信息时尝试拉取（失败不缓存、下次重试）。
+func (a *App) PassportStatus() PassportStatus {
+	if !a.tokens.LoggedIn() {
+		return PassportStatus{}
+	}
+	a.mu.Lock()
+	cached := a.passportUser
+	a.mu.Unlock()
+	if cached != nil {
+		return *cached
+	}
+	st := PassportStatus{LoggedIn: true}
+	if me, err := a.fetchMe(); err == nil {
+		st = me
+		a.mu.Lock()
+		a.passportUser = &st
+		a.mu.Unlock()
+	}
+	// 失败：返回临时占位（LoggedIn=true 无档案），不缓存 —— 下次调用会重试 fetchMe
+	return st
+}
+
+// PassportLogin 执行完整登录流程，阻塞至完成/超时/取消。
+func (a *App) PassportLogin(scheme string) (PassportStatus, error) {
+	// 防护并发登录：若已有登录流程进行中，拒绝新请求
+	a.mu.Lock()
+	if a.loginCancel != nil {
+		a.mu.Unlock()
+		return PassportStatus{}, wireError(errors.New("已有登录流程进行中，请先完成或取消"))
+	}
+	a.mu.Unlock()
+	// 注意：此处与后续 loginCancel 赋值间存在 TOCTOU 窗口（UI 双击时无害）
+
+	cfg := passportConfig()
+
+	cs, err := startCallbackServer()
+	if err != nil {
+		return PassportStatus{}, wireError(err)
+	}
+	defer cs.Close()
+
+	verifier, challenge, err := genPKCE()
+	if err != nil {
+		return PassportStatus{}, wireError(err)
+	}
+	state, err := genState(cs.Port)
+	if err != nil {
+		return PassportStatus{}, wireError(err)
+	}
+	cs.ExpectState(state)
+
+	ctx, cancel := context.WithTimeout(context.Background(), loginTimeout)
+	a.mu.Lock()
+	a.loginCancel = cancel
+	a.mu.Unlock()
+	defer func() {
+		cancel()
+		a.mu.Lock()
+		a.loginCancel = nil
+		a.mu.Unlock()
+	}()
+
+	authURL := buildAuthorizeURL(cfg.Authority, cfg.ClientID, cfg.RedirectURI, cfg.Scopes, state, challenge, scheme)
+	if err := openBrowser(authURL); err != nil {
+		return PassportStatus{}, wireError(fmt.Errorf("无法打开系统浏览器: %w", err))
+	}
+
+	var code string
+	select {
+	case r := <-cs.Result:
+		if r.Err != nil {
+			return PassportStatus{}, wireError(r.Err)
+		}
+		code = r.Code
+	case <-ctx.Done():
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return PassportStatus{}, wireError(errors.New("登录已取消"))
+		}
+		return PassportStatus{}, wireError(errors.New("登录超时，请重试"))
+	}
+
+	ts, err := exchangeCode(ctx, passportHTTP(), cfg.tokenURL(), cfg.ClientID, code, verifier, cfg.RedirectURI)
+	if err != nil {
+		return PassportStatus{}, wireError(err)
+	}
+	a.tokens.Set(ts)
+
+	st := PassportStatus{LoggedIn: true}
+	if me, err := a.fetchMe(); err == nil {
+		st = me
+		a.mu.Lock()
+		a.passportUser = &st
+		a.mu.Unlock()
+	}
+	// 失败：返回临时占位（LoggedIn=true 无档案），不缓存 —— 下次调用会重试 fetchMe
+	a.sink.Emit(EventPassportChanged, st)
+	// 首次登录（冷启动时无令牌，启动那次同步取不到）在此补上，之后本次运行不再拉。
+	go a.syncMarketOnce()
+	// 更新检查同理补一次。它本身不要求登录（见 update.go），但**这个部署**可能要求，
+	// 那时启动那趟会被 401/403 挡住；登录恰好是它唯一的转机，所以在这里重试一次。
+	// 已经成功查过就是空操作（autoCheckUpdate 自己判 autoDone）。
+	go a.autoCheckUpdate(0)
+	return st, nil
+}
+
+// PassportCancelLogin 取消进行中的登录等待。
+func (a *App) PassportCancelLogin() {
+	a.mu.Lock()
+	cancel := a.loginCancel
+	a.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// PassportLogout 清除本地令牌（不调 Passport endsession——桌面登出不应
+// 顺带登出浏览器里的 SSO 会话）。
+func (a *App) PassportLogout() {
+	a.cancelQuestionAdmissions()
+	a.tokens.Clear()
+	a.mu.Lock()
+	a.passportUser = nil
+	a.mu.Unlock()
+	a.sink.Emit(EventPassportChanged, PassportStatus{})
+}
+
+// PassportTenants 列出当前用户可用的租户；单租户时前端自动选定，多租户让用户选。
+func (a *App) PassportTenants() ([]PassportTenant, error) {
+	body, err := a.bridgeGet("/api/tenants")
+	if err != nil {
+		return nil, wireError(err)
+	}
+	var tenants []PassportTenant
+	if err := json.Unmarshal(body, &tenants); err != nil {
+		return nil, wireError(fmt.Errorf("解析租户列表失败: %w", err))
+	}
+	return tenants, nil
+}
+
+// SetActiveTenant 切换当前活动租户：持久化到 desktop.json，并更新内存配置(供对话内
+// 模型选择器与下次新建/恢复会话使用)。仅在通行证会话下更新 baseURL。
+func (a *App) SetActiveTenant(tenantID string) error {
+	tenantID = strings.TrimSpace(tenantID)
+	a.startMu.Lock()
+	defer a.startMu.Unlock()
+	if err := updateRawConfig(func(raw *desktopConfig) error {
+		raw.TenantID = tenantID
+		return nil
+	}); err != nil {
+		return wireError(err)
+	}
+	pc := passportConfig()
+	a.mu.Lock()
+	a.passportTenant = tenantID
+	if a.configPassport {
+		a.config.BaseURL = pc.BridgeBaseURL + tenantPathPrefix(tenantID) + "/v1"
+	}
+	a.mu.Unlock()
+	return nil
+}
+
+// ActiveTenant 返回当前活动租户 id(可能为空 = 令牌自带租户)。
+func (a *App) ActiveTenant() string {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.passportTenant
+}
+
+// SessionModels 返回当前通行证会话所选租户的平台模型，供对话内模型选择器使用；
+// 未登录返回空。
+func (a *App) SessionModels() ([]PassportModel, error) {
+	if !a.tokens.LoggedIn() {
+		return nil, nil
+	}
+	a.mu.Lock()
+	tid := a.passportTenant
+	if a.liveEntryLocked() != nil && a.livePassport {
+		tid = a.livePassportTenant
+	}
+	a.mu.Unlock()
+	return a.PassportModels(tid)
+}
+
+// PassportModels 经 Bridge 列指定租户的平台模型（tenantID 空 = 令牌自带租户）。
+func (a *App) PassportModels(tenantID string) ([]PassportModel, error) {
+	return a.passportModelsTimeout(tenantID, 30*time.Second)
+}
+
+// passportModelsTimeout 是 PassportModels 带显式超时的形态，供会话创建这类延迟
+// 敏感路径用（见 oa.go 的 localModel：宁可这次没有 OA 工具，也不能让新建会话卡在
+// 一个慢 Bridge 上）。
+//
+// 每次成功都顺手刷新本地模型缓存：模型清单本来就是这一份，让 OA 那边再拉一趟只会
+// 多一次网络、还可能拿到与选择器不一致的两份视图。
+func (a *App) passportModelsTimeout(tenantID string, timeout time.Duration) ([]PassportModel, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return a.passportModelsContext(ctx, tenantID)
+}
+
+func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]PassportModel, error) {
+	actor := a.visionAccountIdentity()
+	scope := platformModelRef(tenantID, "")
+	body, status, err := a.bridgeGetStatusContext(ctx, tenantPathPrefix(tenantID)+"/v1/models")
+	if status == http.StatusUnauthorized && ctx.Err() == nil && a.visionAccountIdentity() == actor {
+		a.tokens.ForceRefresh()
+		if a.visionAccountIdentity() != actor {
+			return nil, wireError(errNotLoggedIn)
+		}
+		body, _, err = a.bridgeGetStatusContext(ctx, tenantPathPrefix(tenantID)+"/v1/models")
+	}
+	if err != nil {
+		return nil, wireError(err)
+	}
+	// local/local_default/context_tokens 是本产品对 OpenAI 模型清单的扩展(见
+	// protocol.PassportModel)。老 Bridge 不回这三个字段，解出来是零值，表现为
+	// "没有本地模型"——于是 OA 工具不注册，而不是错把云端模型当成本地的。
+	var payload struct {
+		Data []struct {
+			ID                 string `json:"id"`
+			OwnedBy            string `json:"owned_by"`
+			SupportsImages     *bool  `json:"supports_images"`
+			VisionDefault      bool   `json:"vision_default"`
+			Local              bool   `json:"local"`
+			LocalDefault       bool   `json:"local_default"`
+			ContextTokens      *int   `json:"context_tokens"`
+			MaxOutputTokens    *int   `json:"max_output_tokens"`
+			MaxHistoryMessages *int   `json:"max_history_messages"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return nil, wireError(fmt.Errorf("解析模型列表失败: %w", err))
+	}
+	models := make([]PassportModel, 0, len(payload.Data))
+	for _, m := range payload.Data {
+		contextTokens := 0
+		if m.ContextTokens != nil {
+			contextTokens = *m.ContextTokens
+		} else {
+			// A partial payload is not a complete set of model defaults.
+			m.MaxOutputTokens, m.MaxHistoryMessages = nil, nil
+		}
+		models = append(models, PassportModel{
+			SupportsImages:     m.SupportsImages,
+			VisionDefault:      m.VisionDefault,
+			ID:                 m.ID,
+			OwnedBy:            m.OwnedBy,
+			Local:              m.Local,
+			LocalDefault:       m.LocalDefault,
+			ContextTokens:      contextTokens,
+			MaxOutputTokens:    m.MaxOutputTokens,
+			MaxHistoryMessages: m.MaxHistoryMessages,
+		})
+	}
+	if a.visionAccountIdentity() != actor {
+		return nil, wireError(errors.New("加载模型期间账号已变化，请重试"))
+	}
+	if scope != platformModelRef(tenantID, "") {
+		return nil, wireError(errors.New("加载模型期间平台已变化，请重试"))
+	}
+	a.rememberModelCatalog(scope, actor, models)
+	stored := loadRawConfig()
+	for i := range models {
+		if v := imageOverride(stored, platformModelRef(tenantID, models[i].ID)); v != nil {
+			models[i].SupportsImages = v
+		}
+	}
+	a.rememberLocalModel(tenantID, models)
+	return models, nil
+}
+
+// PassportValidate confirms the persisted token still works by calling the
+// Bridge /api/me. On an auth rejection (401/403) it retries once after forcing a
+// token refresh; if that still fails the token is dead, so it logs out and
+// reports not-logged-in — the UI then returns to the login screen. A transient
+// network/server error keeps the session (a Bridge outage must not force a
+// re-login).
+func (a *App) PassportValidate() PassportStatus {
+	if !a.tokens.LoggedIn() {
+		return PassportStatus{}
+	}
+	me, status, err := a.fetchMeStatus()
+	if err == nil {
+		a.mu.Lock()
+		a.passportUser = &me
+		a.mu.Unlock()
+		return me
+	}
+	if status == http.StatusUnauthorized || status == http.StatusForbidden {
+		a.tokens.ForceRefresh()
+		if me2, _, err2 := a.fetchMeStatus(); err2 == nil {
+			a.mu.Lock()
+			a.passportUser = &me2
+			a.mu.Unlock()
+			return me2
+		}
+		a.tokens.Clear()
+		a.mu.Lock()
+		a.passportUser = nil
+		a.mu.Unlock()
+		return PassportStatus{}
+	}
+	// Transient failure (network / 5xx): keep the session rather than log out.
+	a.mu.Lock()
+	cached := a.passportUser
+	a.mu.Unlock()
+	if cached != nil {
+		return *cached
+	}
+	return PassportStatus{LoggedIn: true}
+}
+
+// fetchMe 经 Bridge /api/me 拉取用户信息。
+func (a *App) fetchMe() (PassportStatus, error) {
+	st, _, err := a.fetchMeStatus()
+	return st, err
+}
+
+// fetchMeStatus fetches /api/me and also returns the HTTP status so callers can
+// distinguish an auth rejection from a transient failure.
+func (a *App) fetchMeStatus() (PassportStatus, int, error) {
+	body, status, err := a.bridgeGetStatus("/api/me")
+	if err != nil {
+		return PassportStatus{}, status, err
+	}
+	var me struct {
+		UserID   string `json:"userId"`
+		UserName string `json:"userName"`
+		Name     string `json:"name"`
+		Nickname string `json:"nickname"`
+		Avatar   string `json:"avatar"`
+		TenantID string `json:"tenantId"`
+	}
+	if err := json.Unmarshal(body, &me); err != nil {
+		return PassportStatus{}, status, wireError(err)
+	}
+	return PassportStatus{LoggedIn: true, UserID: me.UserID, UserName: me.UserName,
+		Name: me.Name, Nickname: me.Nickname, Avatar: me.Avatar, TenantID: me.TenantID}, status, nil
+}
+
+// bridgeGet 带登录令牌 GET Bridge 端点，返回响应体。
+func (a *App) bridgeGet(path string) ([]byte, error) {
+	body, _, err := a.bridgeGetStatus(path)
+	return body, err
+}
+
+// bridgeGetStatus is bridgeGet plus the HTTP status code (0 before a response).
+func (a *App) bridgeGetStatus(path string) ([]byte, int, error) {
+	return a.bridgeGetStatusTimeout(path, 30*time.Second)
+}
+
+// bridgeGetStatusTimeout is bridgeGetStatus with an explicit deadline, for callers
+// on a latency-sensitive path (session startup) that must not stall on a slow or
+// unreachable bridge.
+func (a *App) bridgeGetStatusTimeout(path string, timeout time.Duration) ([]byte, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	return a.bridgeGetStatusContext(ctx, path)
+}
+
+func (a *App) bridgeGetStatusContext(ctx context.Context, path string) ([]byte, int, error) {
+	tok, err := a.tokens.Token()
+	if err != nil {
+		return nil, 0, wireError(err)
+	}
+	cfg := passportConfig()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.BridgeBaseURL+path, nil)
+	if err != nil {
+		return nil, 0, wireError(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+tok)
+	resp, err := passportHTTP().Do(req)
+	if err != nil {
+		return nil, 0, wireError(fmt.Errorf("访问中间服务失败: %w", err))
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if resp.StatusCode != http.StatusOK {
+		return body, resp.StatusCode, wireError(fmt.Errorf("中间服务返回 %d: %s", resp.StatusCode, strings.TrimSpace(string(body))))
+	}
+	return body, resp.StatusCode, nil
+}
+
+// applyPassport 在 provider=="passport" 时把引擎配置切到 Bridge + TokenSource。
+func (a *App) applyPassport(cfg engine.Config, req StartSessionRequest) engine.Config {
+	if !strings.EqualFold(strings.TrimSpace(req.Provider), "passport") {
+		return cfg
+	}
+	pc := passportConfig()
+	cfg.Provider = "openai"
+	// 选定租户 → /t/{tenantId}/v1，让 Bridge 按该租户计费/限额；空则走令牌自带租户。
+	cfg.BaseURL = pc.BridgeBaseURL + tenantPathPrefix(req.TenantID) + "/v1"
+	cfg.APIKey = ""
+	cfg.AuthToken = ""
+	cfg.TokenSource = a.tokens.Token
+	// 服务端 401(令牌过期/被拒)时强制刷新一次令牌后重试。
+	cfg.OnUnauthorized = a.tokens.ForceRefresh
+	return cfg
+}
+
+// passportHTTP 是调 Passport/Bridge 的普通客户端。不用 internal/webclient——
+// 那个加固客户端拒连回环/内网地址，而 Bridge 常部署在内网。
+func passportHTTP() *http.Client {
+	return &http.Client{Timeout: 60 * time.Second}
+}

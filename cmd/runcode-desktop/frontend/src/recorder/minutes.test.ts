@@ -1,0 +1,437 @@
+import { describe, expect, it } from 'vitest'
+
+import {
+  buildDigestPrompt, buildMinutesPrompt, compactTranscript, digestDisplayText, docDisplayText, minutesDisplayText,
+  minutesFileName, parseRecordingMarker, pickMinutesSkill, recordingMarker, speakerBriefing,
+  speakerLabels, type RecordingMark,
+} from './minutes'
+
+function info(p: Partial<RecordingMark> = {}): RecordingMark {
+  return {
+    id: 'rec_20260819_105756',
+    title: '季度评审',
+    startedAt: '2026-08-19T10:57:56+08:00',
+    audioMs: 425_000,
+    ...p,
+  }
+}
+
+describe('pickMinutesSkill', () => {
+  it('优先命中「会议纪要」而不是只含「纪要」的那个', () => {
+    // 机构自己的模板技能通常叫「国开会议纪要」，而工作区里可能还有别的沾边技能。
+    expect(pickMinutesSkill(['周报纪要', '国开会议纪要', '深度研究'])).toBe('国开会议纪要')
+  })
+
+  it('挑不到就返回空串，让调用方退回通用提示', () => {
+    expect(pickMinutesSkill(['深度研究', 'ppt'])).toBe('')
+  })
+
+  it('内置的国开纪要技能按确切名字认，且优先级最高', () => {
+    // 它叫 guokai-huiyijiyao-format —— 拼音，「纪要」「minutes」一个都不沾，
+    // 靠关键词永远匹配不上。产品答应的就是"按国开模板出纪要"，得指名道姓。
+    expect(pickMinutesSkill(['guokai-huiyijiyao-format'])).toBe('guokai-huiyijiyao-format')
+    expect(pickMinutesSkill(['国开会议纪要', 'guokai-huiyijiyao-format']))
+      .toBe('guokai-huiyijiyao-format')
+  })
+
+  it('内置那个被停用/删掉时退回关键词匹配', () => {
+    // 调用方只传启用着的技能名，所以"不在列表里"同时覆盖了删除和停用两种情况。
+    expect(pickMinutesSkill(['国开会议纪要', '深度研究'])).toBe('国开会议纪要')
+  })
+})
+
+describe('minutesFileName', () => {
+  it('日期在前，一个工作区里多场会议才排得整齐', () => {
+    expect(minutesFileName(info())).toBe('会议纪要-20260819-季度评审.md')
+  })
+
+  it('洗掉标题里的路径分隔符与保留字符', () => {
+    // 标题是用户填的，直接拼进文件名会写到别的目录去，或者在 Windows 上直接失败。
+    expect(minutesFileName(info({ title: 'a/b:c*d?e"f<g>h|i' }))).toBe('会议纪要-20260819-a_b_c_d_e_f_g_h_i.md')
+  })
+
+  it('标题为空时有兜底', () => {
+    expect(minutesFileName(info({ title: '' }))).toBe('会议纪要-20260819-录音纪要.md')
+  })
+})
+
+describe('buildMinutesPrompt', () => {
+  const transcript = '**[00:03] 我**：先说结论\n\n**[00:11] S1**：同意'
+
+  it('有技能时指名技能，并把格式整层指给它', () => {
+    const p = buildMinutesPrompt({ mark: info(), transcript, skill: '国开会议纪要', outPath: 'out.md' })
+    expect(p).toContain('请使用「国开会议纪要」技能')
+    expect(p).toContain('一律以「国开会议纪要」技能为准')
+  })
+
+  it('有技能时不再自带格式要求，免得盖掉技能里的模板', () => {
+    // 这条链路最容易坏的地方：两份格式要求摆在一起，模型照的是更具体、位置更靠后
+    // 的那份，于是装了国开模板也出不来国开格式的纪要。
+    const p = buildMinutesPrompt({ mark: info(), transcript, skill: '国开会议纪要', outPath: 'out.md' })
+    expect(p).not.toContain('按议题归纳')
+    expect(p).not.toContain('结论、待办、责任人、时间点分别列出')
+    expect(p).not.toContain('写成 Markdown')
+  })
+
+  it('有技能时连存到哪里都不提，产出什么文件由技能定', () => {
+    const p = buildMinutesPrompt({ mark: info(), transcript, skill: '国开会议纪要', outPath: '会议纪要-20260819-季度评审.md' })
+    expect(p).not.toContain('会议纪要-20260819-季度评审.md')
+  })
+
+  it('内容红线两条支路都给——它只管写什么，不跟技能的模板冲突', () => {
+    for (const skill of ['国开会议纪要', undefined]) {
+      const p = buildMinutesPrompt({ mark: info(), transcript, skill, outPath: 'out.md' })
+      expect(p).toContain('先通读全文再落笔')
+      expect(p).toContain('不要补')
+      expect(p).toContain('同音错误')
+    }
+  })
+
+  it('有技能时仍交代这份转写是什么——那是技能不可能知道的', () => {
+    // 材料说明不是纪要要求：不讲清 S1 是声纹编号，纪要就会把发言安到被喊名字的
+    // 那个人头上；不讲清是语音识别，明显的同音错误会被当成事实照抄。
+    const p = buildMinutesPrompt({ mark: info({ needsBackfill: true }), transcript, skill: '国开会议纪要', outPath: 'out.md' })
+    expect(p).toContain('声纹聚类给出的编号')
+    expect(p).toContain('自动语音识别')
+    expect(p).toContain('断开过')
+  })
+
+  it('没有技能时退回通用措辞，不提技能', () => {
+    const p = buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })
+    expect(p).toContain('整理成一份会议纪要')
+    expect(p).not.toContain('技能')
+  })
+
+  it('没有技能时才由这里给出结构与落盘要求', () => {
+    // 那条路上没有技能可依，格式一条都不给等于让模型自由发挥。
+    const p = buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })
+    expect(p).toContain('按议题归纳')
+    expect(p).toContain('写成 Markdown')
+  })
+
+  it('序号自动排，两条支路都从 1 连到底', () => {
+    // head/tail 换着接，手写序号迟早断号。
+    const withSkill = buildMinutesPrompt({ mark: info(), transcript, skill: 's', outPath: 'out.md' })
+    expect(withSkill).toContain('1. 纪要的格式')
+    expect(withSkill).toContain('6. 按上下文改正')
+    const plain = buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })
+    expect(plain).toContain('1. 按议题归纳')
+    expect(plain).toContain('7. 写成 Markdown')
+  })
+
+  it('带上标题、时间、时长与落盘路径', () => {
+    const p = buildMinutesPrompt({ mark: info(), transcript, outPath: '会议纪要-20260819-季度评审.md' })
+    expect(p).toContain('季度评审')
+    expect(p).toContain('2026-08-19 10:57')
+    expect(p).toContain('7 分 5 秒')
+    expect(p).toContain('`会议纪要-20260819-季度评审.md`')
+  })
+
+  it('转写有缺口时要求点明，不要脑补衔接', () => {
+    const p = buildMinutesPrompt({ mark: info({ needsBackfill: true }), transcript, outPath: 'out.md' })
+    expect(p).toContain('断开过')
+    expect(p).toContain('不要脑补')
+  })
+
+  it('没缺口时不提缺口，免得模型无端加免责声明', () => {
+    const p = buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })
+    expect(p).not.toContain('断开过')
+  })
+
+  it('转写原文整段带进去', () => {
+    const p = buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })
+    expect(p).toContain('先说结论')
+    expect(p).toContain('同意')
+  })
+
+  it('录音时间是现成的，告诉模型直接用，不必回头问', () => {
+    // 国开技能的流程是先把缺的栏目问齐；不点破的话，连录音开始时间也要再问一遍用户。
+    const p = buildMinutesPrompt({ mark: info(), transcript, skill: 'guokai-huiyijiyao-format', outPath: 'out.md' })
+    expect(p).toContain('会议时间就用上面写的录音时间')
+    const noTime = buildMinutesPrompt({ mark: info({ startedAt: undefined }), transcript, skill: 's', outPath: 'out.md' })
+    expect(noTime).not.toContain('会议时间就用')
+  })
+
+  it('不许拿转写里提到的名字去填参会人员和主持人', () => {
+    // 模型最顺手的做法就是把被喊到的名字填进参会人员——喊到不代表在场，更不代表主持。
+    for (const skill of ['guokai-huiyijiyao-format', undefined]) {
+      const p = buildMinutesPrompt({ mark: info(), transcript, skill, outPath: 'out.md' })
+      expect(p).toContain('不要**拿转写里被提到的名字去填参会人员或主持人')
+    }
+    // 没有技能时没有「问齐再生成」的流程，缺的栏目留占位。
+    expect(buildMinutesPrompt({ mark: info(), transcript, outPath: 'out.md' })).toContain('写「待补充」')
+  })
+
+  it('两条支路都要求分清已定和待定', () => {
+    // 需求核对这类会大多是「要不…」「看领导协商」，把倾向写成结论和编造待办一样害人。
+    for (const skill of ['s', undefined]) {
+      const p = buildMinutesPrompt({ mark: info(), transcript, skill, outPath: 'out.md' })
+      expect(p).toContain('分清已经定了的和还没定的')
+      expect(p).toContain('不要把倾向写成定论')
+    }
+  })
+})
+
+describe('compactTranscript', () => {
+  const rows = (...xs: string[]) => xs.join('\n\n')
+
+  it('去掉加粗、空行与标题行，每段一行', () => {
+    const t = '# 季度评审\n\n' + rows('**[00:03] S1**：先说结论', '**[00:11] S2**：同意') + '\n'
+    expect(compactTranscript(t)).toBe('[00:03] S1：先说结论\n[00:11] S2：同意')
+  })
+
+  it('同一说话人紧挨着的段落合并，保留第一段的时间戳', () => {
+    // 分段常切在词中间（「视觉分」「析」），中文直接相连不加空格。
+    const t = rows('**[09:07] S13**：现在应该没有视觉分', '**[09:16] S13**：析，嗯', '**[09:20] S11**：对')
+    expect(compactTranscript(t)).toBe('[09:07] S13：现在应该没有视觉分析，嗯\n[09:20] S11：对')
+  })
+
+  it('隔了别人的发言不合并', () => {
+    const t = rows('**[00:01] S1**：甲', '**[00:02] S2**：乙', '**[00:03] S1**：丙')
+    expect(compactTranscript(t).split('\n')).toHaveLength(3)
+  })
+
+  it('合并有上限，长发言里的时间戳留得住', () => {
+    // 不封顶的话一个人连说十分钟就成了一行，速览大纲标不出议题起止。
+    const long = '字'.repeat(150)
+    const t = rows(...[0, 1, 2, 3].map((i) => `**[00:0${i}] S1**：${long}`))
+    const out = compactTranscript(t).split('\n')
+    expect(out).toHaveLength(2)
+    expect(out[1].startsWith('[00:02] S1：')).toBe(true)
+  })
+
+  it('英文词跨段相接时补空格，免得粘成一个词', () => {
+    const t = rows('**[00:01] S1**：调用 OCR', '**[00:02] S1**：API 就行')
+    expect(compactTranscript(t)).toBe('[00:01] S1：调用 OCR API 就行')
+  })
+
+  it('说话人标签原样保留，不重新编号', () => {
+    // 用户在预览栏看的是落盘原文，纪要里写的编号得能在原文里找到。
+    const t = rows('**[00:01] S92**：甲', '**[00:02] 马文涛**：乙')
+    expect(compactTranscript(t)).toBe('[00:01] S92：甲\n[00:02] 马文涛：乙')
+  })
+
+  it('认不出格式就原样返回，不能把转写弄丢', () => {
+    // Go 侧 Transcript.Markdown 改了格式而这里没跟上时，宁可多花 token。
+    expect(compactTranscript('  S1: 别的格式\n第二行  ')).toBe('S1: 别的格式\n第二行')
+  })
+
+  it('格式里夹着认不出的行也照样带上', () => {
+    const t = rows('**[00:01] S1**：甲', '（此处有缺失）', '**[00:05] S1**：乙')
+    expect(compactTranscript(t)).toBe('[00:01] S1：甲\n（此处有缺失）\n[00:05] S1：乙')
+  })
+})
+
+describe('speakerLabels', () => {
+  it('按首次出现的顺序列出，不重复', () => {
+    const t = [
+      '**[00:03] S1**：先说结论',
+      '**[00:11] 马文涛**：同意',
+      '**[00:20] S1**：那就这样',
+      '**[00:31] S5**：嗯',
+    ].join('\n\n')
+    expect(speakerLabels(t)).toEqual(['S1', '马文涛', 'S5'])
+  })
+
+  it('格式对不上时返回空，不瞎猜', () => {
+    // 这个正则和 Go 侧 Transcript.Markdown 的输出格式绑死，那边改了这里要跟。
+    expect(speakerLabels('S1: 这不是我们的格式')).toEqual([])
+  })
+})
+
+describe('speakerBriefing', () => {
+  const mixed = '**[00:03] S1**：喂，阿波哥\n\n**[00:11] 马文涛**：在\n\n**[00:20] S5**：嗯'
+
+  it('列出本场真实出现的标签，而不是举例', () => {
+    const b = speakerBriefing(mixed).join('\n')
+    expect(b).toContain('S1、马文涛、S5')
+  })
+
+  it('把编号和显示名分开解释', () => {
+    const b = speakerBriefing(mixed).join('\n')
+    expect(b).toContain('S1、S5 是声纹聚类给出的编号')
+    expect(b).toContain('马文涛 是配置里填的显示名')
+  })
+
+  it('说明编号的作用域：同场同号即同人，跨场不通用', () => {
+    const b = speakerBriefing(mixed).join('\n')
+    expect(b).toContain('本场内指同一个人')
+    expect(b).toContain('不在不同场次之间通用')
+  })
+
+  it('切断「内容里提到的人名」与编号的关联', () => {
+    // 实测模型会自作主张认定「S1 应该就是阿波哥」——而喊名字的和被喊的从来不是
+    // 同一个人。把发言安到具体某人头上，是这类纪要最坏的一种错。
+    const b = speakerBriefing(mixed).join('\n')
+    expect(b).toContain('不能')
+    expect(b).toContain('喊名字的和被喊的从来不是同一个人')
+  })
+
+  it('编号多于一个时说明聚类会把同一个人拆开', () => {
+    // 实测一场会出了 15 个编号、最大到 S92。不说这句，模型会写「共 15 人参会」。
+    expect(speakerBriefing(mixed).join('\n')).toContain('编号的个数不等于参会人数')
+    // 只有一个编号时没有拆分可言。
+    expect(speakerBriefing('**[00:03] S1**：甲').join('\n')).not.toContain('拆成几个编号')
+  })
+
+  it('全是编号时不提显示名那一行', () => {
+    const b = speakerBriefing('**[00:03] S1**：甲\n\n**[00:09] S2**：乙').join('\n')
+    expect(b).not.toContain('显示名')
+  })
+
+  it('空转写不编造标签', () => {
+    expect(speakerBriefing('').join('\n')).toContain('（无）')
+  })
+})
+
+describe('录音标记', () => {
+  it('提示词开头带标记，且能原样解回来', () => {
+    // 这是「历史恢复」的全部依据：对话历史由引擎回放，回放回来的只有消息原文，
+    // 卡片本身不在里面。解不出来，恢复后就只剩几千字的提示词。
+    const m = info({ dir: '/rec/x', transcript: 'transcript.md', needsBackfill: true })
+    const p = buildMinutesPrompt({ mark: m, transcript: '**[00:03] S1**：喂', outPath: 'out.md' })
+    expect(parseRecordingMarker(p)).toEqual({ mark: m, stage: 'doc' })
+  })
+
+  it('两段各自带得出自己的 stage', () => {
+    // 恢复历史全靠它分流：digest 那条要补卡片，doc 那条不能再补一张，
+    // 否则同一场录音会堆出好几张卡。
+    const m = info()
+    const digest = buildDigestPrompt({ mark: m, transcript: '**[00:03] S1**：喂' })
+    expect(parseRecordingMarker(digest)?.stage).toBe('digest')
+    const doc = buildMinutesPrompt({ mark: m, transcript: '**[00:03] S1**：喂', outPath: 'out.md' })
+    expect(parseRecordingMarker(doc)?.stage).toBe('doc')
+  })
+
+  it('两段式之前的老标记没有 stage，仍要解得出卡片', () => {
+    // 存量历史里全是这种。当成漏填而丢掉的话，老对话一打开卡片就没了。
+    const m = info()
+    const parsed = parseRecordingMarker(recordingMarker(m))
+    expect(parsed).toEqual({ mark: m, stage: undefined })
+  })
+
+  it('不认识的 stage 按老消息处理，而不是整条丢掉', () => {
+    // 将来若加了新的段，旧客户端至少还能把卡片画出来。
+    expect(parseRecordingMarker('<!-- runcode-recording {"id":"x","title":"t","audioMs":1,"stage":"未来"} -->')?.stage)
+      .toBeUndefined()
+  })
+
+  it('普通消息解不出标记', () => {
+    expect(parseRecordingMarker('帮我看看这个报错')).toBeNull()
+  })
+
+  it('标记坏了当作没有，而不是让整条消息渲染不出来', () => {
+    expect(parseRecordingMarker('<!-- runcode-recording {坏的 -->\n正文')).toBeNull()
+    expect(parseRecordingMarker('<!-- runcode-recording {"title":"缺 id"} -->')).toBeNull()
+  })
+})
+
+describe('buildDigestPrompt', () => {
+  const transcript = '**[00:03] 我**：先说结论\n\n**[00:11] S1**：同意'
+
+  it('给死四段结构，不让模型自由发挥', () => {
+    // 「一眼能看完」靠的就是结构固定。模型自由发挥时最爱按发言人分段复述，
+    // 那读起来和转写本身没区别。
+    const p = buildDigestPrompt({ mark: info(), transcript })
+    for (const section of ['**主题**', '**总结**', '**大纲**', '**待办**', '**待确认**']) {
+      expect(p).toContain(section)
+    }
+  })
+
+  it('限长，否则两段式白做', () => {
+    // 不限长模型照样写一大篇，用户仍旧要等一篇长文、仍旧没有「先看一眼再决定」的机会。
+    expect(buildDigestPrompt({ mark: info(), transcript })).toContain('600 字以内')
+  })
+
+  it('长会放宽上限，但仍远短于正式纪要', () => {
+    // 一个半小时七八个议题挤进 600 字，大纲每条只剩几个字，待确认也放不下。
+    expect(buildDigestPrompt({ mark: info({ audioMs: 30 * 60_000 }), transcript })).toContain('600 字以内')
+    expect(buildDigestPrompt({ mark: info({ audioMs: 45 * 60_000 }), transcript })).toContain('900 字以内')
+    expect(buildDigestPrompt({ mark: info({ audioMs: 97 * 60_000 }), transcript })).toContain('1200 字以内')
+  })
+
+  it('按议题写，不按说话人写', () => {
+    // 编号的归属本身就不可靠（分段切口附近尤甚），速览又没篇幅交代这层不确定。
+    expect(buildDigestPrompt({ mark: info(), transcript })).toContain('不要写「S1 认为」')
+  })
+
+  it('交代分段会切在词中间、同一名词有多种写法', () => {
+    const p = buildDigestPrompt({ mark: info(), transcript })
+    expect(p).toContain('切在词语中间')
+    expect(p).toContain('同一个专有名词')
+  })
+
+  it('发给模型的是压过的转写', () => {
+    const p = buildDigestPrompt({ mark: info(), transcript })
+    expect(p).toContain('[00:03] 我：先说结论')
+    expect(p).not.toContain('**[00:03] 我**')
+  })
+
+  it('不落盘、不调工具', () => {
+    // 不写死这条，模型会顺手去调写文件的工具：白白多一个回合，工作区里还多出一个
+    // 没人要的文件。速览是拿来看的，不是拿来存的。
+    const p = buildDigestPrompt({ mark: info(), transcript })
+    expect(p).toContain('不要写文件')
+    expect(p).not.toContain('.md')
+  })
+
+  it('绝不提技能——技能会把整套公文模板拉进来', () => {
+    // 速览要的恰恰是模板之外的短东西。这条一破，产出又变回一篇长文。
+    const p = buildDigestPrompt({ mark: info(), transcript })
+    expect(p).not.toContain('技能')
+  })
+
+  it('内容红线与正式纪要一致', () => {
+    // 速览更短、更像结论，编出来的待办更容易被人当真，所以这条比在正式纪要里更要紧。
+    expect(buildDigestPrompt({ mark: info(), transcript })).toContain('转写里没有的信息一律不要补')
+  })
+
+  it('材料说明照给：说话人编号、识别误差、转写缺口', () => {
+    const p = buildDigestPrompt({ mark: info({ needsBackfill: true }), transcript })
+    expect(p).toContain('不是姓名')
+    expect(p).toContain('自动语音识别')
+    expect(p).toContain('不要脑补衔接')
+  })
+
+  it('转写全文附在里面', () => {
+    expect(buildDigestPrompt({ mark: info(), transcript })).toContain('先说结论')
+  })
+
+  it('标记在末尾，不占首行', () => {
+    const p = buildDigestPrompt({ mark: info(), transcript })
+    expect(p.split('\n')[0]).not.toContain('runcode-recording')
+    expect(p.trimEnd().split('\n').pop()).toContain('runcode-recording')
+  })
+})
+
+describe('对话里显示的那一句', () => {
+  it('实时与恢复共用同一句，两边必须一致', () => {
+    // 对不上的表现是：同一条消息「刚发出去」和「重开这条对话」时长得不一样。
+    expect(digestDisplayText('季度评审')).toBe('录音速览 · 已附上《季度评审》的转写全文')
+    expect(docDisplayText('季度评审')).toBe('生成会议纪要文档 · 已附上《季度评审》的转写全文')
+  })
+
+  it('三种消息各说各的，不能混', () => {
+    // 老那句原样留着：存量历史里全是它，改掉不会让旧消息变好看，只会让它对不上
+    // 当初发出去的样子。
+    expect(minutesDisplayText('季度评审')).toBe('录音纪要 · 已附上《季度评审》的转写全文')
+    const all = new Set([digestDisplayText('x'), docDisplayText('x'), minutesDisplayText('x')])
+    expect(all.size).toBe(3)
+  })
+
+  it('没标题时有兜底', () => {
+    expect(digestDisplayText('')).toContain('《录音》')
+    expect(docDisplayText('')).toContain('《录音》')
+    expect(minutesDisplayText('')).toContain('《录音》')
+  })
+})
+
+describe('标记的位置', () => {
+  it('在消息末尾，不占首行', () => {
+    // 首行会被当成会话标题的兜底来源——实测侧栏里出现过一串
+    // `<!-- runcode-recording {"id":…` 的 JSON。
+    const p = buildMinutesPrompt({ mark: info(), transcript: '**[00:03] S1**：喂', outPath: 'out.md' })
+    expect(p.split('\n')[0]).not.toContain('runcode-recording')
+    expect(p.trimEnd().split('\n').pop()).toContain('runcode-recording')
+  })
+})

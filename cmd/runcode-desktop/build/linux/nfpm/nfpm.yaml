@@ -1,0 +1,102 @@
+# Linux 安装包（.deb / .rpm）的元数据。
+#
+# 主要目标是银河麒麟 V11 桌面版：它带 GTK4 与 WebKitGTK 2.44（6.0 ABI），正好是
+# Wails v3 的默认路径。
+#
+# 麒麟 V10（--kylin，Wails v2）也用这一份，只是 depends 由 scripts/build-desktop.sh
+# 就地换成 4.0 那套——V10 只有 WebKitGTK 的 4.0 ABI，下面写死的 4.1 包名在它的源里
+# 根本不存在。别把这里的 4.1 改成"两个都写"：depends 是**与**关系，那样两个麒麟就
+# 都装不上了；真要两边兼容得用 `|` 的或关系，但两条链路本来就是两个二进制，没必要。
+#
+# 包名与文件名一律用 ASCII 的产品标识（xrun / zhikai），不用显示名：deb 的包名规范
+# 只允许小写字母数字加 -+. ，中文的「智开」放进去直接是非法包名。中文只出现在
+# .desktop 的 Name 字段，那才是桌面上显示的东西。
+#
+# 按品牌打包时由 scripts/build-desktop.sh 就地替换这里的名字，构建完还原。
+name: "xrun"
+# 手工跑 nfpm 时才靠这个环境变量；经 scripts/build-desktop.sh 打包时这一行会被就地
+# 换成真实架构——两条 Linux 链路都不会把 GOARCH 传到 nfpm，而它对空值的兜底是硬编码
+# 的 amd64，arm64 的包于是带着 amd64 的标签出厂，只有装到 arm64 真机上才看得出来。
+arch: ${GOARCH}
+platform: "linux"
+version: "${APP_VERSION}"
+section: "utils"
+priority: "optional"
+maintainer: "国家开放大学 <noreply@ouchn.cn>"
+description: "AI 办公助手（桌面版）"
+vendor: "国家开放大学"
+homepage: "https://www.ouchn.edu.cn"
+license: "Proprietary"
+release: "1"
+
+# 两条路径都是麒麟打包规范的硬要求，不是风格问题——规范检查会逐条判：
+#
+#   - 可执行文件必须在 /opt/apps/<包名>/ 下（common-standards-27）。装在
+#     /usr/local/bin 是一条警告，软件商店上架过不去。.desktop 的 Exec 要跟着写
+#     全路径，因为 /opt/apps 不在 PATH 上。
+#   - 图标要么给 scalable 的 svg，要么 16~512 **九档 png 全给齐**
+#     （common-standards-22）。只放一张 128 的也是一条警告，实际表现是开始菜单、
+#     任务栏、桌面快捷方式三处里可能有一处画不出图标。九档由
+#     scripts/build-desktop.sh 调 tools/icongen 从 build/appicon.png 现生成，
+#     产物在 build/linux/icons/，不进版本库。
+contents:
+  - src: "./bin/xrun"
+    dst: "/opt/apps/xrun/xrun"
+  - src: "./build/linux/icons/16x16/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/16x16/apps/xrun.png"
+  - src: "./build/linux/icons/24x24/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/24x24/apps/xrun.png"
+  - src: "./build/linux/icons/32x32/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/32x32/apps/xrun.png"
+  - src: "./build/linux/icons/48x48/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/48x48/apps/xrun.png"
+  - src: "./build/linux/icons/64x64/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/64x64/apps/xrun.png"
+  - src: "./build/linux/icons/96x96/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/96x96/apps/xrun.png"
+  - src: "./build/linux/icons/128x128/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/128x128/apps/xrun.png"
+  - src: "./build/linux/icons/256x256/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/256x256/apps/xrun.png"
+  - src: "./build/linux/icons/512x512/apps/xrun.png"
+    dst: "/usr/share/icons/hicolor/512x512/apps/xrun.png"
+  - src: "./build/linux/xrun.desktop"
+    dst: "/usr/share/applications/xrun.desktop"
+
+# GTK3 + WebKitGTK 4.1，对应 --gtk3 构建（CI 就是这么打的）。
+#
+# 为什么不用更新的 GTK4 + WebKitGTK 6.0：那要在 Ubuntu 24.04 上编，而 24.04 的
+# glibc 是 2.39，比麒麟 V11 的 2.38 还新。glibc 只向后兼容，用新的编、拿到旧系统上
+# 就是一句 GLIBC_2.39 not found。所以在 Ubuntu 22.04（glibc 2.35）上编，配它的
+# WebKitGTK 4.1——麒麟 V11 两个 ABI 都带（2.44），接得上。
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.1-0
+
+# 登录令牌的落盘要这两个。Linux 侧的凭据保护走 Secret Service（见 secret_linux.go）：
+# 钥匙串里只放一把主密钥，凭据本身 AES-GCM 加密后留在 desktop.json 里；取不到钥匙串
+# 就**拒绝落盘**，宁可让用户重新登录，也不把密钥和密文一起明文放在同一台机器上。
+#
+# 缺了它们的表现就是"每次启动都要重新登录"，而且不报任何错——它在设计上就是静默
+# 降级的。所以列成 recommends：apt 默认会装上，而在没有桌面会话的环境里（那里本来
+# 也没有钥匙串守护进程）又不会把安装卡住。
+#
+# **两个都要，少一个都不行**，这一条是在麒麟 V10 SP1 真机上查出来的：
+#
+#   - libsecret-tools       提供 secret-tool 命令，我们靠它读写 Secret Service。
+#   - libpam-gnome-keyring  提供 pam_gnome_keyring.so。麒麟的 gnome-keyring 包**只带
+#     守护进程、不带 PAM 模块**，而模块正是"图形登录时用登录密码创建并解锁登录
+#     钥匙串"的那一步。
+#
+# 缺了 PAM 模块的故障链有四层静默，从现象根本查不回来：/etc/pam.d/lightdm 里那两行
+# 带 `-` 前缀（模块缺失就跳过，不报错）→ 登录钥匙串从未被创建 → 应用要存令牌时
+# D-Bus 临时拉起的守护进程手里没有登录密码，只能弹窗要人新建钥匙串 → 无人值守下
+# 它就一直挂着，我们 5 秒超时后当作"取不到钥匙串" → 静默不落盘。
+#
+# 装完还要**注销重登一次图形界面**：PAM 只在登录那一刻起作用。
+#
+# 注意 recommends 只有 apt 会装，`dpkg -i` 不会。所以装包请用
+# `sudo apt install ./zhikai_x.y.z_arm64.deb`，别用 dpkg -i。
+recommends:
+  - libsecret-tools
+  - libpam-gnome-keyring

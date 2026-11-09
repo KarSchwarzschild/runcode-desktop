@@ -1,0 +1,49 @@
+{
+  "name": "runcode-desktop-frontend",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src"
+  },
+  "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
+    "@fontsource/ibm-plex-sans": "^5.2.8",
+    "@lexical/history": "^0.53.0",
+    "@lexical/plain-text": "^0.53.0",
+    "@lexical/react": "^0.53.0",
+    "@lexical/utils": "^0.53.0",
+    "@wailsio/runtime": "^3.0.0-beta.9",
+    "docx-preview": "^0.4.0",
+    "highlight.js": "^11.11.1",
+    "lexical": "^0.53.0",
+    "pptx-preview": "^1.0.7",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-markdown": "^10.1.0",
+    "rehype-highlight": "^7.0.2",
+    "remark-gfm": "^4.0.1",
+    "xlsx": "file:third_party/sheetjs/xlsx-0.20.3.tgz"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@tailwindcss/vite": "^4.3.1",
+    "@types/react": "^18.3.31",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.3.4",
+    "eslint": "^9.39.5",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "jsdom": "^30.1.3",
+    "sharp": "^0.35.5",
+    "tailwindcss": "^4.3.1",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.65.0",
+    "vite": "^6.0.7",
+    "vitest": "^4.1.11"
+  }
+}

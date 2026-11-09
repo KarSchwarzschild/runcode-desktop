@@ -1,0 +1,234 @@
+// 一条对话的状态，以及"按会话 id 存一份"的表。
+//
+// 为什么要拆出来：引擎本来就是多会话的，每条信封都带 sessionId（core/protocol
+// 的 onEnvelope），而这里原先是一份全局状态——所有会话的事件都往同一个地方塞。
+// 单会话时看不出问题，多会话时后台会话的输出会记到前台会话头上。
+//
+// 这个模块是纯的（没有 React、没有 Wails），所以折叠规则可以单独测；use-conversation
+// 只负责订阅事件、把信封按 id 派发进来，以及把聚焦会话那一份交给界面渲染。
+import { type Block } from '@/chat/blocks'
+import { type ContextCompaction, type PlanSnapshot, type QuestionKnowledge, type KnowledgeContextStatus } from '@/core/bridge'
+import { fmtTokens } from '@/core/format'
+import { cancelKnowledgeRuns, renderKnowledgeRun, type KnowledgeRun } from './knowledge-chat-state'
+
+/** ConversationState 是**一条**对话的全部可渲染状态。 */
+export interface ConversationState {
+  knowledgeRuns?: Record<string, KnowledgeRun>
+  knowledgeByQuestion?: Record<string, QuestionKnowledge>
+  stoppedQuestionRows?: Set<string>
+  stoppedQuestions?: Set<string>
+  /** blocks 是消息流：用户气泡、助手回复、工具卡片、错误与警告。 */
+  blocks: Block[]
+  /** harmAllows 把 tool-use id 映到智能模式自动放行的理由，供工具卡标注。 */
+  harmAllows: Record<string, string>
+  /**
+   * oaBlocked 把 tool-use id 映到「被 OA 本地模型闸门拦下」时要切去的那个模型。
+   *
+   * 那次调用在模型眼里确实是失败的（工具结果带 IsError，模型要据此停下来），
+   * 但对用户不是——系统正在自动切换并重跑这一轮。所以卡片不该是红色的「执行失败」。
+   * 按 id 标注而不是让界面去匹配错误文案：措辞改一次匹配就静默失效，
+   * 而失效的表现只是退回报错，没人会注意到。
+   */
+  oaBlocked: Record<string, string>
+  /** busy 表示这条会话有回合在跑。**每会话一份**是并行的前提：后台会话在跑
+   *  不该让前台的输入框变成"回合进行中"。 */
+  busy: boolean
+  /** plan 是最近一次 TodoWrite 快照（顶部进度胶囊），null 表示模型还没记过。 */
+  plan: PlanSnapshot | null
+  /** 上下文占用来自引擎的校准估算，与压缩预算同源，并非精确 tokenizer 计数。 */
+  ctxTokens: number
+  ctxEstimated: boolean
+  /** compacting 表示正在手动或自动压缩；回合在自动压缩期间仍保持 busy。 */
+  compacting: boolean
+  /** 自动压缩进度条的块 id，完成/失败时原位更新，不堆叠消息。 */
+  compactionNoticeID?: string
+  /** revertedEdits 是已撤销的编辑快照 id，决定「已编辑」卡片画成灰的还是可操作的。 */
+  revertedEdits: Set<string>
+}
+
+export const emptyConversation: ConversationState = {
+  blocks: [],
+  harmAllows: {},
+  oaBlocked: {},
+  busy: false,
+  plan: null,
+  ctxTokens: 0,
+  ctxEstimated: false,
+  compacting: false,
+  revertedEdits: new Set(),
+}
+
+// Native events may beat the submit receipt. Keep their question identity until
+// that exact optimistic row is acknowledged; never attach to the latest draft.
+export function withQuestionKnowledge(state: ConversationState, event: KnowledgeContextStatus): ConversationState {
+  if (!event.questionId) return state
+  const previous = state.knowledgeByQuestion?.[event.questionId]
+  const knowledge = previous?.status === 'cancelled' || state.stoppedQuestions?.has(event.questionId)
+    ? cancelledKnowledge(event.knowledge) : event.knowledge
+  return {
+    ...state,
+    knowledgeByQuestion: { ...state.knowledgeByQuestion, [event.questionId]: knowledge },
+    blocks: state.blocks.map(b => b.kind === 'user' && b.questionId === event.questionId ? { ...b, knowledge } : b),
+  }
+}
+
+export function bindQuestionReceipt(state: ConversationState, blockId: string, questionId: string): ConversationState {
+  const stopped = state.stoppedQuestionRows?.has(blockId)
+  const stoppedQuestionRows = new Set(state.stoppedQuestionRows)
+  stoppedQuestionRows.delete(blockId)
+  const stoppedQuestions = new Set(state.stoppedQuestions)
+  if (stopped) stoppedQuestions.add(questionId)
+  const cached = state.knowledgeByQuestion?.[questionId]
+  const knowledge = stopped && cached ? cancelledKnowledge(cached) : cached
+  const next = { ...state, stoppedQuestionRows, stoppedQuestions,
+    knowledgeByQuestion: knowledge ? { ...state.knowledgeByQuestion, [questionId]: knowledge } : state.knowledgeByQuestion,
+    blocks: state.blocks.map(b => b.kind === 'user' && b.id === blockId
+      ? { ...b, questionId, knowledge: knowledge ?? b.knowledge } : b),
+  }
+  if (stopped && next.knowledgeRuns?.[questionId]) next.knowledgeRuns = { ...next.knowledgeRuns, [questionId]: { ...next.knowledgeRuns[questionId], phase: 'cancelled' } }
+  return renderKnowledgeRun(next, questionId)
+}
+
+export function reconcileQuestionBlocks(state: ConversationState, blocks: Block[]): Block[] {
+  return blocks.map(b => b.kind === 'user' && b.questionId && state.knowledgeByQuestion?.[b.questionId]
+    ? { ...b, knowledge: state.knowledgeByQuestion[b.questionId] } : b)
+}
+
+export function cancelPreparingKnowledge(state: ConversationState): ConversationState {
+  state = cancelKnowledgeRuns(state)
+  const stoppedQuestionRows = new Set(state.stoppedQuestionRows)
+  const stoppedQuestions = new Set(state.stoppedQuestions)
+  for (const b of state.blocks) {
+    if (b.kind !== 'user' || b.knowledge?.applied || (b.knowledge && !['pending', 'ready'].includes(b.knowledge.status))) continue
+    if (b.questionId) stoppedQuestions.add(b.questionId)
+    else stoppedQuestionRows.add(b.id)
+  }
+  const knowledgeByQuestion = Object.fromEntries(Object.entries(state.knowledgeByQuestion ?? {}).map(([id, knowledge]) => {
+    if (!knowledge.applied && ['pending', 'ready'].includes(knowledge.status)) stoppedQuestions.add(id)
+    return [id, stoppedQuestions.has(id) ? cancelledKnowledge(knowledge) : knowledge]
+  }))
+  return { ...state, stoppedQuestionRows, stoppedQuestions, knowledgeByQuestion,
+    blocks: state.blocks.map(b => b.kind === 'user' && b.knowledge && b.questionId && stoppedQuestions.has(b.questionId) ? { ...b, knowledge: cancelledKnowledge(b.knowledge) } : b),
+  }
+}
+
+function cancelledKnowledge(knowledge: QuestionKnowledge): QuestionKnowledge {
+  return !knowledge.applied && ['pending', 'ready', 'empty'].includes(knowledge.status)
+    ? { ...knowledge, status: 'cancelled', sources: [] } : knowledge
+}
+
+/**
+ * sessionOf 取一条信封属于哪个会话。
+ *
+ * 线上的 sessionId 是可选字段：进程级事件（passport:changed 之类）不属于任何一条
+ * 对话，那里是空的。归一成空串之后，patchConv 会原样跳过它们——好过在每个处理器
+ * 里散落 `?? ''`，也好过让类型检查逼出一堆非空断言。
+ */
+export function sessionOf(env: { sessionId?: string }): string {
+  return env.sessionId ?? ''
+}
+
+/** ConvMap 是会话 id → 该会话的状态。 */
+export type ConvMap = Record<string, ConversationState>
+
+/**
+ * patchConv 用 fn 改一条会话的状态，返回新表（不改入参）。
+ *
+ * 会话还没有条目时按空状态起一条——事件可能先于「会话已建立」的往返到达，
+ * 丢掉它们会让第一个 delta 凭空消失。
+ *
+ * id 为空串时原样返回：进程级事件（passport:changed 之类）的信封 sessionId 是空的，
+ * 它们不属于任何一条对话，不该凭空造出一条。
+ */
+export function patchConv(
+  map: ConvMap,
+  id: string,
+  fn: (s: ConversationState) => ConversationState,
+): ConvMap {
+  if (!id) return map
+  const cur = map[id] ?? emptyConversation
+  const next = fn(cur)
+  if (next === cur) return map
+  return { ...map, [id]: next }
+}
+
+/** convOf 取一条会话的状态；没有就给空状态（同一个对象，便于引用比较）。 */
+export function convOf(map: ConvMap, id: string): ConversationState {
+  return map[id] ?? emptyConversation
+}
+
+/**
+ * dropConv 删掉一条会话的状态。会话被关闭或删除时调用——留着就是纯占内存，
+ * 而且会让"这条会话曾经在跑"的 busy 永远挂在表里。
+ */
+export function dropConv(map: ConvMap, id: string): ConvMap {
+  if (!id || !(id in map)) return map
+  const next = { ...map }
+  delete next[id]
+  return next
+}
+
+/**
+ * lastUserText 取一条会话最近一次用户提问，压成单行并截断——**自动标题还没生成
+ * 时**，会话列表拿它当临时标题。
+ *
+ * 为什么不由后端给：自动标题是每个回合结束后才由模型生成的（session:renamed），
+ * 而「打开中」那一栏最需要认出哪条是哪条的时刻，恰恰是回合正在跑的时候。这一份
+ * 前端本来就有，用户一按发送就在，比新加一个后端字段再想办法及时刷新简单得多。
+ *
+ * 空文本的用户块（只带附件的那种）跳过，继续往前找：一行空白当不了标题。
+ */
+export function lastUserText(s: ConversationState, max = 48): string {
+  for (let i = s.blocks.length - 1; i >= 0; i--) {
+    const b = s.blocks[i]
+    if (b.kind !== 'user') continue
+    // 先粗切一刀再压空白：粘进来的几万字不必整段扫一遍。
+    const line = b.text.slice(0, max * 8).replace(/\s+/g, ' ').trim()
+    if (!line) continue
+    if (line.length <= max) return line
+    // 末尾若剩了代理对的前半个，去掉——否则会渲染成一个 U+FFFD。
+    return line.slice(0, max).replace(/[\uD800-\uDBFF]$/, '') + '…'
+  }
+  return ''
+}
+
+/** withReverted 往已撤销集合里加一个快照 id，返回新的状态。 */
+export function withReverted(s: ConversationState, snapshotID: string): ConversationState {
+  if (s.revertedEdits.has(snapshotID)) return s
+  const next = new Set(s.revertedEdits)
+  next.add(snapshotID)
+  return { ...s, revertedEdits: next }
+}
+
+/** 压缩只改变运行状态与估算计数，不结束回合，也不碰已有思考消息。 */
+export function withContextCompaction(
+  state: ConversationState,
+  event: ContextCompaction,
+  noticeID: string,
+  cancelled = false,
+): ConversationState {
+  // 手动压缩仍由命令的返回值提供用量与消息条数，避免双份提示。
+  if (event.reason === 'manual') return state
+  if (!['started', 'completed', 'failed'].includes(event.phase)) return state
+  if (event.phase === 'started' && cancelled) return state
+  const started = event.phase === 'started'
+  const failed = event.phase === 'failed'
+  const id = state.compactionNoticeID ?? noticeID
+  const counts = `≈${fmtTokens(event.beforeTokens)} → ≈${fmtTokens(event.afterTokens)}`
+  const text = started
+    ? '正在压缩上下文（含思考中的理解与判断），完成后继续'
+    : failed
+      ? cancelled ? '已取消上下文压缩，原始记录已保留' : '上下文压缩未完成，原始记录（含思考）已保留'
+      : event.afterTokens < event.beforeTokens
+        ? `上下文已压缩 · ${counts}${event.reason === 'auto_in_turn' ? '，继续当前任务' : ''}`
+        : '暂无需要压缩的内容'
+  const block: Block = { kind: failed && !cancelled ? 'warning' : 'notice', id, text }
+  const index = state.blocks.findIndex((b) => b.id === id)
+  const blocks = index < 0 ? [...state.blocks, block] : state.blocks.map((b, i) => i === index ? block : b)
+  return {
+    ...state, blocks, compacting: started,
+    compactionNoticeID: started ? id : undefined,
+    ctxTokens: started ? event.beforeTokens : event.afterTokens,
+    ctxEstimated: true,
+  }
+}

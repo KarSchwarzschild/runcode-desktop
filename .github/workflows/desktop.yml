@@ -1,0 +1,385 @@
+name: Desktop
+
+# 桌面版（cmd/runcode-desktop）的多平台打包。
+#
+# Wails 不能交叉编译（三平台 WebView 各不相同：Windows WebView2 / macOS WKWebView
+# / Linux WebKitGTK），所以每个目标都在自己那种机器上原生构建，架构也一样——arm64
+# 的包就在 arm64 机器上打，不做交叉。
+#
+# ---- 为什么这份文件被整个重写过 ------------------------------------------------
+# 2026-07-20 起线上全线失败，一个半月没出过包。两个原因叠在一起：
+#
+#   1. go.work 提交进了仓库，而这里没设 GOWORK=off。CI 上没有 ../agentloop 那个同级
+#      目录，于是任何 go 命令都以 "cannot load module ../../../agentloop listed in
+#      go.work" 收场——连编译都到不了。
+#   2. 引擎当时只在内网 GitLab，GitHub 的机器根本够不着那个域名。
+#
+# 现在引擎在 GitHub 上（私有，同一所有者），所以第 2 条有解了：把引擎 checkout 下来，
+# 用 go mod edit -replace 指过去。引擎的 module 声明仍是 gitlab 路径，而 replace 到
+# 本地目录时 Go 校验的正是"目标 go.mod 声明的路径 == replace 左侧"，两边一致，所以
+# 引擎仓库和本仓的 import 路径都不用改。
+#
+# 这条链路需要一个仓库 secret：ENGINE_REPO_TOKEN，一个对 mwt06/agentloop 有读权限的
+# 令牌（fine-grained PAT，Contents: Read 即可）。GITHUB_TOKEN 不行——它的权限只覆盖
+# 当前仓库，拉不到另一个私有仓库。
+#
+# ---- 触发与成本 ---------------------------------------------------------------
+# macOS 机器按 10 倍分钟数计费，ARM64 机器在私有仓库里也计入配额，所以**不在每次推
+# main 时打全量包**（旧版那么做过）。正式包只在打 tag 时出；日常想要包就手动触发。
+# PR 上只跑一个 windows-amd64，用最便宜的方式确认改动能编译。
+
+on:
+  workflow_dispatch:
+    inputs:
+      brand:
+        description: 打哪个品牌
+        type: choice
+        default: zhikai
+        options: [zhikai, zhikai-guokai, runcode, all]
+      targets:
+        description: 打哪些目标
+        type: choice
+        default: all
+        options: [all, windows-only, windows-arm64-only, macos-only, linux-only, kylin10-only]
+      devtools:
+        # 只对麒麟 V10 生效（它是 Wails v2 的构建标记）。打开后 WebView 的 developer
+        # extras 可用，窗口里按 Ctrl-Shift-F12 开检查器——麒麟上出白屏或前端异常时，
+        # 这是唯一能看到控制台的办法（不开这个标记，连 WEBKIT_INSPECTOR_SERVER 那个
+        # 环境变量也是无效的）。产物名带 -devtools 后缀，别当正式包发出去。
+        description: 麒麟 V10 出诊断版（带 Ctrl-Shift-F12 检查器）
+        type: boolean
+        default: false
+  push:
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write # 打 tag 时把产物挂到 Release 上
+
+# go.work 只服务本地开发（它把 ../agentloop 联动进来）。CI 一律走 go.mod + replace，
+# 否则 workspace 会掩盖掉模块本身的问题——这也正是之前一个半月都没出包的直接原因。
+env:
+  # 必须带引号：YAML 会把裸 off 解析成布尔假，环境变量于是变成 "false"——那不是
+  # GOWORK 认得的值（它只认 "off" 或一个 go.work 路径），等于这行白写。
+  GOWORK: "off"
+  GO_VERSION: '1.26.x'
+  NODE_VERSION: '20'
+  WAILS_VERSION: v3.0.0-beta.9
+
+jobs:
+  # 目标矩阵按输入裁剪。手动触发以外的场景（tag / PR）用不到 inputs，各自有默认。
+  plan:
+    name: 定目标
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: 打包契约检查
+        run: python3 -m unittest discover -s cmd/runcode-desktop/scripts -p '*_test.py'
+      - id: pick
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          BRAND: ${{ inputs.brand || 'zhikai' }}
+          TARGETS: ${{ inputs.targets || 'all' }}
+        run: |
+          set -euo pipefail
+          # PR 只验编译：一个最便宜的目标就够，不为每个 PR 烧 macOS 的分钟数。
+          if [ "$EVENT" = pull_request ]; then
+            echo 'matrix={"include":[{"target":"windows-amd64","os":"windows-2022","brand":"zhikai"}]}' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          win='{"target":"windows-amd64","os":"windows-2022"},{"target":"windows-arm64","os":"windows-11-arm"}'
+          # macos-13 已退役；Intel 版用 macos-15-intel（Intel 机器整体在 2027 秋停供）。
+          mac='{"target":"macos-arm64","os":"macos-15"},{"target":"macos-amd64","os":"macos-15-intel"}'
+          # Linux 目标是银河麒麟 V11。**必须用 ubuntu-22.04 而不是 24.04**:24.04 的
+          # glibc 是 2.39，比麒麟 V11 的 2.38 还新，而 glibc 只向后兼容——拿新系统编的
+          # 二进制到麒麟上就是一句 GLIBC_2.39 not found，装得上、跑不起来。
+          # 22.04 是 2.35，比目标旧，安全。
+          linux='{"target":"linux-amd64","os":"ubuntu-22.04"},{"target":"linux-arm64","os":"ubuntu-22.04-arm"}'
+          # 麒麟 V10 走 Wails v2（-tags kylin）：V10 的 WebKitGTK 只有 4.0 ABI，而 v3
+          # 没有 4.0 的代码路径。必须在 ubuntu:20.04 容器里编——V10 的 glibc 是 2.31，
+          # 而 runner 自身是 2.35，在宿主上编出来的到 V10 上跑不了。20.04 同时也是
+          # 唯一还带 libwebkit2gtk-4.0-dev 的 Ubuntu。
+          kylin='{"target":"kylin10-amd64","os":"ubuntu-22.04","container":"ubuntu:20.04"},{"target":"kylin10-arm64","os":"ubuntu-22.04-arm","container":"ubuntu:20.04"}'
+          case "$TARGETS" in
+            windows-only) targets="$win" ;;
+            windows-arm64-only) targets='{"target":"windows-arm64","os":"windows-11-arm"}' ;;
+            macos-only)   targets="$mac" ;;
+            linux-only)   targets="$linux" ;;
+            kylin10-only) targets="$kylin" ;;
+            *)            targets="$win,$mac,$linux,$kylin" ;;
+          esac
+
+          case "$BRAND" in
+            all) brands='"zhikai","zhikai-guokai","runcode"' ;;
+            *)   brands="\"$BRAND\"" ;;
+          esac
+
+          # 目标 × 品牌 的笛卡尔积。jq 比在 shell 里拼 JSON 可靠得多。
+          matrix=$(jq -cn --argjson t "[$targets]" --argjson b "[$brands]" \
+            '{include: [$t[] as $x | $b[] as $y | ($x + {brand: $y})]}')
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.brand }} · ${{ matrix.target }}
+    needs: plan
+    runs-on: ${{ matrix.os }}
+    # 只有麒麟 V10 那两个目标带 container；其余目标这里求值为空，直接跑在 runner 上。
+    container: ${{ matrix.container || '' }}
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # ubuntu:20.04 容器是裸的：没有 git（checkout 要用）、没有 curl、没有证书。
+      # 这一步必须排在 checkout 之前，否则 checkout 会退化成 REST API 下载，
+      # 拿不到 .git，后面读版本号那些步骤会莫名其妙地失败。
+      - name: 备好容器
+        if: matrix.container != ''
+        run: |
+          set -eux
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y --no-install-recommends git curl ca-certificates xz-utils build-essential pkg-config sudo libgtk-3-dev libwebkit2gtk-4.0-dev
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # setup-go 必须在接引擎之前：那一步要跑 go mod edit，而 windows-11-arm 这类
+      # 镜像不保证预装 Go。
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: '**/go.sum'
+
+      - name: 接上引擎
+        uses: ./.github/actions/setup-engine
+        with:
+          token: ${{ secrets.ENGINE_REPO_TOKEN }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: cmd/runcode-desktop/frontend/package-lock.json
+
+      # 图形栈必须装在 wails3 CLI 之前：CLI 自己也要编译 Wails 的包，那一步就会去
+      # 找 gtk/webkit 的 pkg-config。装反了的表现是 go install 直接报
+      # "Package gtk+-3.0 not found"，看着像 CLI 的问题，其实是顺序问题。
+      #
+      # 用 4.1 而不是 v3 默认的 6.0，原因见矩阵那段：编译机的 glibc 必须不比麒麟 V11
+      # 新，而带 6.0 的发行版都比它新。
+      - name: 装 Linux 图形栈
+        if: startsWith(matrix.target, 'linux')
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libgtk-3-dev libwebkit2gtk-4.1-dev build-essential pkg-config
+
+      # 麒麟 V10 那条走 Wails v2，整条链路不碰 wails3：前端用 npm 直接构建，Go 用
+      # go build -tags kylin，打包用 nfpm。装 v3 的 CLI 在 20.04 容器里还会失败——
+      # 它要 webkit2gtk-4.1，而 20.04 只有 4.0（这正是选它的原因）。
+      #
+      # 其余平台照旧。Linux 上装 CLI 也要带 gtk3，跟后面真正构建时用的路径保持一致；
+      # 不带的话它按 GTK4 + WebKitGTK 6.0 找，而那套在 22.04 上没有。
+      - name: 安装 wails3 CLI
+        if: ${{ !startsWith(matrix.target, 'kylin10') }}
+        run: |
+          set -euo pipefail
+          tags=""
+          case "${{ matrix.target }}" in linux-*) tags="-tags gtk3" ;; esac
+          go install $tags github.com/wailsapp/wails/v3/cmd/wails3@${WAILS_VERSION}
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # NSIS 出 Windows 安装包。打包脚本会自己去 Program Files 找 makensis，所以这里
+      # 只负责"装上"，不去动 PATH。
+      - name: 装 NSIS
+        if: startsWith(matrix.target, 'windows')
+        run: |
+          set -euo pipefail
+          if [ -x "/c/Program Files (x86)/NSIS/makensis.exe" ] || [ -x "/c/Program Files/NSIS/makensis.exe" ]; then
+            echo "NSIS 已在镜像里"
+          else
+            choco install nsis -y --no-progress
+          fi
+
+      # 前端类型检查：vite build 不跑 tsc，这是唯一的类型闸门。放在打包之前，
+      # 让类型错误以一条清楚的报错结束，而不是等打完包才发现。
+      - name: 前端自检
+        working-directory: cmd/runcode-desktop/frontend
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run typecheck
+          npm run lint
+          npx vitest run
+
+      # 打包一律走 scripts/build-desktop.sh，不直接调 wails3 task：品牌有六处开关
+      # （前端、窗口标题、单实例锁、应用名、打包元数据、版本与产品标识），脚本一次
+      # 配齐并在构建后还原。手敲 task 只会改到应用名，成品会出现"界面是智开、bundle
+      # 标识符还是 XRUN"这类装机后才看得出的错配。
+      - name: 打包
+        working-directory: cmd/runcode-desktop
+        run: |
+          set -euo pipefail
+          # windows-11-arm 镜像里的 gcc 是 x86 的，拿它编译 runtime/cgo 的 ARM64
+          # 汇编会逐条报 "no such instruction: stp x29,x30"。CGO 在本项目里关不掉
+          # （录音采集走 malgo），所以改用镜像自带的 LLVM——它是原生 arm64，认得
+          # 那些指令。
+          if [ "${{ matrix.target }}" = windows-arm64 ]; then
+            clang --version | head -2
+            # 还要再包一层：clang 22 起把 -mthreads 判成硬错误，而那个 flag 是 Go
+            # 自己给 runtime/cgo 加的，关不掉。整段来龙去脉写在 shim 源码头部，
+            # 连同"哪天绿哪天红"的证据。
+            #
+            # cygpath -m 出来的是正斜杠的 Windows 绝对路径：Go 认，clang 认，
+            # 也不会在 bash 里被当成转义。源码拷到 RUNNER_TEMP 再 go mod init，
+            # 是为了不把一个临时模块塞进仓库。
+            shim="$(cygpath -m "$RUNNER_TEMP")/ccshim"
+            mkdir -p "$shim"
+            cp ../../.github/ccshim/main.go ../../.github/ccshim/main_test.go "$shim/"
+            ( cd "$shim" && go mod init ccshim >/dev/null && go test ./... && go build -o ccshim.exe . )
+            export CC="$shim/ccshim.exe" CXX=clang++
+          fi
+          # 运行时环境（Python/Node/Git 绿色包）的清单地址。走对象存储上的静态清单，
+          # 不经 Bridge——/api/app/runtimes 那个端点还没有，而包早就传上去了。
+          # 不传这个参数的成品不会报错，只是运行时那一节全显示"本平台暂未提供"：
+          # 一个静悄悄的功能缺失，装机之后才看得出来，所以宁可写死在这里。
+          # {platform} 由客户端换成 windows-amd64 这类片段（见 runtimeManifestURL）；
+          # 包与品牌无关，两个品牌共用同一份。
+          rt=(--runtime-manifest "https://files-aibase.ouc-online.com.cn/zhikai/runtimepacks/runtimes-{platform}.json")
+          case "${{ matrix.target }}" in
+            windows-*) ./scripts/build-desktop.sh --brand "${{ matrix.brand }}" --installer "${rt[@]}" ;;
+            macos-*)   ./scripts/build-desktop.sh --brand "${{ matrix.brand }}" --installer --zip "${rt[@]}" ;;
+            linux-*)   ./scripts/build-desktop.sh --brand "${{ matrix.brand }}" --installer --gtk3 "${rt[@]}" ;;
+            kylin10-*) ./scripts/build-desktop.sh --brand "${{ matrix.brand }}" --installer --kylin "${rt[@]}" ${{ inputs.devtools && '--devtools' || '' }} ;;
+          esac
+
+      # 产物改成全 ASCII 的名字：应用名可能是中文（智开），而中文文件名在 artifact
+      # 上传、浏览器下载与 Release 资产那几段链路上都可能被转义成乱码。
+      - name: 整理产物
+        id: collect
+        working-directory: cmd/runcode-desktop
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^  version: "\(.*\)"[[:space:]]*$/\1/p' build/config.yml | head -1)
+          case "${{ matrix.brand }}" in
+            zhikai)  app=智开; product=zhikai; bundle_id=cn.ouconline.ai.zhikai ;;
+            zhikai-guokai) app="智开（国开版）"; product=zhikai-guokai; bundle_id=cn.ouconline.ai.zhikai.guokai ;;
+            runcode) app=XRUN; product=xrun; bundle_id=cn.ouconline.ai.xrun ;;
+            *) echo "未知品牌" >&2; exit 1 ;;
+          esac
+          arch="${{ matrix.target }}"; arch="${arch##*-}"
+          mkdir -p dist
+          case "${{ matrix.target }}" in
+            windows-*)
+              python3 scripts/verify-windows-executable.py "bin/$app.exe" --arch "$arch" --check-startup
+              cp "bin/$app.exe" "dist/$product-$version-windows-$arch.exe"
+              for f in bin/"$app"-*-installer.exe; do
+                [ -f "$f" ] && cp "$f" "dist/$product-$version-windows-$arch-setup.exe"
+              done
+              test -s "dist/$product-$version-windows-$arch-setup.exe"
+              ;;
+            macos-*)
+              bundle="bin/$app.app"
+              python3 scripts/verify-macos-bundle.py "$bundle" --name "$app" \
+                --bundle-id "$bundle_id" --version "${version%%-*}" --app-version "$version" --product "$product" --check-build
+              native_arch="$arch"; [ "$arch" != amd64 ] || native_arch=x86_64
+              # -verify_arch consumes every following argument as an architecture.
+              lipo "$bundle/Contents/MacOS/$app" -verify_arch "$native_arch"
+              codesign --verify --deep --strict "$bundle"
+              hdiutil verify "bin/$app-macos.dmg"
+              (
+                mount=$(mktemp -d)
+                trap 'hdiutil detach "$mount" >/dev/null 2>&1 || true; rmdir "$mount" 2>/dev/null || true' EXIT
+                hdiutil attach "bin/$app-macos.dmg" -readonly -nobrowse -mountpoint "$mount"
+                python3 scripts/verify-macos-bundle.py "$mount/$app.app" --name "$app" \
+                  --bundle-id "$bundle_id" --version "${version%%-*}" --app-version "$version" --product "$product" --check-build
+                test "$(readlink "$mount/Applications")" = /Applications
+                iconutil -c iconset "$mount/$app.app/Contents/Resources/icons.icns" -o "$RUNNER_TEMP/check.iconset"
+              )
+              cp "bin/$app-macos.dmg" "dist/$product-$version-macos-$arch.dmg"
+              cp "bin/$app-macos.zip" "dist/$product-$version-macos-$arch.zip"
+              ;;
+            linux-*|kylin10-*)
+              # Linux 上应用名就是 ASCII 的产品标识（见打包脚本），所以这里直接用它。
+              # 两条 Linux 目标产物形状一样，只是名字里要标出给哪个麒麟——V10 与 V11
+              # 的 WebKit ABI 不同，装错那个的表现是「装得上、点了没反应」，光看
+              # 文件名分不出来是最容易发错包的地方。
+              flavor=linux
+              case "${{ matrix.target }}" in kylin10-*) flavor=kylin10 ;; esac
+              # 诊断版单独标出来。它和正式包长得一模一样，混了就会有人拿着一个带
+              # 检查器的包当正式版发出去。
+              if [ "${{ inputs.devtools }}" = true ]; then flavor="$flavor-devtools"; fi
+              # deb **保留 nfpm 给的规范名**（zhikai_1.0.10-1_arm64.deb）。麒麟的包规范
+              # 检查要求文件名与 control 里的 Package_Version_Architecture 完全一致
+              # （common-standards-01），改成带 flavor 的名字就是一条「不通过」，
+              # 适配认证直接过不去。V10/V11 的区分改由 artifact 名承担——下载下来
+              # 的压缩包本来就叫 zhikai-<版本>-kylin10-<架构>，信息没丢。
+              for f in bin/*.deb; do
+                [ -f "$f" ] || continue
+                test "$(dpkg-deb -f "$f" Package)" = "$product"
+                test "$(dpkg-deb -f "$f" Architecture)" = "$arch"
+                test "$(basename "$f")" = "${product}_$(dpkg-deb -f "$f" Version)_${arch}.deb"
+                dpkg-deb --fsys-tarfile "$f" | tar -xOf - "./opt/apps/$product/$product" | cmp - "bin/$product"
+                cp "$f" "dist/$(basename "$f")"
+              done
+              compgen -G "dist/*.deb" >/dev/null
+              [ -f "bin/$product" ] && cp "bin/$product" "dist/$product-$version-$flavor-$arch"
+              ;;
+          esac
+          ls -la dist
+
+          # Release 是**一个平铺的命名空间**，八个目标的产物挂在同一处。deb 的规范名里
+          # 没有 V10/V11 之分（两边都是 zhikai_1.0.18-1_arm64.deb），原样挂上去就是后传的
+          # 覆盖先传的，而且没有任何报错——Release 上只剩一个，还看不出是哪一个。
+          # 所以挂 Release 的那份给 deb 换成带 flavor 的名字，与同一处的 exe/zip/裸二进制
+          # 一个命名法；artifact 里仍是规范名。**送麒麟适配认证请用 artifact 里的包**，
+          # 或把 Release 上下的改回 {Package}_{Version}_{Architecture}.deb，否则
+          # common-standards-01 判不通过。
+          mkdir -p release
+          for f in dist/*; do
+            case "$f" in
+              *.deb) cp "$f" "release/$product-$version-$flavor-$arch.deb" ;;
+              *)     cp "$f" release/ ;;
+            esac
+          done
+          # 分目录计算，Release 中 deb 改名后校验单也必须跟着改；名称按目标隔离。
+          sums="$product-$version-${{ matrix.target }}-SHA256SUMS.txt"
+          for directory in dist release; do
+            (
+              cd "$directory"
+              for f in *; do
+                [ "$f" != "$sums" ] || continue
+                if command -v sha256sum >/dev/null; then sha256sum "$f"; else shasum -a 256 "$f"; fi
+              done > "$sums"
+            )
+          done
+          ls -la release
+
+          suffix=""
+          if [ "${{ inputs.devtools }}" = true ]; then suffix="-devtools"; fi
+          echo "name=$product-$version-${{ matrix.target }}$suffix" >> "$GITHUB_OUTPUT"
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.collect.outputs.name }}
+          path: cmd/runcode-desktop/dist/*
+          if-no-files-found: error
+
+      - name: 挂到 Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: cmd/runcode-desktop/release/*
+          # 带后缀的 tag（v1.0.0-rc.1）算预发布，不占 latest。
+          prerelease: ${{ contains(github.ref_name, '-') }}
