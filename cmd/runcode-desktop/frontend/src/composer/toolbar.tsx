@@ -148,8 +148,10 @@ export function ComposerToolbar({
   }, [])
   // Thresholds are the bar's natural content width: ~660px with every label, ~440px
   // once the secondary labels are icons. 0 = not measured yet → stay expanded.
-  const compactBar = toolbarW > 0 && toolbarW < 660
-  const tinyBar = toolbarW > 0 && toolbarW < 450
+  // The image generation chip adds about 180px with its label, ~40px as an icon.
+  const chipShown = !!imageGeneration?.enabled
+  const compactBar = toolbarW > 0 && toolbarW < (chipShown ? 840 : 660)
+  const tinyBar = toolbarW > 0 && toolbarW < (chipShown ? 490 : 450)
 
   return (
     <div

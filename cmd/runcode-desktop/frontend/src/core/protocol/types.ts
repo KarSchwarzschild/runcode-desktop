@@ -942,6 +942,7 @@ export interface ResumedTool {
   input?: string;
   isError: boolean;
   output?: string;
+  imageGeneration?: ImageGenerationResult;
 }
 
 // Mirrors protocol.RetryNotice. RetryNotice reports that an LLM request failed transiently and is being retried.

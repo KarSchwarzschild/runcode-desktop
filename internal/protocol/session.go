@@ -110,6 +110,10 @@ type ResumedTool struct {
 	Input        string `json:"input,omitempty"` // the tool call's raw arguments JSON
 	IsError      bool   `json:"isError"`
 	Output       string `json:"output,omitempty"`
+	// ImageGeneration is an image_generate call's result, merged from the
+	// session's submission ledger (or its persisted tool content), so a reopened
+	// conversation repaints the image card without re-running anything.
+	ImageGeneration *ImageGenerationResult `json:"imageGeneration,omitempty"`
 }
 
 // ResumedSession carries a reopened session's status plus its prior conversation

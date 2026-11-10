@@ -33,11 +33,16 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
     setSaved(false)
     const [catalogResult, settingsResult] = await Promise.allSettled([listImageGenerationModels(tenantId), getImageGenerationSettings(tenantId)])
     if (gen !== generation.seq) return
-    const nextCatalog = catalogResult.status === 'fulfilled' ? catalogResult.value : null
-    const nextSettings = settingsResult.status === 'fulfilled' ? settingsResult.value : null
+    const nextCatalog = catalogResult.status === 'fulfilled' ? catalogResult.value ?? null : null
+    const nextSettings = settingsResult.status === 'fulfilled' ? settingsResult.value ?? null : null
     setCatalog(nextCatalog)
     setSettings(nextSettings)
-    setCatalogError(catalogResult.status === 'rejected' ? errText(catalogResult.reason) : settingsResult.status === 'rejected' ? errText(settingsResult.reason) : '')
+    // An empty answer or a message-less rejection is a failed read too; never
+    // leave the section silently disabled.
+    const failed = '未能读取生图模型或设置'
+    setCatalogError(catalogResult.status === 'rejected' ? errText(catalogResult.reason) || failed
+      : settingsResult.status === 'rejected' ? errText(settingsResult.reason) || failed
+        : !nextCatalog || !nextSettings ? failed : '')
     const sel = settingsSelection(nextCatalog, nextSettings)
     setDraftKey(sel.key)
     setDraftSize(sel.size)
@@ -82,7 +87,7 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
       setDraftSize(sel.size)
       setSaved(true)
     } catch (e) {
-      if (gen === generation.seq) setSaveError(errText(e))
+      if (gen === generation.seq) setSaveError(errText(e) || '保存失败，请重试')
     } finally {
       if (gen === generation.seq) setSaving(false)
     }

@@ -215,7 +215,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
             next[idx] = { ...existing, tool: mergeTool(existing.tool, ev) }
             return next
           }
-          return [...next, { kind: 'tool', id: nextID(), tool: ev }]
+          return [...next, { kind: 'tool', id: nextID(), tool: ev, sessionId: sessionOf(env) }]
         })
       }),
       // Live context occupancy: emitted before every model round-trip inside a turn,
@@ -537,6 +537,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         return [{
           kind: 'tool',
           id: nextID(),
+          sessionId: sid,
           tool: {
             type: t.isError ? 'failed' : 'completed',
             toolName: t.toolName,
@@ -547,6 +548,8 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
             message: t.isError ? 'completed with error' : 'completed',
             files: matched ?? (t.path ? [{ path: t.path }] : undefined),
             output: matched ? [] : lines,
+            // 生图结果由宿主从账本/工具结果合并而来，卡片据此重画，不重放任何请求。
+            ...(t.imageGeneration ? { data: t.imageGeneration } : {}),
           },
         }]
       }),

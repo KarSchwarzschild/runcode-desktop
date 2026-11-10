@@ -220,7 +220,7 @@ func (a *App) ResumeSession(id string) (ResumedSession, error) {
 		if err != nil {
 			return err
 		}
-		blocks = imageAnalysisBlocks(ctx, ws, info.SessionID, toResumedBlocks(history))
+		blocks = imageGenerationBlocks(ws, info.SessionID, imageAnalysisBlocks(ctx, ws, info.SessionID, toResumedBlocks(history)))
 		meta, err := backend.LoadMeta(ctx, info.SessionID)
 		if err != nil {
 			return err

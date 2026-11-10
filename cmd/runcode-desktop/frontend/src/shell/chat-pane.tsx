@@ -10,6 +10,7 @@ import { diffStats, hasDiff } from '@/chat/tool-text'
 import { AgentTaskGroup } from '@/chat/agent-task'
 import { AnalyzeCard } from '@/chat/analyze-card'
 import { SkillCard } from '@/chat/skill-card'
+import { GeneratedImageCard } from '@/chat/generated-image-card'
 import { AskCard } from '@/chat/ask-card'
 import { BlockView } from '@/chat/block-view'
 import { BotRow } from '@/chat/bot-row'
@@ -142,6 +143,8 @@ export function ChatPane({
               <BotRow key={g.id}><AnalyzeCard tool={g.tool} /></BotRow>
             ) : g.kind === 'skill' ? (
               <BotRow key={g.id}><SkillCard tool={g.tool} /></BotRow>
+            ) : g.kind === 'image' ? (
+              <BotRow key={g.id}><GeneratedImageCard tool={g.tool} sessionId={g.sessionId} onOpenFile={onOpenFile} /></BotRow>
             ) : g.kind === 'taskgroup' ? (
               <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} /></BotRow>
             ) : (
