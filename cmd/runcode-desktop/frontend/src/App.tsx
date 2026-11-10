@@ -48,8 +48,9 @@ import { PermissionsPage } from '@/pages/permissions'
 import { MemoryPage } from '@/pages/memory'
 import { SettingsPage } from '@/pages/settings'
 import { StartForm } from '@/pages/start'
+import { UsagePage } from '@/pages/usage'
 
-export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory'
+export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
 
 export default function App() {
   const [view, setView] = useState<View>('chat')
@@ -346,6 +347,9 @@ export default function App() {
             restrictedConversation ? <p className="p-6 text-muted">此会话不使用工具或文件授权。请新建普通会话管理权限。</p> : <PermissionsPage sessionID={focusedId} directoryAccess={directoryAccess} mode={session.info?.permissionMode} onPickMode={session.pickMode} />
           ) : view === 'memory' ? (
             <MemoryPage />
+          ) : view === 'usage' ? (
+            // 统计页只读平台记录，不影响后台会话；未登录时页内引导去设置页登录。
+            <UsagePage passport={passport} onOpenSettings={() => setView('settings')} />
           ) : (
             <>
               <ArtifactActionsContext.Provider value={preview.actions}><ChatPane
