@@ -197,7 +197,7 @@ func TestImageGenerationTurnSnapshotIsFrozenPerTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	state := newImageGenerationTurnState(id, 7)
+	state := newImageGenerationTurnState(id, "instance-7")
 	app.mu.Lock()
 	e.imageGeneration = state
 	app.mu.Unlock()
@@ -205,7 +205,7 @@ func TestImageGenerationTurnSnapshotIsFrozenPerTurn(t *testing.T) {
 	app.freezeImageGenerationTurn(e)
 	first := state.snapshot()
 	if !first.Enabled || !first.Available || first.TurnID == "" || first.Model != "image-only-url" || first.Size != "2048x2048" ||
-		first.Tenant != "tenant-a" || first.Workspace != cwd || first.Generation != 7 || first.SettingsRevision != 1 || first.SwitchRevision != 1 || first.ScopeID == "" {
+		first.Tenant != "tenant-a" || first.Workspace != cwd || first.Generation != "instance-7" || first.SettingsRevision != 1 || first.SwitchRevision != 1 || first.ScopeID == "" {
 		t.Fatalf("frozen snapshot = %+v", first)
 	}
 	saveImageModel(t, app, "tenant-a", "image-only-b64", "1280x720")

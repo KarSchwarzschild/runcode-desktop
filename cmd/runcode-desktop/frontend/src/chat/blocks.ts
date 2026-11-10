@@ -3,6 +3,7 @@
 // unit-tested directly (see chat.test.ts).
 import type { ToolEvent, PlanSnapshot, PlanItem, EditRecord, ResumedBlock, QuestionKnowledge } from '@/core/bridge'
 import { isEditRecord } from '@/core/bridge'
+import { IMAGE_GENERATION_TOOL } from '@/core/image-generation'
 import { type RecordingMark } from '@/recorder/minutes'
 
 // AgentNested holds a sub-agent's live activity, shown nested inside its Task card:
@@ -11,7 +12,9 @@ export type AgentNested = { agent: string; text: string; tools: ToolEvent[]; usa
 export type Block =
   | { kind: 'user'; id: string; questionId?: string; knowledge?: QuestionKnowledge; text: string; ts: string; attachments?: string[] }
   | { kind: 'assistant'; id: string; text: string; thinking?: string; streaming: boolean; ts: string }
-  | { kind: 'tool'; id: string; tool: ToolEvent; nested?: AgentNested }
+  // sessionId is the session the tool ran in; cards that open its files (the
+  // generated image card) must address that session, never whichever is focused.
+  | { kind: 'tool'; id: string; tool: ToolEvent; nested?: AgentNested; sessionId?: string }
   | { kind: 'error'; id: string; text: string }
   | { kind: 'warning'; id: string; text: string }
   | { kind: 'notice'; id: string; text: string }
@@ -46,6 +49,9 @@ export type Group =
   // because a bare 加载技能 row says nothing: the call carries only a name, so
   // what the model actually picked up (and why) is only visible on a card.
   | { kind: 'skill'; id: string; tool: ToolEvent }
+  // image is one image_generate call: the result (thumbnail or honest status) is
+  // the deliverable, so it is never folded into the compact tool list.
+  | { kind: 'image'; id: string; tool: ToolEvent; sessionId: string }
   | { kind: 'edits'; id: string; edits: EditRecord[] }
   // taskgroup collects a fan-out of parallel Task delegations (adjacent Task calls
   // issued in one assistant response) so they render as one container of compact
@@ -248,6 +254,10 @@ export function groupBlocks(blocks: Block[]): Group[] {
       // greps.
       if (b.tool.toolName === 'Skill') {
         out.push({ kind: 'skill', id: b.id, tool: b.tool })
+        continue
+      }
+      if (b.tool.toolName === IMAGE_GENERATION_TOOL) {
+        out.push({ kind: 'image', id: b.id, tool: b.tool, sessionId: b.sessionId ?? '' })
         continue
       }
       // A Task delegation is its own observable card (its sub-agent's live text and

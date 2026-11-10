@@ -34,7 +34,7 @@ type imageGenerationSnapshot struct {
 
 	SessionID  string
 	TurnID     string
-	Generation uint64
+	Generation string
 	Workspace  string
 
 	Account, Epoch, Bridge, Tenant, ScopeID string
@@ -44,17 +44,18 @@ type imageGenerationSnapshot struct {
 	Model            string
 	Size             string
 	SupportedSizes   []string
+	ResponseFormat   string
 }
 
 // imageGenerationTurnState is one session instance's image generation state.
 type imageGenerationTurnState struct {
 	mu         sync.Mutex
 	sessionID  string
-	generation uint64
+	generation string // host session instance generation
 	snap       imageGenerationSnapshot
 }
 
-func newImageGenerationTurnState(sessionID string, generation uint64) *imageGenerationTurnState {
+func newImageGenerationTurnState(sessionID, generation string) *imageGenerationTurnState {
 	return &imageGenerationTurnState{sessionID: sessionID, generation: generation}
 }
 
@@ -243,7 +244,7 @@ func (a *App) freezeImageGenerationTurn(e *sessionEntry) {
 		if why != "" {
 			reason = why
 		} else {
-			snap.Model, snap.Size, snap.SupportedSizes = pref.DefaultModel.Name, pref.DefaultSize, pref.SupportedSizes
+			snap.Model, snap.Size, snap.SupportedSizes, snap.ResponseFormat = pref.DefaultModel.Name, pref.DefaultSize, pref.SupportedSizes, pref.ResponseFormat
 			if len(snap.SupportedSizes) == 0 {
 				snap.SupportedSizes = []string{pref.DefaultSize}
 			}
