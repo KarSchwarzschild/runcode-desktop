@@ -92,6 +92,9 @@ type sessionEntry struct {
 	plans     *planStore
 	// knowledgeTurn holds the on-demand knowledge_search freeze and D01 notes.
 	knowledgeTurn *knowledgeTurnState
+	// imageGeneration holds this session instance's image_generate turn
+	// snapshot (nil for sessions that do not register the tool).
+	imageGeneration *imageGenerationTurnState
 
 	// turnActive mirrors whether this session has a turn in flight (set on
 	// submit, cleared when the sink adapter observes turn:end / turn:error).

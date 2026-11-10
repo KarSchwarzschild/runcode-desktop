@@ -22,7 +22,12 @@ const (
 var errModelCatalogUnavailable = errors.New("获取平台模型目录失败")
 
 type modelCatalog struct {
-	models map[string]PassportModel
+	// models holds only text-capable entries; every lookup through it is for a
+	// chat, judge, budget or vision purpose. Image generation entries are kept
+	// apart in imageGeneration (catalog order in imageOrder).
+	models          map[string]PassportModel
+	imageGeneration map[string]PassportModel
+	imageOrder      []string
 	// visionDefaults comes from the raw Bridge list, before ID dedupe: two
 	// entries claiming vision_default are a misconfiguration to report, not
 	// something the map may quietly collapse into one.
@@ -43,8 +48,17 @@ func modelCatalogKey(scope modelReference, actor string) string {
 // Catalogs are immutable snapshots. Publish under the requesting identity, never
 // whichever account happens to be logged in when a slow response arrives.
 func (a *App) rememberModelCatalog(scope modelReference, actor string, models []PassportModel) {
-	next := modelCatalog{models: make(map[string]PassportModel, len(models)), at: time.Now()}
+	next := modelCatalog{models: make(map[string]PassportModel, len(models)), imageGeneration: map[string]PassportModel{}, at: time.Now()}
 	for _, m := range models {
+		if isImageGenerationModel(m) {
+			if _, seen := next.imageGeneration[m.ID]; !seen {
+				next.imageOrder = append(next.imageOrder, m.ID)
+			}
+			next.imageGeneration[m.ID] = m
+		}
+		if !isChatModel(m) {
+			continue
+		}
 		next.models[m.ID] = m
 		if m.VisionDefault {
 			next.visionDefaults = append(next.visionDefaults, m)

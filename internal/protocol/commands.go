@@ -17,22 +17,22 @@ import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 
 // CommandKinds 按名字给每条命令分类。
 var CommandKinds = map[string]hostproto.CommandKind{
-	"CreateKnowledgeChat":        hostproto.CommandTrigger,
-	"RenameKnowledgeChat":        hostproto.CommandIdempotentSet,
-	"ExportKnowledgeChat":        hostproto.CommandQuery,
-	"GetModelContextSettings":    hostproto.CommandQuery,
-	"SaveModelContextSettings":   hostproto.CommandIdempotentSet,
-	"GetVisionSettings":          hostproto.CommandQuery,
-	"SaveVisionSettings":         hostproto.CommandTrigger,
-	"SetPlatformImageCapability": hostproto.CommandTrigger,
-	"GetQuestion":                hostproto.CommandQuery,
-	"ForkQuestion":               hostproto.CommandTrigger,
-	"SubmitQuestion":             hostproto.CommandTrigger,
-	"ListKnowledgeBases":         hostproto.CommandQuery,
+	"CreateKnowledgeChat":         hostproto.CommandTrigger,
+	"RenameKnowledgeChat":         hostproto.CommandIdempotentSet,
+	"ExportKnowledgeChat":         hostproto.CommandQuery,
+	"GetModelContextSettings":     hostproto.CommandQuery,
+	"SaveModelContextSettings":    hostproto.CommandIdempotentSet,
+	"GetVisionSettings":           hostproto.CommandQuery,
+	"SaveVisionSettings":          hostproto.CommandTrigger,
+	"SetPlatformImageCapability":  hostproto.CommandTrigger,
+	"GetQuestion":                 hostproto.CommandQuery,
+	"ForkQuestion":                hostproto.CommandTrigger,
+	"SubmitQuestion":              hostproto.CommandTrigger,
+	"ListKnowledgeBases":          hostproto.CommandQuery,
 	"GetSessionKnowledge":         hostproto.CommandQuery,
 	"GetSessionKnowledgeSnapshot": hostproto.CommandQuery,
 	"SetSessionKnowledge":         hostproto.CommandIdempotentSet,
-	"OpenKnowledgeDirectory":     hostproto.CommandTrigger,
+	"OpenKnowledgeDirectory":      hostproto.CommandTrigger,
 
 	// Queries (read-only, safely retriable).
 	"ActiveTenant":            hostproto.CommandQuery,
@@ -163,4 +163,13 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"RemoveRuntime":    hostproto.CommandTrigger,
 	"InstallUpdate":    hostproto.CommandTrigger,
 	"RevealUpdate":     hostproto.CommandTrigger,
+
+	// 文生图（IMG-GEN-001）：设置与会话开关。保存/切换是带 revision 的幂等设置——
+	// 同一目标重复提交返回当前视图，不重复增加 revision。没有直接生图的命令：真实
+	// 生成只经 image_generate 工具与现有审批。
+	"ListImageGenerationModels":   hostproto.CommandQuery,
+	"GetImageGenerationSettings":  hostproto.CommandQuery,
+	"SaveImageGenerationSettings": hostproto.CommandIdempotentSet,
+	"GetSessionImageGeneration":   hostproto.CommandQuery,
+	"SetSessionImageGeneration":   hostproto.CommandIdempotentSet,
 }
