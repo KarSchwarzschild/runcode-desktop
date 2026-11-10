@@ -370,3 +370,11 @@ export {
   listImageGenerationModels, getImageGenerationSettings, saveImageGenerationSettings,
   getSessionImageGeneration, setSessionImageGeneration,
 } from './protocol/commands'
+
+// ---- 用量统计（USAGE-001）：只读查询，类型与命令都来自生成协议 ------------------
+export type {
+  UsageQuery, UsageEffectiveRange, ResolvedUsageQuery, UsageRequestsQuery, UsageDimensionsQuery,
+  UsageQuality, UsageTotals, UsageBucket, UsageCapabilities, UsageCoverageGap, UsageOverview,
+  UsageRowQuality, UsageRequestRow, UsageRequestsPage, UsageDimensionRow, UsageDimensionsPage,
+} from './protocol/types'
+export { getUsageOverview, getUsageRequests, getUsageDimensions } from './protocol/commands'
