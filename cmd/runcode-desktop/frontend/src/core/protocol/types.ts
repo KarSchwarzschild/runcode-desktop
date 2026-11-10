@@ -76,6 +76,14 @@ export const ErrCodes = {
   NotFound: 'not_found',
   NotLoggedIn: 'not_logged_in',
   Unavailable: 'unavailable',
+  UsageForbidden: 'usage_forbidden',
+  UsageIdentityChanged: 'usage_identity_changed',
+  UsageInvalidCursor: 'usage_invalid_cursor',
+  UsageInvalidRange: 'usage_invalid_range',
+  UsageInvalidResponse: 'usage_invalid_response',
+  UsageTimeout: 'usage_timeout',
+  UsageUnavailable: 'usage_unavailable',
+  UsageUnsupported: 'usage_unsupported',
 } as const;
 
 // ErrCode keeps unknown codes assignable so a newer host degrades gracefully.
@@ -906,6 +914,14 @@ export interface RecordingInfo {
   dir?: string;
 }
 
+// Mirrors protocol.ResolvedUsageQuery. ResolvedUsageQuery 是总览返回范围之后，日志与分组共用的查询条件；翻页沿用它， 不再各自解析相对时间。
+export interface ResolvedUsageQuery {
+  tenantId: string;
+  effectiveRange: UsageEffectiveRange;
+  providerId?: string;
+  model?: string;
+}
+
 // Mirrors protocol.ResultImage. ResultImage is an inline image a tool returned (Data is base64 in JSON).
 export interface ResultImage {
   media_type?: string;
@@ -1310,6 +1326,173 @@ export interface UpdateInfo {
   file: string;
   autoRestart: boolean;
   installHint: string;
+}
+
+// Mirrors protocol.UsageBucket. UsageBucket 是趋势里的一个时间桶（首尾可能是被裁剪的部分桶）。coverage 取 known（已覆盖，没有记录就是真 0）/ gap（有证据的采集缺口）/ unknown（覆盖未知）。
+export interface UsageBucket {
+  startAt: string;
+  endAt: string;
+  requestCount: string;
+  inputTokens: string | null;
+  outputTokens: string | null;
+  totalTokens: string | null;
+  cacheHitTokens: string | null;
+  cacheEligibleInputTokens: string | null;
+  coverage: string;
+}
+
+// Mirrors protocol.UsageCapabilities. UsageCapabilities 声明本次数据能可靠支持哪些维度；requestStatus 与 ttft 首期恒为 false（日志里没有这些字段）。
+export interface UsageCapabilities {
+  providerBreakdown: boolean;
+  cacheMetrics: boolean;
+  requestStatus: boolean;
+  ttft: boolean;
+}
+
+// Mirrors protocol.UsageCoverageGap. UsageCoverageGap 是一段有证据的采集缺口。
+export interface UsageCoverageGap {
+  startAt: string;
+  endAt: string;
+}
+
+// Mirrors protocol.UsageDimensionRow. UsageDimensionRow 是一个模型或供应商的汇总；供应商无法确定时归入 unknown 分组。
+export interface UsageDimensionRow {
+  id: string;
+  name: string;
+  totals: UsageTotals;
+}
+
+// Mirrors protocol.UsageDimensionsPage. UsageDimensionsPage 是一页分组汇总，按请求数降序、ID 稳定排序。
+export interface UsageDimensionsPage {
+  items: UsageDimensionRow[] | null;
+  groupBy: string;
+  page: number;
+  pageSize: number;
+  totalCount: string;
+  hasMore: boolean;
+  effectiveRange: UsageEffectiveRange;
+  queryKey: string;
+}
+
+// Mirrors protocol.UsageDimensionsQuery. UsageDimensionsQuery 读取按模型或供应商分组的汇总（groupBy = model / provider）。 pageSize 只能是 50/100，page 从 1 开始。
+export interface UsageDimensionsQuery {
+  query: ResolvedUsageQuery;
+  groupBy: string;
+  search?: string;
+  page: number;
+  pageSize: number;
+}
+
+// Mirrors protocol.UsageEffectiveRange. UsageEffectiveRange 是 Bridge 为一次查询固定下来的半开区间 [startAt, endAt)。
+export interface UsageEffectiveRange {
+  startAt: string;
+  endAt: string;
+  timezone: string;
+}
+
+// Mirrors protocol.UsageOverview. UsageOverview 是同一次一致性读取得到的汇总、趋势与质量。dataAsOf 是服务端读取 时刻，不是入账水位；replicaLagSeconds 为 null 表示副本延迟未知。
+export interface UsageOverview {
+  scopeId: string;
+  queryKey: string;
+  effectiveRange: UsageEffectiveRange;
+  dataAsOf: string;
+  summary: UsageTotals;
+  trend: UsageBucket[] | null;
+  capabilities: UsageCapabilities;
+  empty: boolean;
+  coverageStart: string | null;
+  coverageGaps: UsageCoverageGap[] | null;
+  coverageStatus: string;
+  sourceKind?: string;
+  replicaLagSeconds: number | null;
+  consistency?: string;
+  mappingVersion?: string;
+}
+
+// Mirrors protocol.UsageQuality. UsageQuality 描述一组统计的口径覆盖：tokenCoverage / cacheCoverage 取 complete / partial / none；legacy 标记说明合计里含无法确认来源的历史口径。
+export interface UsageQuality {
+  tokenCoverage: string;
+  cacheCoverage: string;
+  containsEstimates: boolean;
+  containsLegacyUnknown: boolean;
+  containsLegacyInferredCache: boolean;
+  invalidRecordCount: string;
+}
+
+// Mirrors protocol.UsageQuery. UsageQuery 是总览查询。range 取 today / last24h / last7d / last14d / last30d / all / custom；custom 时 startAt 必填，endAt 与 followNow 二选一（followNow 只是 页面偏好：每次刷新由 Bridge 固定成读取时刻）。timezone 固定 Asia/Shanghai。
+export interface UsageQuery {
+  tenantId: string;
+  range: string;
+  startAt?: string;
+  endAt?: string;
+  followNow: boolean;
+  timezone: string;
+  providerId?: string;
+  model?: string;
+}
+
+// Mirrors protocol.UsageRequestRow. UsageRequestRow 是一条已入账的消费记录，只有计量与口径，没有正文或成本。 meterKind 不是 tokens 时 Token 各列为 null，用量见 usageQuantity + usageUnit。
+export interface UsageRequestRow {
+  id: string;
+  recordedAt: string;
+  startedAt: string | null;
+  model: string;
+  providerId: string | null;
+  providerName: string | null;
+  meterKind: string;
+  usageQuantity: string | null;
+  usageUnit: string | null;
+  inputTokens: string | null;
+  outputTokens: string | null;
+  cacheHitTokens: string | null;
+  cacheMissTokens: string | null;
+  reasoningTokens: string | null;
+  durationMs: number | null;
+  quality: UsageRowQuality;
+}
+
+// Mirrors protocol.UsageRequestsPage. UsageRequestsPage 是一页请求日志。totalCount 是读取时刻的可见总数，不是快照； nextCursor 由 Bridge 签名并绑定身份、范围与筛选，客户端原样回传。
+export interface UsageRequestsPage {
+  items: UsageRequestRow[] | null;
+  totalCount: string;
+  pageSize: number;
+  nextCursor?: string;
+  hasMore: boolean;
+  effectiveRange: UsageEffectiveRange;
+  queryKey: string;
+}
+
+// Mirrors protocol.UsageRequestsQuery. UsageRequestsQuery 读取一页请求日志。第一页不带 cursor；pageSize 只能是 20/50/100。
+export interface UsageRequestsQuery {
+  query: ResolvedUsageQuery;
+  cursor?: string;
+  pageSize: number;
+}
+
+// Mirrors protocol.UsageRowQuality. UsageRowQuality 是单条记录各项用量的来源口径（reported / estimated / derived / legacyUnknown / legacyInferred / unavailable）。
+export interface UsageRowQuality {
+  tokenSource: string;
+  cacheSource: string;
+  reasoningSource: string;
+}
+
+// Mirrors protocol.UsageTotals. UsageTotals 是一组记录的聚合。totalTokens = inputTokens + outputTokens（缓存是输入 子集、思考是输出子集，都不再相加）；缓存三项只统计可信缓存子集，命中率是 SUM(命中)/SUM(可信输入)。
+export interface UsageTotals {
+  requestCount: string;
+  tokenRequestCount: string;
+  inputTokens: string | null;
+  outputTokens: string | null;
+  totalTokens: string | null;
+  cacheHitTokens: string | null;
+  cacheMissTokens: string | null;
+  cacheEligibleInputTokens: string | null;
+  cacheHitRate: number | null;
+  cacheKnownRequestCount: string;
+  cacheEligibleRequestCount: string;
+  reasoningTokens: string | null;
+  durationSampleCount: string;
+  averageDurationMs: number | null;
+  quality: UsageQuality;
 }
 
 // Mirrors protocol.VisionSettings. VisionSettings configures the fixed destination for automatic image analysis.
