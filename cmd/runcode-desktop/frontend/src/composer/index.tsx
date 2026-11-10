@@ -1,5 +1,6 @@
 import type { QuestionDraft } from '@/core/bridge'
 import type { SessionKnowledge } from '@/session/use-knowledge'
+import { useImageGeneration } from '@/session/use-image-generation'
 import { KnowledgeStatus, KnowledgePicker } from './knowledge-picker'
 import { InlineEditor, type ComposerEditorHandle } from './inline-editor'
 import { GhostBtn } from '@/ui/ghost-btn'
@@ -52,6 +53,7 @@ export function Composer({
   onPickModel,
   builtinScenarios = {},
   onPickScenario,
+  onOpenImageGenerationSettings,
 }: {
   knowledge: SessionKnowledge
   attachments: Attachment[]
@@ -88,6 +90,8 @@ export function Composer({
   // onPickScenario 把选中的场景交回 App：填提示词、选中占位符都要动 taRef 与
   // input，那两样都归 App 持有。
   onPickScenario: (s: Scenario) => void
+  // 前往「设置 → 图片生成」。可选：宿主还没接时，生图状态标记里改为文字提示。
+  onOpenImageGenerationSettings?: () => void
 }) {
   const readOnlyReason = info?.readOnlyReason ?? ''
   const inputId = useId()
@@ -126,6 +130,21 @@ export function Composer({
   // 展开着的场景分类 id；'' = 没展开。与 mention 一样是纯界面状态，留在本组件。
   const [scenarioCat, setScenarioCat] = useState('')
   const closeScenario = useCallback(() => setScenarioCat(''), [])
+  // 「生成图片」开关跟着会话走；它与知识库互不影响，关一个不会动另一个。
+  const imageGen = useImageGeneration(sessionId)
+  async function toggleImageGeneration(on: boolean) {
+    const error = await imageGen.setEnabled(on, { busy })
+    if (error) onNotify?.(error)
+  }
+  const imageView = imageGen.state.view
+  const imageChip = readOnlyReason ? undefined : {
+    enabled: imageGen.enabled,
+    available: !!imageView?.available,
+    reason: imageView?.reason || (imageGen.state.loading ? '正在读取图片生成状态…' : imageGen.state.error || '会话创建后生效'),
+    model: imageView?.model?.name ?? '',
+    size: imageView?.size ?? '',
+    saving: imageGen.state.saving,
+  }
   const [chatSkills, setChatSkills] = useState<SkillInfo[]>([])
   const [chatAgents, setChatAgents] = useState<AgentInfo[]>([])
   const selItemRef = useRef<HTMLDivElement>(null)
@@ -313,7 +332,14 @@ export function Composer({
     const body = sendText(input, attachments)
     sendingRef.current = true
     setSending(true)
-    try { await onSend(body, images, text || undefined) }
+    try {
+      // 新会话的开关草稿先落盘成功才发首条消息；失败就不发，避免按未确认的状态跑回合。
+      if (!(await imageGen.ensureCommitted())) {
+        onNotify?.(imageGen.currentError() || '图片生成开关未能保存，消息未发送')
+        return
+      }
+      await onSend(body, images, text || undefined)
+    }
     catch (e) { onNotify?.(errText(e)) }
     finally { sendingRef.current = false; setSending(false) }
   }
@@ -498,6 +524,9 @@ export function Composer({
         onPickModel={onPickModel}
         onSend={() => void handleSend()}
         onStop={onStop}
+        imageGeneration={imageChip}
+        onToggleImageGeneration={(on) => void toggleImageGeneration(on)}
+        onOpenImageGenerationSettings={onOpenImageGenerationSettings}
       />
     </footer>
   )

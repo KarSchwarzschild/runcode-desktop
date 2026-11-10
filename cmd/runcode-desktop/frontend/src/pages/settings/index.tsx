@@ -16,6 +16,7 @@ import { AccountSection } from './account'
 import { SessionSection } from './session'
 import { CustomModelsSection } from './custom-models'
 import { VisionSection } from './vision'
+import { ImageGenerationSection } from './image-generation'
 import { ProxySection } from './proxy'
 import { RecorderSection } from './recorder'
 import { ContextSection } from './context'
@@ -130,6 +131,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
         </fieldset>
         <CustomModelsSection models={customModels} onChanged={setCustomModels} />
         <VisionSection tenantId={activeTenantId} platform={platformModels} custom={customModels} onPlatformChanged={setPlatformModels} />
+        <ImageGenerationSection tenantId={activeTenantId} />
         <ProxySection />
         {/* 录音设置跟着「录音纪要」这个功能走：品牌关掉它时这块也不画，否则设置页
             里留着一组调不出任何界面的开关。 */}
