@@ -1,0 +1,31 @@
+*.exe
+frontend/node_modules/
+frontend/wailsjs/
+# go-task 的校验和缓存（wails3 task 每次构建都写）。
+.task/
+# wails3 自动生成的绑定。本项目不用它——命令层走 tools/protogen 生成的
+# core/protocol/commands.ts（它按 CommandKinds 交叉核对，能挡住漏登记），
+# 录音窗那几个方法走手写的 recorder/window-api.ts。留着只会让人以为有两套真相。
+frontend/bindings/
+frontend/package.json.md5
+build/bin/
+# Wails v3 的产物目录（v2 是 build/bin/）。exe 已被上面的 *.exe 覆盖，但 macOS 的
+# .app 包与通用二进制没有扩展名，所以整个目录一并忽略。
+bin/
+# Runtime data and stray files created when the app is run from build/ as its CWD.
+build/.runcode/
+build/*.html
+build/*.py
+build/ppt_skill/
+# dist/ is a build output — `wails build` / `npm run build` regenerates it, so
+# none of it is committed. Only the empty .gitkeep is tracked, and solely so the
+# directory survives a fresh clone: main.go's `//go:embed all:frontend/dist` needs
+# the tree to exist and match at least one file, and the `all:` prefix is what
+# makes a dot-file count. Without it `go build ./...` fails on a clean checkout.
+# (index.html used to be committed as a placeholder, but it carries the hashed
+# asset names, so every rebuild left the working tree dirty for no benefit.)
+frontend/dist/*
+!frontend/dist/.gitkeep
+# 九档应用图标由 scripts/build-desktop.sh 调 tools/icongen 从 build/appicon.png
+# 现生成（麒麟包规范要 16~512 全给齐），是构建产物，不进版本库。
+build/linux/icons/

@@ -1,0 +1,78 @@
+# Binaries
+/runcode
+/runcode.exe
+*.exe~
+# go build ./tools/<x> 会在仓库根产出 <x>.exe。逐个列名迟早漏一个——
+# runtimepacks.exe 就这样被提交过一次（9.1 MiB）。这里一次挡住整类。
+*.exe
+/dist/
+/bin/
+
+# Stray root-level screenshots / scratch pages (dev artifacts, not repo content)
+/*.png
+/*.html
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+coverage.html
+
+# Editor / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Go
+vendor/
+
+# Local config / secrets
+.env
+.env.local
+*.local
+/runcode.toml
+
+# Session history, transcripts, permissions, and other runtime data. The
+# skills/ and agents/ subdirectories are the exception: project skills and
+# sub-agents are meant to be shared in-repo, so they are tracked while everything
+# else under .runcode stays local.
+/.runcode/*
+!/.runcode/skills/
+!/.runcode/agents/
+# 拿本仓库当工作区自测时，会话落盘文件会散在被打开的那个目录里（根目录、
+# tools/protogen/…），同样是运行时数据。
+sess_*.jsonl
+sess_*.title
+sess_*.meta.json
+
+# Runtime data
+*.db
+*.db-journal
+
+# Build cache
+/.cache/
+
+# GoReleaser
+.goreleaser-snapshot/
+
+# Superpowers brainstorm/SDD scratch
+/.superpowers/
+
+# Local API debug requests (may contain credentials) and scratch assets
+/core-id.cfg
+/id.cfg
+/idbody.json
+/xiao.svg
+/cmd/runcode-desktop/core.cfg
+/cmd/runcode-desktop/core-tools.cfg
+/cmd/runcode-server/runcode-server.exe
+
+# CI 把引擎仓库 checkout 到这里再 replace 过去（见 .github/actions/setup-engine）。
+# 本地照同样步骤复现 CI 时也会生成它，别让它进版本库。
+/.engine/
+
+# Python packaging checks
+__pycache__/
+*.pyc

@@ -1,0 +1,17 @@
+{
+	"fixed": {
+		"file_version": "1.0.0.0",
+		"product_version": "1.0.0.0"
+	},
+	"info": {
+		"0409": {
+			"ProductVersion": "1.0.0",
+			"FileVersion": "1.0.0",
+			"CompanyName": "国家开放大学",
+			"FileDescription": "XRUN",
+			"LegalCopyright": "© 2026 国家开放大学",
+			"ProductName": "XRUN",
+			"Comments": "An open-source AI coding companion (desktop)"
+		}
+	}
+}

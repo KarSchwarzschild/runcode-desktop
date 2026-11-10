@@ -1,0 +1,158 @@
+// 设置页：按小节拆分——账号(通行证)、会话、自定义模型、联网工具代理、上下文长度。
+// 拆分原则——进 saveSettings() 载荷的字段（会话）受控于 SettingsPage 本体；
+// 各自直接落后端的小节（账号/代理/自定义模型草稿）状态内化，只把共享数据（平台
+// 模型、自定义模型列表，二者合成模型候选）回流给父级。
+import { useEffect, useState } from 'react'
+import { BTN, BTN_PRIMARY } from '@/ui/tokens'
+import { toModelOptions, type ModelOption } from '@/ui/model-picker'
+import {
+  errText, listCustomModels, saveSettings,
+  type CustomModel, type PassportModel, type SessionInfo, type SettingsView,
+} from '@/core/bridge'
+import { Toggle } from '@/ui/toggle'
+import { BRAND } from '@/core/brand'
+import { Section } from './section'
+import { AccountSection } from './account'
+import { SessionSection } from './session'
+import { CustomModelsSection } from './custom-models'
+import { VisionSection } from './vision'
+import { ProxySection } from './proxy'
+import { RecorderSection } from './recorder'
+import { ContextSection } from './context'
+import { ContextAuditSection } from './context-audit'
+import { RuntimesSection } from './runtimes'
+import { AboutSection } from './about'
+import { InlineError } from '@/ui/feedback'
+import { PageShell } from '@/ui/layout'
+import { type UpdateController } from '@/session/use-update'
+import { useRuntimes } from '@/session/use-runtimes'
+
+export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchModel }: {
+  initial: Partial<SettingsView>
+  info: SessionInfo | null
+  busy: boolean
+  // update 由 App 持有（侧栏那颗小红点也读它），这里只是把它交给「关于与更新」。
+  update: UpdateController
+  onSaved: (info: SessionInfo) => void
+  // Switch the live session's model/connection in place (platform ↔ custom), the same
+  // path the composer's in-chat picker uses — no new session, history preserved.
+  onSwitchModel: (choice: ModelOption) => void
+}) {
+  // 选库不锁设置页；仅真实只读历史限制改写。
+  const sessionRestriction = info?.readOnlyReason || ''
+  // The session's model is now switched live (see 模型 field below), so it is read
+  // straight from the running session, not a form field. Permission mode still prefers
+  // the live session. Saving this form never sends connection fields.
+  const [harmJudgeModel, setHarmJudgeModel] = useState(initial.harmJudgeModel ?? '')
+  const [harmJudgeVotes, setHarmJudgeVotes] = useState(initial.harmJudgeVotes ?? 1)
+  const [permissionMode, setPermissionMode] = useState(info?.permissionMode || initial.permissionMode || 'interactive')
+  // 免登录:关闭(默认)时启动强制走登录页;开启后未登录也可直接进表单用本地自定义模型。
+  const [skipLogin, setSkipLogin] = useState(initial.skipLogin ?? false)
+  const [saving, setSaving] = useState(false)
+  const [accountBusy, setAccountBusy] = useState(false)
+  const [saved, setSaved] = useState(false)
+  const [error, setError] = useState('')
+  // 共享数据：平台模型（账号小节回流）+ 自定义模型列表（自定义模型小节维护），
+  // 合成会话/判定模型选择器共用的候选列表。
+  const [platformModels, setPlatformModels] = useState<PassportModel[]>([])
+  const [activeTenantId, setActiveTenantId] = useState(initial.tenantId ?? '')
+  const [accountReady, setAccountReady] = useState(false)
+  const [customModels, setCustomModels] = useState<CustomModel[]>([])
+  // 运行时环境（Python/Node/Git）。状态在 Go 侧，这里只做它的镜子；只有设置页用到，
+  // 所以钩子就挂在这里，不必像 update 那样提到 App（侧栏小红点要读那个）。
+  const runtimes = useRuntimes()
+  useEffect(() => {
+    listCustomModels().then((l) => setCustomModels(l ?? [])).catch(() => {})
+  }, [])
+  // switchOpts drives the live 模型 switcher: platform + custom together, since
+  // picking either now switches the connection in place (via SwitchModel). modelOpts
+  // stays platform-only for the harm-judge field, which takes a bare model id the
+  // engine resolves — a custom profile's display name is not such an id.
+  const switchOpts = toModelOptions(platformModels, customModels)
+  const modelOpts = toModelOptions(platformModels, [])
+  async function save() {
+    if (sessionRestriction) return
+    setSaving(true)
+    setSaved(false)
+    setError('')
+    try {
+      const i = await saveSettings({
+        permissionMode,
+        harmJudgeModel,
+        harmJudgeVotes,
+        skipLogin,
+      })
+      if (i && i.model) onSaved(i)
+      setSaved(true)
+      setTimeout(() => setSaved(false), 2200)
+    } catch (e) {
+      setError(errText(e))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <PageShell title="设置" hint="模型与权限模式即时生效；连接设置在下次新建会话时生效。" width={640}>
+
+        <AccountSection
+          onAccount={(tenantId, models, ready) => {
+            setActiveTenantId(tenantId)
+            setPlatformModels(models)
+            setAccountReady(ready)
+          }}
+          onBusy={setAccountBusy}
+        />
+        <Section title="登录" hint="保存后于下次启动/登出时生效">
+          <label className="flex items-center justify-between gap-3 cursor-pointer">
+            <span className="min-w-0">
+              <span className="text-[13px]">免登录</span>
+              <span className="block text-[12px] text-muted mt-0.5">关闭（默认）时启动强制登录通行证；开启后未登录也可直接进入并使用本地自定义模型。</span>
+            </span>
+            <Toggle on={skipLogin} onChange={setSkipLogin} />
+          </label>
+        </Section>
+        {sessionRestriction && <p role="status" className="text-[12px] text-amberink">{sessionRestriction}</p>}
+        <fieldset disabled={!!sessionRestriction} className="min-w-0">
+        <SessionSection
+          currentModel={info?.model ?? ''}
+          switchOpts={switchOpts}
+          onSwitchModel={onSwitchModel}
+          busy={busy}
+          permissionMode={permissionMode}
+          onPermissionMode={setPermissionMode}
+          harmJudgeModel={harmJudgeModel}
+          onHarmJudgeModel={setHarmJudgeModel}
+          harmJudgeVotes={harmJudgeVotes}
+          onHarmJudgeVotes={setHarmJudgeVotes}
+          modelOpts={modelOpts}
+        />
+        </fieldset>
+        <CustomModelsSection models={customModels} onChanged={setCustomModels} />
+        <VisionSection tenantId={activeTenantId} platform={platformModels} custom={customModels} onPlatformChanged={setPlatformModels} />
+        <ProxySection />
+        {/* 录音设置跟着「录音纪要」这个功能走：品牌关掉它时这块也不画，否则设置页
+            里留着一组调不出任何界面的开关。 */}
+        {BRAND.features.recorder && <RecorderSection />}
+        <ContextSection tenantId={activeTenantId} platform={platformModels} custom={customModels} disabled={accountBusy} />
+
+        <ContextAuditSection />
+
+        {/* 运行时环境与「关于与更新」挨着：两者都是"下载 + 安装"，而且用户来设置页
+            找它们的心情是同一种（"这东西是不是缺了点什么"）。 */}
+        <RuntimesSection runtimes={runtimes} />
+
+        <AboutSection update={update} />
+
+        <Section title="工作区">
+          <div className="font-mono text-[13px] text-muted break-all">{info?.cwd || '—'}</div>
+        </Section>
+
+        {error && <InlineError variant="text">{error}</InlineError>}
+        <div className="flex items-center gap-3 pb-2">
+          <button className={`${BTN} ${BTN_PRIMARY} px-7 py-2.5`} disabled={!!sessionRestriction || saving || accountBusy || (!!activeTenantId && !accountReady)} onClick={save}>{saving ? '保存中…' : accountBusy ? '正在同步租户…' : '保存设置'}</button>
+          {saved && <span className="text-green text-[13px]">✓ 已保存</span>}
+        </div>
+    </PageShell>
+  )
+}

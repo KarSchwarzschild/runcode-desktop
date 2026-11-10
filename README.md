@@ -1,92 +1,121 @@
-# Client-platform-zhikai
+# runcode
 
+> An open-source AI coding companion in Go.
+> 中文名：**奔跑的代码** — see [README.zh-CN.md](./README.zh-CN.md).
 
+[![CI](https://github.com/wt68/runcode/actions/workflows/ci.yml/badge.svg)](https://github.com/wt68/runcode/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/wt68/runcode.svg)](https://pkg.go.dev/github.com/wt68/runcode)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](./LICENSE)
 
-## Getting started
+> **Status: alpha.** This repository holds the **shells** over one shared engine: a shell-friendly `chat` CLI, a Bubble Tea `tui`, a Wails desktop app (**XRUN**, see [docs/desktop.md](./docs/desktop.md)), and a server skeleton (`cmd/runcode-server`). The engine itself — ReAct loop, 14 built-in tools, MCP / skills / sub-agents / memory / hooks, permission modes with a model-based harm gate, session persistence and compaction — lives in its own repository: **`gitlab.ouc-online.com.cn/aibase/agentloop`**.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## What is runcode?
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+`runcode` is a Go implementation of an AI coding companion. This repository contains the user-facing frontends; the transport-agnostic session engine is the external `agentloop` module, consumed through each `go.mod`'s `replace` pointing at a sibling checkout. The long-term direction is inspired by Anthropic's Claude Code, but all code is an original Go implementation.
 
-## Add your files
+- **CLI** (`runcode chat`): streams assistant output to stdout, shell-friendly.
+- **TUI** (`runcode tui`): Bubble Tea interface with streaming Markdown, tool cards, permission modals, slash commands.
+- **Desktop** (**XRUN**, `cmd/runcode-desktop`): full Wails + React app with judge/flight permission modes, sub-agent cards, artifact preview.
+- **Server skeleton** (`cmd/runcode-server`): a runnable HTTP/SSE reference that consumes only the engine's public surface — the template for a standalone server repo.
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+## Quick start
 
+For development, check out the engine repo **next to** this one — the committed `go.work` links them so engine edits take effect live:
+
+```bash
+git clone https://github.com/wt68/runcode.git
+git clone https://gitlab.ouc-online.com.cn/aibase/agentloop.git agentloop   # sibling checkout (go.work links it)
+cd runcode
+go build ./cmd/runcode
+./runcode version
+./runcode --help
 ```
-cd existing_repo
-git remote add origin https://gitlab.ouc-online.com.cn/aibase/client-platform-zhikai.git
-git branch -M main
-git push -uf origin main
+
+To build without the sibling checkout (CI-style), fetch the tagged engine directly instead:
+
+```bash
+GOWORK=off GOPRIVATE=gitlab.ouc-online.com.cn go build ./cmd/runcode
 ```
 
-## Integrate with your tools
+> Requires Go 1.26+ and, for the direct fetch, git credentials for the internal GitLab.
 
-- [ ] [Set up project integrations](https://gitlab.ouc-online.com.cn/aibase/client-platform-zhikai/-/settings/integrations)
+## Current CLI
 
-## Collaborate with your team
+```bash
+ANTHROPIC_MODEL=claude-sonnet-5 \
+ANTHROPIC_API_KEY=... \
+./runcode chat "summarize this repository"
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Automatically merge when pipeline succeeds](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+ANTHROPIC_MODEL=claude-sonnet-5 \
+ANTHROPIC_API_KEY=... \
+./runcode tui
+```
 
-## Test and Deploy
+Seven subcommands: `version`, `chat` (`--loop` for multi-turn), `tui` (`--pick` opens a session picker), `config` (effective config with sources, credentials redacted), `permissions`, `sessions` (`list`/`show`), `transcript` (`list`/`search`).
 
-Use the built-in continuous integration in GitLab.
+Useful flags and environment variables (shared by `chat`/`tui`):
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing(SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+- `--provider` / `RUNCODE_PROVIDER`: `anthropic` or `openai` (the latter also drives OpenAI-compatible endpoints such as vLLM/Ollama/llama.cpp/gateways; point `--base-url` at the API root serving `/chat/completions`).
+- `--model` / `ANTHROPIC_MODEL`; `--api-key` / `ANTHROPIC_API_KEY` or `--auth-token` / `ANTHROPIC_AUTH_TOKEN`; `--base-url` / `ANTHROPIC_BASE_URL`.
+- `--cwd` / `RUNCODE_CWD`: workspace for tools.
+- `--permission-mode safe|interactive` / `RUNCODE_PERMISSION_MODE` (the desktop additionally offers `judge`/`flight`).
+- `--thinking off|low|medium|high` / `RUNCODE_THINKING`.
+- `--resume <id>` / `--continue` / `--no-session`; `--session-backend jsonl|sqlite` / `RUNCODE_SESSION_BACKEND`.
+- `--transcript off|jsonl|sqlite` / `RUNCODE_TRANSCRIPT`; `--telemetry off|jsonl` / `RUNCODE_TELEMETRY`.
+- `--max-history-messages`, `--max-context-tokens` (context compaction budget), `--max-retries`, `--input-price` / `--output-price` (for `/cost`), `--allow-mcp-sampling`.
+- `--system-prompt` / `--append-system-prompt`.
 
-***
+TUI slash commands: `/help`, `/clear`, `/compact`, `/status`, `/mode`, `/model`, `/cost`, `/exit`, plus custom `*.md` commands discovered from user/project `commands/` directories.
 
-# Editing this README
+## Features (engine)
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thank you to [makeareadme.com](https://www.makeareadme.com/) for this template.
+These behaviors ship in the [agentloop](https://gitlab.ouc-online.com.cn/aibase/agentloop) engine and surface through every shell; details live in that repo's README and docs.
 
-## Suggestions for a good README
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+- **Tools**: 14 built-ins (Read/Write/Edit/Delete/Glob/Grep/Bash + background shells/TodoWrite/WebFetch/WebSearch/Analyze/AskUser), plus dynamically added MCP tools, `Skill`, `Task` (sub-agents), and `Remember` (memory).
+- **Permissions**: every tool call is classified and authorized; `safe` (non-interactive deny) and `interactive` (ask) in the CLI/TUI, plus `judge` (model harm-gate auto-allow with deterministic floors, budget breaker, and audit events) and `flight` in the desktop. Grants persist to `<workspace>/.runcode/permissions.json`, managed by `runcode permissions`.
+- **MCP**: stdio + Streamable HTTP servers configured in the **user-level** `config.toml` only (`[mcp.servers.<name>]`, `${VAR}` expansion); tools appear as `mcp__<server>__<tool>`; resources/prompts/roots supported, sampling opt-in.
+- **Skills / Sub-agents / Memory / Hooks**: `SKILL.md` directories with progressive disclosure; `*.md` agent definitions delegated via `Task` (one level deep, concurrent fan-out); two-scope persistent memory via `Remember`; 8 lifecycle hook events (user-level config only, argv exec, JSON on stdin).
+- **Sessions**: full history persisted per workspace (`jsonl` or pure-Go `sqlite` backend), resume/continue, generated titles, token-budget context compaction; sanitized searchable transcripts (FTS5) as a separate opt-in record.
+- **Providers**: Anthropic (official SDK) and OpenAI-compatible HTTP/SSE, with thinking budgets, image input, prompt-cache boundaries, and connection-phase retries.
+- **Configuration**: TOML files with precedence flag > env > project `runcode.toml` > user `config.toml` > default; credentials, MCP servers, and hooks are honored **only** from the user-level file.
 
-## Name
-Choose a self-explaining name for your project.
+## Architecture at a glance
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+```text
+user input
+  -> cmd/runcode chat | tui        (this repo)
+  -> XRUN desktop / server skeleton (this repo)
+       -> engine.Build(cfg, Options{...}) -> Session   (agentloop, external module)
+            system prompt + tool specs -> model stream -> tool_use
+            -> executor -> permissions -> Tool.Run -> tool_result
+       -> streamed text / tool events / approval requests back to the shell
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+- [docs/architecture.md](./docs/architecture.md) — this repo's shells, module boundaries, protocol codegen.
+- [docs/desktop.md](./docs/desktop.md) — the desktop app (XRUN) architecture and build.
+- agentloop's `README.md` and `docs/` — engine internals (ReAct loop, permissions, tools, providers, persistence).
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+## Project layout
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+```text
+cmd/runcode/             Cobra CLI: version, chat, tui, config, permissions, sessions, transcript
+cmd/runcode-desktop/     nested Go module: Wails desktop shell + React frontend (XRUN)
+cmd/runcode-server/      nested Go module: server skeleton (HTTP/SSE, engine public surface only)
+internal/desktop/        desktop core (host.Manager adapter, events, approver; no Wails dependency)
+internal/ui/             Bubble Tea TUI: views, slash-command registry, session picker, approval bridge
+internal/command/        custom slash commands (*.md discovery)
+internal/previewtool/    desktop artifact-preview tool (injected via ExtraTools)
+tools/protogen/          protocol TS code generator (reads agentloop/protocol, writes frontend src/protocol/)
+```
 
 ## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+This project is in **alpha**. Engine contributions (tools, providers, permission model) go to the agentloop repo; this repo takes shell work (CLI/TUI/desktop/server). See [CONTRIBUTING.md](./CONTRIBUTING.md).
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Apache-2.0 — see [LICENSE](./LICENSE).
+
+## Acknowledgements
+
+Architecture concepts are inspired by Anthropic's Claude Code CLI. All Go code in this repository is original.
