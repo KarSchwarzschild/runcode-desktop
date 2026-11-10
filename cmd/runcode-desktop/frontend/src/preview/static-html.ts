@@ -5,6 +5,7 @@
 // 写在一切内容之前，是继 sandbox 与标记清理之后的第三道闸。
 //
 // 原文 <head> 里的 <style> 也要提取并单独过 CSS 白名单，整段丢掉会让 H5 只剩文字。
+import DOMPurify, { type DOMPurify as Purifier } from 'dompurify'
 import { PREVIEW_LIMITS, utf8Bytes } from './static-detect'
 import { sanitizeDeclarations, sanitizeStylesheet } from './static-css'
 
@@ -148,6 +149,57 @@ export function measureDocumentHeight(doc: Document): number {
   const body = doc.body
   if (!body) return 0
   return Math.ceil(Math.max(body.scrollHeight, body.getBoundingClientRect().height))
+}
+
+// 正文的 DOMPurify 静态白名单。用独立实例：钩子挂在默认实例上会连带改变 Mermaid
+// 内部对同一模块的清理行为。<style> 已由 extractHtml 提前取走，这里一律禁止。
+const FORBID_TAGS = [
+  'script', 'style', 'link', 'meta', 'base', 'iframe', 'frame', 'frameset', 'object', 'embed', 'applet',
+  'form', 'video', 'audio', 'source', 'track', 'picture', 'canvas', 'dialog', 'template', 'slot', 'portal',
+  'noscript', 'math', 'foreignObject',
+]
+const FORBID_ATTR = ['srcset', 'action', 'formaction', 'ping', 'target', 'autofocus', 'contenteditable', 'popover', 'download']
+const CONTROLS = new Set(['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'OPTION', 'OPTGROUP', 'FIELDSET'])
+// 承载地址的属性只放行文档内锚点与小型内嵌位图；远端、相对路径、file:、blob: 一律
+// 不留。不能用 ALLOWED_URI_REGEXP 表达：DOMPurify 把它套在所有非 URI 安全属性上，
+// width、fill 这类普通值也会被一并删掉。
+const URL_ATTRS = new Set(['src', 'href', 'xlink:href', 'poster', 'background', 'cite', 'longdesc', 'data', 'codebase', 'manifest'])
+const ALLOWED_URL = /^(?:#[A-Za-z_][\w:.-]*$|data:image\/(?:png|jpeg|gif|webp);base64,)/i
+const LOCAL_CSS_URL = /url\(\s*(["']?)#[A-Za-z_][\w:.-]*\1\s*\)/gi
+
+let purifier: Purifier | null = null
+
+function staticPurifier(): Purifier {
+  if (purifier) return purifier
+  const p = DOMPurify(window)
+  p.addHook('uponSanitizeAttribute', (_node, data) => {
+    const value = data.attrValue.trim()
+    if (URL_ATTRS.has(data.attrName) && !ALLOWED_URL.test(value)) data.keepAttr = false
+    else if (data.attrName !== 'style' && /url\s*\(/i.test(value.replace(LOCAL_CSS_URL, ''))) data.keepAttr = false
+  })
+  p.addHook('afterSanitizeAttributes', (node) => {
+    // 超链接只当文字：去掉 href，SVG 内的 #id 引用（use/渐变等）不受影响。
+    if (node.nodeName === 'A' || node.nodeName === 'AREA') node.removeAttribute('href')
+    // 控件按静态外观展示：没有表单可提交，再加 disabled 防止聚焦输入。
+    if (CONTROLS.has(node.nodeName)) node.setAttribute('disabled', '')
+  })
+  purifier = p
+  return p
+}
+
+export function sanitizeHtmlBody(html: string): string {
+  return staticPurifier().sanitize(html, {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+    FORBID_TAGS,
+    FORBID_ATTR,
+    ALLOW_DATA_ATTR: false,
+    ALLOW_UNKNOWN_PROTOCOLS: false,
+  })
+}
+
+// renderStaticHtml：消息内 HTML 预览的完整入口（DOMPurify 正文 + CSS 白名单 + 固定外壳）。
+export function renderStaticHtml(source: string): HtmlResult {
+  return prepareStaticHtml(source, sanitizeHtmlBody)
 }
 
 // 自动高度的收敛控制。父页面在 load、容器宽度变化和资源加载后测量 scrollHeight，

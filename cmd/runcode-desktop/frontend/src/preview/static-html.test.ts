@@ -2,6 +2,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildPreviewDocument, createHeightGovernor, extractHtml, hasVisibleContent, measureDocumentHeight, prepareStaticHtml,
+  renderStaticHtml, sanitizeHtmlBody,
   HTML_PREVIEW_CSP, HTML_PREVIEW_SANDBOX,
 } from './static-html'
 
@@ -101,6 +102,59 @@ describe('prepareStaticHtml', () => {
   it('applies the injected sanitizer to the body', () => {
     const r = prepareStaticHtml('<html><body><p>a</p></body></html>', () => '<p>cleaned</p>')
     expect(r.ok && r.srcdoc).toContain('<p>cleaned</p>')
+  })
+})
+
+describe('sanitizeHtmlBody / renderStaticHtml (DOMPurify static allowlist)', () => {
+  const bodyOf = (srcdoc: string) => new DOMParser().parseFromString(srcdoc, 'text/html').body
+
+  it('removes scripts, event handlers and javascript URLs (X01)', () => {
+    const out = sanitizeHtmlBody('<p onclick="x()">a</p><script>alert(1)</script><img src="x" onerror="alert(2)"><a href="javascript:alert(3)">b</a><svg><script>alert(4)</script><rect width="1" height="1" onload="x()"/></svg>')
+    expect(out).not.toMatch(/script|onclick|onerror|onload|javascript/i)
+    expect(out).toContain('<rect')
+  })
+  it('drops forms, frames, meta refresh, base and popups (X02)', () => {
+    const out = sanitizeHtmlBody('<form action="https://x"><input name="q"><button formaction="https://y">go</button></form><iframe src="https://x"></iframe><meta http-equiv="refresh" content="0;url=https://x"><base href="https://x/"><object data="x"></object><embed src="x"><dialog open>d</dialog><a href="https://x" target="_blank">link</a>')
+    expect(out).not.toMatch(/<form|<iframe|<meta|<base|<object|<embed|<dialog|action=|target=|https:\/\/x/i)
+    expect(out).toContain('link')
+  })
+  it('keeps controls only as disabled static visuals', () => {
+    const body = bodyOf(`<body>${sanitizeHtmlBody('<button>提交</button><input value="v"><select><option>a</option></select><textarea>t</textarea>')}</body>`)
+    for (const el of Array.from(body.querySelectorAll('button,input,select,textarea'))) expect(el.hasAttribute('disabled')).toBe(true)
+    expect(body.textContent).toContain('提交')
+  })
+  it('keeps only data images and in-document references (X03)', () => {
+    const out = sanitizeHtmlBody('<img src="https://x/a.png"><img src="a.png"><img src="file:///c:/a.png"><img src="data:image/png;base64,iVBORw0KGgo="><img srcset="a.png 1x"><svg><defs><linearGradient id="g"></linearGradient></defs><rect width="1" height="1" fill="url(#g)"></rect><use href="#g"></use><image href="https://x/i.png"></image></svg>')
+    const body = bodyOf(`<body>${out}</body>`)
+    const srcs = Array.from(body.querySelectorAll('img')).map((i) => i.getAttribute('src'))
+    expect(srcs.filter(Boolean)).toEqual(['data:image/png;base64,iVBORw0KGgo='])
+    expect(out).not.toMatch(/https:|file:|a\.png|srcset/)
+    expect(body.querySelector('rect')?.getAttribute('fill')).toBe('url(#g)')
+    expect(body.querySelector('rect')?.getAttribute('width')).toBe('1')
+    expect(sanitizeHtmlBody('<svg><rect width="2" fill="url(https://x/p.svg#a)"/></svg>')).not.toContain('https')
+    expect(sanitizeHtmlBody('<table><tr><td colspan="2" width="40">c</td></tr></table>')).toContain('colspan="2"')
+    // DOMPurify 默认不放行 <use>（历史上的外部引用漏洞），HTML 内联 SVG 不支持它。
+    expect(body.querySelector('use')).toBeNull()
+  })
+  it('drops SVG foreignObject and animation inside HTML', () => {
+    const out = sanitizeHtmlBody('<svg><foreignObject><div>x</div></foreignObject><rect width="1" height="1"><animate attributeName="x" to="9"/></rect></svg>')
+    expect(out).not.toMatch(/foreignObject|animate/i)
+  })
+  it('does not leak its hooks into the default DOMPurify instance', async () => {
+    const { default: shared } = await import('dompurify')
+    sanitizeHtmlBody('<a href="#x">a</a>')
+    expect(shared.sanitize('<a href="https://ok.test">a</a>')).toContain('href="https://ok.test"')
+  })
+  it('renders a complete static architecture page end to end (F03)', () => {
+    const r = renderStaticHtml(PAGE)
+    if (!r.ok) throw new Error(r.reason)
+    const body = bodyOf(r.srcdoc)
+    expect(body.querySelectorAll('.box')).toHaveLength(2)
+    expect(r.srcdoc).not.toMatch(/<script|innerHTML|bg\.png|cdn\.test/)
+  })
+  it('accepts an explicit preview fragment', () => {
+    const r = renderStaticHtml('<div style="display:flex;gap:8px"><span>甲</span><span>乙</span></div>')
+    expect(r.ok && r.srcdoc).toContain('display:flex')
   })
 })
 
