@@ -1,0 +1,152 @@
+// @vitest-environment jsdom
+import { describe, it, expect } from 'vitest'
+import {
+  buildPreviewDocument, createHeightGovernor, extractHtml, hasVisibleContent, measureDocumentHeight, prepareStaticHtml,
+  HTML_PREVIEW_CSP, HTML_PREVIEW_SANDBOX,
+} from './static-html'
+
+// 测试替身：只删 <script>，用来验证外壳与提取的结构。真实的正文清理（DOMPurify 静态
+// 白名单）单独测试；这里不能拿替身证明 X01/X02。
+const dropScripts = (html: string) => {
+  const doc = new DOMParser().parseFromString(`<body>${html}`, 'text/html')
+  doc.querySelectorAll('script').forEach((s) => s.remove())
+  return doc.body.innerHTML
+}
+
+const PAGE = `<!doctype html><html lang="zh-CN"><head>
+<style>.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px} .box{border:1px solid #333;background:url(http://x/bg.png)}</style>
+<link rel="stylesheet" href="https://cdn.test/x.css">
+</head><body class="page" style="background:#f6f8fa;behavior:x">
+<div class="grid"><div class="box">前端</div><div class="box">后端</div></div>
+<style>.box{padding:6px}</style>
+<script>document.body.innerHTML=''</script>
+</body></html>`
+
+describe('policy constants', () => {
+  it('never grants scripts to the preview iframe', () => {
+    expect(HTML_PREVIEW_SANDBOX.split(/\s+/)).toEqual(['allow-same-origin'])
+  })
+  it('locks down every fetch directive except inline style and data images', () => {
+    for (const d of ["default-src 'none'", "script-src 'none'", "connect-src 'none'", "object-src 'none'", "frame-src 'none'", "base-uri 'none'", "form-action 'none'", "style-src 'unsafe-inline'", 'img-src data:']) {
+      expect(HTML_PREVIEW_CSP).toContain(d)
+    }
+  })
+})
+
+describe('extractHtml', () => {
+  it('pulls head and body styles out, counts blocked scripts and external sheets', () => {
+    const parts = extractHtml(PAGE)!
+    expect(parts.lang).toBe('zh-CN')
+    expect(parts.styles).toHaveLength(2)
+    expect(parts.body).not.toContain('<style')
+    expect(parts.scripts).toBe(1)
+    expect(parts.externalStyles).toBe(1)
+    expect(parts.bodyClass).toBe('page')
+  })
+  it('wraps bare fragments into a body', () => {
+    expect(extractHtml('<div>片段</div>')!.body).toBe('<div>片段</div>')
+  })
+})
+
+describe('buildPreviewDocument', () => {
+  it('puts the CSP before any generated content and escapes body attributes', () => {
+    const doc = buildPreviewDocument({ body: '<p>x</p>', css: '.a{color:red}', bodyClass: 'a" onload="x', bodyStyle: 'color:red' })
+    const cspAt = doc.indexOf('Content-Security-Policy')
+    expect(cspAt).toBeGreaterThan(0)
+    expect(cspAt).toBeLessThan(doc.indexOf('.a{color:red}'))
+    expect(cspAt).toBeLessThan(doc.indexOf('<p>x</p>'))
+    expect(doc).toContain('class="a&quot; onload=&quot;x"')
+    const parsed = new DOMParser().parseFromString(doc, 'text/html')
+    expect(parsed.body.getAttribute('onload')).toBeNull()
+    expect(parsed.querySelector('meta[http-equiv="Content-Security-Policy"]')?.getAttribute('content')).toBe(HTML_PREVIEW_CSP)
+  })
+  it('falls back to zh-CN for malformed lang values', () => {
+    expect(buildPreviewDocument({ body: '', css: '', lang: 'en"><script>' })).toContain('<html lang="zh-CN">')
+    expect(buildPreviewDocument({ body: '', css: '', lang: 'en-US' })).toContain('<html lang="en-US">')
+  })
+  it('keeps host rules that disable animation and control interaction', () => {
+    const doc = buildPreviewDocument({ body: '', css: '' })
+    expect(doc).toContain('animation:none!important')
+    expect(doc).toContain('pointer-events:none!important')
+  })
+})
+
+describe('prepareStaticHtml', () => {
+  it('produces a static document with sanitized styles (F03)', () => {
+    const r = prepareStaticHtml(PAGE, dropScripts)
+    if (!r.ok) throw new Error(r.reason)
+    expect(r.blocked).toEqual({ scripts: 1, externalStyles: 1 })
+    expect(r.srcdoc).toContain('display:grid')
+    expect(r.srcdoc).toContain('.box{padding:6px}')
+    expect(r.srcdoc).not.toContain('bg.png')
+    expect(r.srcdoc).not.toContain('cdn.test')
+    expect(r.srcdoc).toContain('style="background:#f6f8fa"')
+    expect(r.srcdoc).toContain('前端')
+  })
+  it('reports pages that only render through scripts instead of showing a blank box', () => {
+    const spa = '<!doctype html><html><head><script src="https://cdn/react.js"></script></head><body><div id="root"></div><script>mount()</script></body></html>'
+    expect(prepareStaticHtml(spa, dropScripts)).toEqual({ ok: false, reason: 'needs-script' })
+    expect(prepareStaticHtml('<html><body>   </body></html>', dropScripts)).toEqual({ ok: false, reason: 'empty' })
+  })
+  it('refuses oversized input before parsing', () => {
+    expect(prepareStaticHtml('<p>' + 'x'.repeat(256 * 1024) + '</p>', dropScripts)).toEqual({ ok: false, reason: 'too-large' })
+  })
+  it('runs inline style attributes through the CSS allowlist after the body sanitizer', () => {
+    const r = prepareStaticHtml('<html><body><div style="color:red;background:url(https://x/a.png)">a</div><p style="animation:x 1s">b</p></body></html>', (b) => b)
+    if (!r.ok) throw new Error(r.reason)
+    expect(r.srcdoc).toContain('<div style="color:red">a</div>')
+    expect(r.srcdoc).toContain('<p>b</p>')
+    expect(r.srcdoc).not.toContain('a.png')
+  })
+  it('applies the injected sanitizer to the body', () => {
+    const r = prepareStaticHtml('<html><body><p>a</p></body></html>', () => '<p>cleaned</p>')
+    expect(r.ok && r.srcdoc).toContain('<p>cleaned</p>')
+  })
+})
+
+describe('hasVisibleContent', () => {
+  it('accepts text or inline graphics, rejects empty mount points', () => {
+    expect(hasVisibleContent('<div>文字</div>')).toBe(true)
+    expect(hasVisibleContent('<svg viewBox="0 0 1 1"></svg>')).toBe(true)
+    expect(hasVisibleContent('<img src="data:image/png;base64,AAAA">')).toBe(true)
+    expect(hasVisibleContent('<div id="root"></div>')).toBe(false)
+  })
+})
+
+describe('measureDocumentHeight', () => {
+  it('reads the body box, not the viewport-floored documentElement.scrollHeight', () => {
+    const doc = new DOMParser().parseFromString('<body><p>x</p></body>', 'text/html')
+    expect(measureDocumentHeight(doc)).toBeGreaterThanOrEqual(0)
+    const empty = document.implementation.createHTMLDocument('')
+    empty.body.remove()
+    expect(measureDocumentHeight(empty)).toBe(0)
+  })
+})
+
+describe('createHeightGovernor (L04)', () => {
+  it('follows content height within the cap', () => {
+    const g = createHeightGovernor({ max: 1000 })
+    expect(g.observe(300)).toEqual({ height: 300, scroll: false })
+    expect(g.observe(420)).toEqual({ height: 420, scroll: false })
+    expect(g.observe(400)).toEqual({ height: 400, scroll: false })
+  })
+  it('caps oversized pages and switches to inner scrolling for good', () => {
+    const g = createHeightGovernor({ max: 1000 })
+    expect(g.observe(5000)).toEqual({ height: 1000, scroll: true })
+    expect(g.observe(200)).toEqual({ height: 1000, scroll: true })
+    g.reset()
+    expect(g.observe(200)).toEqual({ height: 200, scroll: false })
+  })
+  it('stops a 100vh-style feedback loop instead of growing forever', () => {
+    const g = createHeightGovernor({ max: 2400, maxGrowthSteps: 4 })
+    let last = g.observe(300)
+    for (let i = 0; i < 20 && !last.scroll; i++) last = g.observe(last.height + 4)
+    expect(last.scroll).toBe(true)
+    expect(last.height).toBeLessThan(400)
+  })
+  it('applies a minimum height and tolerates junk measurements', () => {
+    const g = createHeightGovernor({ min: 48 })
+    expect(g.observe(0)).toEqual({ height: 48, scroll: false })
+    expect(g.observe(Number.NaN)).toEqual({ height: 48, scroll: false })
+  })
+})
