@@ -44,6 +44,7 @@ type imageGenerationSnapshot struct {
 	Model            string
 	Size             string
 	SupportedSizes   []string
+	ResponseFormat   string
 }
 
 // imageGenerationTurnState is one session instance's image generation state.
@@ -243,7 +244,7 @@ func (a *App) freezeImageGenerationTurn(e *sessionEntry) {
 		if why != "" {
 			reason = why
 		} else {
-			snap.Model, snap.Size, snap.SupportedSizes = pref.DefaultModel.Name, pref.DefaultSize, pref.SupportedSizes
+			snap.Model, snap.Size, snap.SupportedSizes, snap.ResponseFormat = pref.DefaultModel.Name, pref.DefaultSize, pref.SupportedSizes, pref.ResponseFormat
 			if len(snap.SupportedSizes) == 0 {
 				snap.SupportedSizes = []string{pref.DefaultSize}
 			}

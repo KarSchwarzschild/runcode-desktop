@@ -21,6 +21,19 @@ type imageGenerationPreference struct {
 	DefaultModel   *modelReference `json:"defaultModel,omitempty"`
 	DefaultSize    string          `json:"defaultSize,omitempty"`
 	SupportedSizes []string        `json:"supportedSizes,omitempty"`
+	ResponseFormat string          `json:"responseFormat,omitempty"`
+}
+
+// preferredResponseFormat prefers url (smaller response) and falls back to
+// b64_json when that is all the profile offers (design 6.2).
+func preferredResponseFormat(formats []string) string {
+	if slices.Contains(formats, "url") {
+		return "url"
+	}
+	if slices.Contains(formats, "b64_json") {
+		return "b64_json"
+	}
+	return ""
 }
 
 func (p imageGenerationPreference) view(scope string) appwire.ImageGenerationSettings {
@@ -89,6 +102,7 @@ func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSetting
 		return appwire.ImageGenerationSettings{}, wireError(errors.New("图片生成设置已变化，请刷新后重试"))
 	}
 	var supported []string
+	format := ""
 	if model != nil {
 		actor := a.visionAccountIdentity()
 		ctx, cancel := context.WithTimeout(context.Background(), imageGenerationCatalogTimeout)
@@ -111,7 +125,7 @@ func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSetting
 		if !slices.Contains(profile.SupportedSizes, size) {
 			return appwire.ImageGenerationSettings{}, wireError(errors.New("该生图模型不支持所选尺寸"))
 		}
-		supported = profile.SupportedSizes
+		supported, format = profile.SupportedSizes, preferredResponseFormat(profile.ResponseFormats)
 		if current.sameTarget(model, size) {
 			return current.view(scope), nil
 		}
@@ -125,7 +139,7 @@ func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSetting
 		if prev.Revision != req.ExpectedRevision {
 			return errors.New("图片生成设置已变化，请刷新后重试")
 		}
-		saved = imageGenerationPreference{Revision: prev.Revision + 1, DefaultModel: model, DefaultSize: size, SupportedSizes: supported}
+		saved = imageGenerationPreference{Revision: prev.Revision + 1, DefaultModel: model, DefaultSize: size, SupportedSizes: supported, ResponseFormat: format}
 		if cfg.ImageGenerationPreferences == nil {
 			cfg.ImageGenerationPreferences = map[string]imageGenerationPreference{}
 		}
