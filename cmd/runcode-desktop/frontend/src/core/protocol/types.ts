@@ -412,6 +412,59 @@ export interface HarmAutoAllow {
   count: number;
 }
 
+// Mirrors protocol.ImageGenerationArtifact. ImageGenerationArtifact is one saved image, addressed relative to the workspace.
+export interface ImageGenerationArtifact {
+  path: string;
+  mimeType: string;
+  bytes: number;
+  width: number;
+  height: number;
+}
+
+// Mirrors protocol.ImageGenerationCatalog. ImageGenerationCatalog lists the image models of one account/Bridge/tenant scope.
+export interface ImageGenerationCatalog {
+  scopeId: string;
+  models: ImageGenerationModel[] | null;
+}
+
+// Mirrors protocol.ImageGenerationModel. ImageGenerationModel is one candidate in the settings catalog.
+export interface ImageGenerationModel {
+  model: ModelReference;
+  provider: string;
+  profile: ImageGenerationProfile;
+}
+
+// Mirrors protocol.ImageGenerationProfile. ImageGenerationProfile is the gateway-declared parameter profile of one image model.
+export interface ImageGenerationProfile {
+  available: boolean;
+  supportedSizes: string[] | null;
+  defaultSize: string;
+  responseFormats: string[] | null;
+  unavailableReason?: string;
+}
+
+// Mirrors protocol.ImageGenerationResult. ImageGenerationResult is the bounded result shared by the model's tool content, the live tool event and history replay.
+export interface ImageGenerationResult {
+  version: number;
+  generationId: string;
+  status: string;
+  code?: string;
+  model: string;
+  size: string;
+  images: ImageGenerationArtifact[] | null;
+  message?: string;
+  requestId?: string;
+  accountingStatus: string;
+}
+
+// Mirrors protocol.ImageGenerationSettings. ImageGenerationSettings is the saved default of one scope.
+export interface ImageGenerationSettings {
+  scopeId: string;
+  revision: number;
+  defaultModel?: ModelReference;
+  defaultSize: string;
+}
+
 // Mirrors protocol.Info. Info is the handshake payload describing the host's protocol support.
 export interface Info {
   protocolVersion: number;
@@ -619,6 +672,8 @@ export interface OutputLine {
 
 // Mirrors protocol.PassportModel. PassportModel 是 Bridge /v1/models 列表项。 Local 及其后两个字段是本产品对 OpenAI 模型清单的扩展，由基座的 bridge.catalog 下发（改 ConfigMap 即生效，客户端不必发版）: - Local 标记该模型的推理在内网完成。**客户端只认这个标记、不做二次判断**—— "这个 id 的渠道到底指向哪里"只有基座知道，把它写死在客户端等于让两处事实 互相漂移。标记错了的后果是保密数据出内网，所以基座那边要在配置旁写明依据。 - LocalDefault 指定 Local 模型里默认用哪一个。只标 Local 不够:清单顺序一变 就换了模型，而"换哪个模型"必须是显式声明。 - ContextTokens / MaxOutputTokens / MaxHistoryMessages 是逐模型默认预算。 新 Bridge 同时声明三项；缺失输出/历史字段表示旧目录，不能沿用其他模型的值。 VisionDefault is the unique tenant-authorized platform image fallback, not OA.
 export interface PassportModel {
+  imageGeneration?: ImageGenerationProfile;
+  capabilities?: string[] | null;
   maxOutputTokens?: number;
   maxHistoryMessages?: number;
   visionDefault?: boolean;
@@ -732,7 +787,7 @@ export interface QuestionImage {
   mediaType: string;
 }
 
-// Mirrors protocol.QuestionKnowledge. QuestionKnowledge describes a frozen selection and its engine preparation status.
+// Mirrors protocol.QuestionKnowledge. QuestionKnowledge describes frozen selection and tool/search status for one question.
 export interface QuestionKnowledge {
   libraries: KnowledgeBaseSummary[] | null;
   status: string;
@@ -953,6 +1008,15 @@ export interface SaveCustomModelRequest {
   clearAPIKey?: boolean;
 }
 
+// Mirrors protocol.SaveImageGenerationSettingsRequest. SaveImageGenerationSettingsRequest replaces one scope's default.
+export interface SaveImageGenerationSettingsRequest {
+  tenantId: string;
+  scopeId: string;
+  expectedRevision: number;
+  defaultModel?: ModelReference;
+  defaultSize: string;
+}
+
 // Mirrors protocol.SaveModelContextSettingsRequest. SaveModelContextSettingsRequest replaces or clears one model preference.
 export interface SaveModelContextSettingsRequest {
   model: ModelReference;
@@ -978,6 +1042,17 @@ export interface SecretStorage {
   ok: boolean;
   reason?: string;
   fix?: string;
+}
+
+// Mirrors protocol.SessionImageGenerationView. SessionImageGenerationView is one session's switch.
+export interface SessionImageGenerationView {
+  sessionId: string;
+  enabled: boolean;
+  revision: number;
+  available: boolean;
+  reason?: string;
+  model?: ModelReference;
+  size?: string;
 }
 
 // Mirrors protocol.SessionInfo. SessionInfo is the display state returned when a session starts and by Status.
@@ -1024,6 +1099,13 @@ export interface SessionSummary {
 export interface SetPlatformImageCapabilityRequest {
   model: ModelReference;
   supportsImages?: boolean;
+}
+
+// Mirrors protocol.SetSessionImageGenerationRequest. SetSessionImageGenerationRequest changes one session's switch with a revision check.
+export interface SetSessionImageGenerationRequest {
+  sessionId: string;
+  enabled: boolean;
+  expectedRevision: number;
 }
 
 // Mirrors protocol.SetSessionKnowledgeRequest. SetSessionKnowledgeRequest replaces the entire selection using a revision check.

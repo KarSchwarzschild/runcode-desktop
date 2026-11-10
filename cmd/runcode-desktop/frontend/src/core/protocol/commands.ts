@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateKnowledgeChatRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateKnowledgeChatRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationCatalog, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -317,6 +317,12 @@ export function listEdits(sessionID: string): Promise<EditRecord[] | null> {
 // kind: query
 export function listFiles(): Promise<string[] | null> {
   return call<string[] | null>('ListFiles');
+}
+
+// ListImageGenerationModels lists the image models the current account may see under tenantID.
+// kind: query
+export function listImageGenerationModels(tenantID: string): Promise<ImageGenerationCatalog> {
+  return call<ImageGenerationCatalog>('ListImageGenerationModels', tenantID);
 }
 
 // ListKnowledgeBases lists the explicit session's authenticated catalog.

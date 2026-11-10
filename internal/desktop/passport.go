@@ -289,24 +289,68 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 	if err != nil {
 		return nil, wireError(err)
 	}
-	// local/local_default/context_tokens 是本产品对 OpenAI 模型清单的扩展(见
-	// protocol.PassportModel)。老 Bridge 不回这三个字段，解出来是零值，表现为
-	// "没有本地模型"——于是 OA 工具不注册，而不是错把云端模型当成本地的。
+	all, err := decodePassportModels(body)
+	if err != nil {
+		return nil, wireError(err)
+	}
+	if a.visionAccountIdentity() != actor {
+		return nil, wireError(errors.New("加载模型期间账号已变化，请重试"))
+	}
+	if scope != platformModelRef(tenantID, "") {
+		return nil, wireError(errors.New("加载模型期间平台已变化，请重试"))
+	}
+	a.rememberModelCatalog(scope, actor, all)
+	// Every caller of this list picks a text model (chat, judge, sub-agent,
+	// context budget, OA local model, vision). Image-only models live in the
+	// catalog's separate image set and reach the UI only through
+	// ListImageGenerationModels.
+	models := make([]PassportModel, 0, len(all))
+	for _, m := range all {
+		if isChatModel(m) {
+			models = append(models, m)
+		}
+	}
+	stored := loadRawConfig()
+	for i := range models {
+		if v := imageOverride(stored, platformModelRef(tenantID, models[i].ID)); v != nil {
+			models[i].SupportsImages = v
+		}
+	}
+	a.rememberLocalModel(tenantID, models)
+	return models, nil
+}
+
+// decodePassportModels parses a Bridge /v1/models body, including this
+// product's catalog extensions.
+//
+// local/local_default/context_tokens 是本产品对 OpenAI 模型清单的扩展(见
+// protocol.PassportModel)。老 Bridge 不回这三个字段，解出来是零值，表现为
+// "没有本地模型"——于是 OA 工具不注册，而不是错把云端模型当成本地的。
+// capabilities/image_generation 同理：老目录不带它们，模型保持聊天用途且不是生图候选。
+func decodePassportModels(body []byte) ([]PassportModel, error) {
 	var payload struct {
 		Data []struct {
-			ID                 string `json:"id"`
-			OwnedBy            string `json:"owned_by"`
-			SupportsImages     *bool  `json:"supports_images"`
-			VisionDefault      bool   `json:"vision_default"`
-			Local              bool   `json:"local"`
-			LocalDefault       bool   `json:"local_default"`
-			ContextTokens      *int   `json:"context_tokens"`
-			MaxOutputTokens    *int   `json:"max_output_tokens"`
-			MaxHistoryMessages *int   `json:"max_history_messages"`
+			ID                 string   `json:"id"`
+			OwnedBy            string   `json:"owned_by"`
+			SupportsImages     *bool    `json:"supports_images"`
+			VisionDefault      bool     `json:"vision_default"`
+			Local              bool     `json:"local"`
+			LocalDefault       bool     `json:"local_default"`
+			ContextTokens      *int     `json:"context_tokens"`
+			MaxOutputTokens    *int     `json:"max_output_tokens"`
+			MaxHistoryMessages *int     `json:"max_history_messages"`
+			Capabilities       []string `json:"capabilities"`
+			ImageGeneration    *struct {
+				Available         bool     `json:"available"`
+				SupportedSizes    []string `json:"supported_sizes"`
+				DefaultSize       string   `json:"default_size"`
+				ResponseFormats   []string `json:"response_formats"`
+				UnavailableReason string   `json:"unavailable_reason"`
+			} `json:"image_generation"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
-		return nil, wireError(fmt.Errorf("解析模型列表失败: %w", err))
+		return nil, fmt.Errorf("解析模型列表失败: %w", err)
 	}
 	models := make([]PassportModel, 0, len(payload.Data))
 	for _, m := range payload.Data {
@@ -317,7 +361,7 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 			// A partial payload is not a complete set of model defaults.
 			m.MaxOutputTokens, m.MaxHistoryMessages = nil, nil
 		}
-		models = append(models, PassportModel{
+		model := PassportModel{
 			SupportsImages:     m.SupportsImages,
 			VisionDefault:      m.VisionDefault,
 			ID:                 m.ID,
@@ -327,22 +371,23 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 			ContextTokens:      contextTokens,
 			MaxOutputTokens:    m.MaxOutputTokens,
 			MaxHistoryMessages: m.MaxHistoryMessages,
-		})
-	}
-	if a.visionAccountIdentity() != actor {
-		return nil, wireError(errors.New("加载模型期间账号已变化，请重试"))
-	}
-	if scope != platformModelRef(tenantID, "") {
-		return nil, wireError(errors.New("加载模型期间平台已变化，请重试"))
-	}
-	a.rememberModelCatalog(scope, actor, models)
-	stored := loadRawConfig()
-	for i := range models {
-		if v := imageOverride(stored, platformModelRef(tenantID, models[i].ID)); v != nil {
-			models[i].SupportsImages = v
 		}
+		for _, c := range m.Capabilities {
+			if c = strings.TrimSpace(c); c != "" {
+				model.Capabilities = append(model.Capabilities, c)
+			}
+		}
+		if p := m.ImageGeneration; p != nil {
+			model.ImageGeneration = &ImageGenerationProfile{
+				Available:         p.Available,
+				SupportedSizes:    p.SupportedSizes,
+				DefaultSize:       p.DefaultSize,
+				ResponseFormats:   p.ResponseFormats,
+				UnavailableReason: p.UnavailableReason,
+			}
+		}
+		models = append(models, model)
 	}
-	a.rememberLocalModel(tenantID, models)
 	return models, nil
 }
 

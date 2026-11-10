@@ -359,3 +359,11 @@ function base64(bytes: Uint8Array): string {
   }
   return btoa(binary)
 }
+
+// ---- 文生图（IMG-GEN-001）---------------------------------------------------------
+export type {
+  ImageGenerationProfile, ImageGenerationModel, ImageGenerationCatalog, ImageGenerationSettings,
+  SaveImageGenerationSettingsRequest, SessionImageGenerationView, SetSessionImageGenerationRequest,
+  ImageGenerationArtifact, ImageGenerationResult,
+} from './protocol/types'
+export { listImageGenerationModels } from './protocol/commands'
