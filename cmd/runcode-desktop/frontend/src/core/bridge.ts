@@ -366,4 +366,7 @@ export type {
   SaveImageGenerationSettingsRequest, SessionImageGenerationView, SetSessionImageGenerationRequest,
   ImageGenerationArtifact, ImageGenerationResult,
 } from './protocol/types'
-export { listImageGenerationModels } from './protocol/commands'
+export {
+  listImageGenerationModels, getImageGenerationSettings, saveImageGenerationSettings,
+  getSessionImageGeneration, setSessionImageGeneration,
+} from './protocol/commands'

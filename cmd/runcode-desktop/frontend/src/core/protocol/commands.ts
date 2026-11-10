@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateKnowledgeChatRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationCatalog, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateKnowledgeChatRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationCatalog, ImageGenerationSettings, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionImageGenerationView, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionImageGenerationRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -199,6 +199,12 @@ export function forkQuestion(ref: QuestionReference): Promise<ResumedSession> {
   return call<ResumedSession>('ForkQuestion', ref);
 }
 
+// GetImageGenerationSettings returns the current account's saved default for tenantID.
+// kind: query
+export function getImageGenerationSettings(tenantID: string): Promise<ImageGenerationSettings> {
+  return call<ImageGenerationSettings>('GetImageGenerationSettings', tenantID);
+}
+
 // GetModelContextSettings reads defaults and local overrides for one model.
 // kind: query
 export function getModelContextSettings(ref: ModelReference): Promise<ModelContextView> {
@@ -215,6 +221,12 @@ export function getProtocolInfo(): Promise<Info> {
 // kind: query
 export function getQuestion(ref: QuestionReference): Promise<QuestionDraft> {
   return call<QuestionDraft>('GetQuestion', ref);
+}
+
+// GetSessionImageGeneration reads the session's confirmed switch.
+// kind: query
+export function getSessionImageGeneration(sessionID: string): Promise<SessionImageGenerationView> {
+  return call<SessionImageGenerationView>('GetSessionImageGeneration', sessionID);
 }
 
 // GetSessionKnowledge reads and revalidates the session's durable selection.
@@ -655,6 +667,12 @@ export function saveCustomModel(req: SaveCustomModelRequest): Promise<CustomMode
   return call<CustomModel[] | null>('SaveCustomModel', req);
 }
 
+// SaveImageGenerationSettings replaces the scope's default after checking the model against the live catalog.
+// kind: idempotent-set
+export function saveImageGenerationSettings(req: SaveImageGenerationSettingsRequest): Promise<ImageGenerationSettings> {
+  return call<ImageGenerationSettings>('SaveImageGenerationSettings', req);
+}
+
 // SaveMCPServer creates or updates a server and persists it to config.toml.
 // kind: idempotent-set
 export function saveMCPServer(in_: MCPServerInput): Promise<void> {
@@ -779,6 +797,12 @@ export function setPlatformImageCapability(req: SetPlatformImageCapabilityReques
 // kind: idempotent-set
 export function setReasoningScenario(sessionID: string, scenario: string): Promise<ConversationInfo> {
   return call<ConversationInfo>('SetReasoningScenario', sessionID, scenario);
+}
+
+// SetSessionImageGeneration changes the session's switch for the next turn.
+// kind: idempotent-set
+export function setSessionImageGeneration(req: SetSessionImageGenerationRequest): Promise<SessionImageGenerationView> {
+  return call<SessionImageGenerationView>('SetSessionImageGeneration', req);
 }
 
 // SetSessionKnowledge performs authorization without lifecycle/storage locks, then reacquires the existing lock order and CAS before durable publication.
