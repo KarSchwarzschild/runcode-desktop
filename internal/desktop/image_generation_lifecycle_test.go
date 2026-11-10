@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -113,6 +116,37 @@ func TestImageGenerationLifecycleCancelKeepsBudgetAndSaysWhy(t *testing.T) {
 	}
 	if again := f.run(t, "tu_2", `{"prompt":"海报"}`); again.Code != "turn_budget_exhausted" && f.bridge.posts.Load() != 0 {
 		t.Fatalf("cancel released a budget that may have been spent: %+v", again)
+	}
+}
+
+func TestImageGenerationLifecycleSaveFailureIsNotSuccessOrRetry(t *testing.T) {
+	f := newImageGenFlow(t)
+	if err := os.WriteFile(filepath.Join(f.cwd, imageGenerationDir), []byte("blocked"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	got := f.run(t, "tu_1", `{"prompt":"海报"}`)
+	if got.Status != "save_failed" || got.Code != "save_failed" || len(got.Images) != 0 || got.RequestID != "brg-synthetic-0002" ||
+		got.AccountingStatus != "unverified" || !strings.Contains(got.Message, "计费待核验") || strings.Contains(got.Message, "免费") {
+		t.Fatalf("save failure = %+v", got)
+	}
+	if again := f.run(t, "tu_2", `{"prompt":"海报"}`); again.Code != "turn_budget_exhausted" || f.bridge.posts.Load() != 1 {
+		t.Fatalf("save failure triggered another POST: %+v posts=%d", again, f.bridge.posts.Load())
+	}
+	rec, err := readImageGenerationLedger(f.cwd, f.id, got.GenerationID)
+	if err != nil || rec.Status != "save_failed" {
+		t.Fatalf("ledger = %+v %v", rec, err)
+	}
+}
+
+func TestImageGenerationLifecycleFreezeNeverTouchesTheNetwork(t *testing.T) {
+	f := newImageGenFlow(t)
+	before := f.bridge.posts.Load()
+	f.bridge.srv.Close() // any catalog or generation request would now fail loudly
+	for i := 0; i < 3; i++ {
+		f.app.freezeImageGenerationTurn(f.entry)
+	}
+	if snap := f.state.snapshot(); !snap.Available || f.bridge.posts.Load() != before {
+		t.Fatalf("freeze depended on the network: %+v", snap)
 	}
 }
 
