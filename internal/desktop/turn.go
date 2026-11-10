@@ -208,4 +208,7 @@ func (a *App) onTurnStart(sessionID string) {
 	}
 	// Freeze callable libraries before the first model/tool step (no retrieve).
 	a.freezeKnowledgeTurn(e, "")
+	// A fresh TurnID and image generation target per independent turn; injected
+	// messages never reach this hook, so they keep the running turn's budget.
+	a.freezeImageGenerationTurn(e)
 }

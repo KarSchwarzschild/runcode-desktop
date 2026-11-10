@@ -34,7 +34,7 @@ type imageGenerationSnapshot struct {
 
 	SessionID  string
 	TurnID     string
-	Generation uint64
+	Generation string
 	Workspace  string
 
 	Account, Epoch, Bridge, Tenant, ScopeID string
@@ -51,11 +51,11 @@ type imageGenerationSnapshot struct {
 type imageGenerationTurnState struct {
 	mu         sync.Mutex
 	sessionID  string
-	generation uint64
+	generation string // host session instance generation
 	snap       imageGenerationSnapshot
 }
 
-func newImageGenerationTurnState(sessionID string, generation uint64) *imageGenerationTurnState {
+func newImageGenerationTurnState(sessionID, generation string) *imageGenerationTurnState {
 	return &imageGenerationTurnState{sessionID: sessionID, generation: generation}
 }
 
