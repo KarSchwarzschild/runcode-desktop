@@ -10,6 +10,7 @@ import { Composer } from './index'
 import type { ComposerEditorHandle } from './inline-editor'
 
 const directoryCommand = vi.hoisted(() => vi.fn())
+const imageApi = vi.hoisted(() => ({ get: vi.fn(), set: vi.fn() }))
 
 vi.mock('@/core/bridge', () => ({
   listAgents: async () => ({ agents: [] }),
@@ -18,9 +19,18 @@ vi.mock('@/core/bridge', () => ({
   sessionModels: async () => [],
   pickImageAttachment: async () => '',
   savePastedFile: async () => '',
-  errText: String,
+  errText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
   openKnowledgeDirectory: directoryCommand,
+  getSessionImageGeneration: imageApi.get,
+  setSessionImageGeneration: imageApi.set,
+  onEvent: () => () => {},
+  Events: { PassportChanged: 'passport:changed' },
 }))
+
+const imageRef = { kind: 'platform', name: 'image-model', bridge: 'https://bridge.example', tenantId: 't1' }
+function imageView(sessionId: string, patch: Record<string, unknown> = {}) {
+  return { sessionId, enabled: false, revision: 0, available: true, model: imageRef, size: '1024x1024', ...patch }
+}
 
 const kb: KnowledgeBaseSummary = { id: 'private-library-id', title: '测试知识库标题', description: '测试简介', path: '测试目录/产品', source: 'demo', documentCount: 2, documentCountKnown: true }
 const noop = () => {}
@@ -28,6 +38,8 @@ let host: HTMLDivElement, root: Root
 
 beforeEach(() => {
   directoryCommand.mockReset()
+  imageApi.get.mockReset().mockImplementation(async (id: string) => imageView(id))
+  imageApi.set.mockReset().mockImplementation(async (req: { sessionId: string; enabled: boolean; expectedRevision: number }) => imageView(req.sessionId, { enabled: req.enabled, revision: req.expectedRevision + 1 }))
   ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
   host = document.createElement('div')
   document.body.append(host)
@@ -60,12 +72,13 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-async function mount(initialLibrary = kb, options: { kind?: string; busy?: boolean; attachments?: Attachment[]; sendBlock?: string } = {}) {
+async function mount(initialLibrary = kb, options: { kind?: string; busy?: boolean; attachments?: Attachment[]; sendBlock?: string; sessionId?: string } = {}) {
   const handle = createRef<ComposerEditorHandle>(), chat = createRef<HTMLDivElement>()
   let text = 'abcd'
   let libraries = initialLibrary ? [initialLibrary] : []
   let toast = ''
-  const sessionId = 'A', contextVersion = 1
+  let sessionId = options.sessionId ?? 'A'
+  const contextVersion = 1
   const saves: string[][] = []
   const sends: string[] = []
   const refreshFiles = vi.fn()
@@ -91,7 +104,13 @@ async function mount(initialLibrary = kb, options: { kind?: string; busy?: boole
   await act(async () => render())
   const textbox = host.querySelector<HTMLElement>('[role="textbox"]')!
   const editor = getNearestEditorFromDOMNode(textbox)!
-  return { handle, textbox, editor, text: () => text, saves, sends, refreshFiles, toast: () => toast }
+  const switchSession = async (id: string) => { sessionId = id; await act(async () => render()) }
+  return { handle, textbox, editor, text: () => text, saves, sends, refreshFiles, toast: () => toast, switchSession }
+}
+
+const findButton = (label: string) => Array.from(host.querySelectorAll<HTMLButtonElement>('button')).find((b) => b.textContent?.trim().startsWith(label))
+async function openAddMenu() {
+  await act(async () => host.querySelector<HTMLButtonElement>('button[title^="添加："]')!.click())
 }
 
 async function nextFrame() {
@@ -137,5 +156,59 @@ describe('Composer inline editor integration', () => {
     expect(app.refreshFiles).toHaveBeenCalledOnce()
     expect(app.text()).not.toContain(kb.title)
     expect(app.textbox.textContent).not.toContain(kb.title)
+  })
+})
+
+describe('Composer image generation entry', () => {
+  it('「+」里开启生成图片：只改本会话开关，不动知识库，显示状态标记', async () => {
+    const app = await mount(kb)
+    await openAddMenu()
+    const item = findButton('生成图片')!
+    expect(item.getAttribute('aria-checked')).toBe('false')
+    await act(async () => item.click())
+    expect(imageApi.set).toHaveBeenCalledWith({ sessionId: 'A', enabled: true, expectedRevision: 0 })
+    expect(app.saves).toEqual([])
+    expect(host.textContent).toContain('生图 · image-model')
+  })
+
+  it('回合进行中禁止切换', async () => {
+    await mount(kb, { busy: true })
+    await openAddMenu()
+    expect(findButton('生成图片')!.disabled).toBe(true)
+  })
+
+  it('未配置模型时标记提示去设置选择，不自动选择模型', async () => {
+    imageApi.get.mockImplementation(async (id: string) => imageView(id, { enabled: true, available: false, model: undefined, size: '', reason: '尚未选择生图模型，请在「设置 → 图片生成」中选择' }))
+    await mount(kb)
+    expect(host.textContent).toContain('生图 · 未就绪')
+    await act(async () => findButton('生图')!.click())
+    expect(host.textContent).toContain('尚未选择生图模型')
+    expect(host.textContent).toContain('选择生图模型')
+    expect(imageApi.set).not.toHaveBeenCalled()
+  })
+
+  it('开关保存失败时提示原因且不显示已开启', async () => {
+    imageApi.set.mockRejectedValueOnce(new Error('图片生成记录无法读取或保存'))
+    const app = await mount(kb)
+    await openAddMenu()
+    await act(async () => findButton('生成图片')!.click())
+    expect(app.toast()).toContain('无法读取或保存')
+    expect(host.textContent).not.toContain('生图 · image-model')
+  })
+
+  it('新会话草稿保存失败时不发送首条消息', async () => {
+    const app = await mount(null as unknown as KnowledgeBaseSummary, { sessionId: '' })
+    await openAddMenu()
+    await act(async () => findButton('生成图片')!.click())
+    expect(imageApi.set).not.toHaveBeenCalled()
+    await app.switchSession('NEW')
+    imageApi.set.mockRejectedValueOnce(new Error('草稿未能保存'))
+    await act(async () => app.textbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    expect(imageApi.set).toHaveBeenCalledWith({ sessionId: 'NEW', enabled: true, expectedRevision: 0 })
+    expect(app.sends).toEqual([])
+    expect(app.toast()).toContain('草稿未能保存')
+
+    await act(async () => app.textbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    expect(app.sends).toEqual(['abcd'])
   })
 })

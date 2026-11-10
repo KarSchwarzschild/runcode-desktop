@@ -491,6 +491,15 @@ export function Icon({ name, size = 18, className }: Props) {
           <path d="M12 12h9m0 0-3.2-3.2M21 12l-3.2 3.2" />
         </svg>
       )
+    // 文生图：画框 + 右上角的生成星点。
+    case 'image-gen':
+      return (
+        <svg {...common} {...stroke}>
+          <path d="M13 4.5H6a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V11" />
+          <path d="M4.5 16.5l4-4 3.5 3.5 2.5-2.5 4 4" />
+          <path d="M18 2.8v4.4M15.8 5h4.4" />
+        </svg>
+      )
     default:
       return null
   }
