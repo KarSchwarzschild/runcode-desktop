@@ -15,18 +15,24 @@ type QuestionImage struct {
 
 // QuestionDraft is the actual submitted text, not the bubble's shortened label.
 type QuestionDraft struct {
-	Source QuestionReference `json:"source"`
-	Text   string            `json:"text"`
-	Images []QuestionImage   `json:"images"`
+	Knowledge *QuestionKnowledge `json:"knowledge,omitempty"`
+	Source    QuestionReference  `json:"source"`
+	Text      string             `json:"text"`
+	Images    []QuestionImage    `json:"images"`
 }
 
 // SubmitQuestionRequest supports ordinary input and a prepared retry branch.
 // OriginalImages indexes only the Source question authorized by branch lineage.
 type SubmitQuestionRequest struct {
-	SessionID      string             `json:"sessionId"`
-	Text           string             `json:"text"`
-	ImagePaths     []string           `json:"imagePaths"`
-	Source         *QuestionReference `json:"source,omitempty"`
-	OriginalImages []int              `json:"originalImages"`
-	AllowSteering  bool               `json:"allowSteering"`
+	SubmissionID      string             `json:"submissionId,omitempty"`
+	KnowledgeOverride *KnowledgeOverride `json:"knowledgeOverride,omitempty"`
+	SessionID         string             `json:"sessionId"`
+	Text              string             `json:"text"`
+	ImagePaths        []string           `json:"imagePaths"`
+	Source            *QuestionReference `json:"source,omitempty"`
+	OriginalImages    []int              `json:"originalImages"`
+	AllowSteering     bool               `json:"allowSteering"`
+	// KnowledgeRevision is optional for older clients; selected libraries are
+	// always enforced by the desktop regardless of whether it is supplied.
+	KnowledgeRevision *int64 `json:"knowledgeRevision,omitempty"`
 }

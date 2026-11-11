@@ -17,6 +17,7 @@ import (
 	"github.com/wt68/runcode/internal/browsertool"
 	"github.com/wt68/runcode/internal/codexauth"
 	"github.com/wt68/runcode/internal/codexproxy"
+	"github.com/wt68/runcode/internal/knowledgetool"
 	"github.com/wt68/runcode/internal/officetool"
 	"github.com/wt68/runcode/internal/plantool"
 	"github.com/wt68/runcode/internal/previewtool"
@@ -70,8 +71,11 @@ type Quitter interface{ Quit() }
 //     期间做慢操作。等到某个字段真需要长时间持有(比如以后每会话一条连接),再给
 //     条目加锁,并遵守 startMu → App.mu → entry.mu 的次序。
 type sessionEntry struct {
-	modelRef   modelReference
-	questionMu sync.Mutex // serializes submission preparation without holding App.mu
+	chat            *knowledgeChatSession // immutable pointer; run/seq protected by App.mu
+	pendingQuestion *questionAdmission    // protected by App.mu; exact pre-host submission attempt
+	modelRef        modelReference
+	questionMu      sync.Mutex       // serializes submission preparation without holding App.mu
+	knowledge       knowledgeBinding // immutable account and connection binding for selection state
 	// Creation connection belongs to this entry, not whichever session has focus.
 	connectionConfig engine.Config
 	passport         bool
@@ -86,6 +90,8 @@ type sessionEntry struct {
 	emit      func(event string, payload any)
 	edits     *editStore
 	plans     *planStore
+	// knowledgeTurn holds the on-demand knowledge_search freeze and D01 notes.
+	knowledgeTurn *knowledgeTurnState
 
 	// turnActive mirrors whether this session has a turn in flight (set on
 	// submit, cleared when the sink adapter observes turn:end / turn:error).
@@ -231,6 +237,8 @@ type App struct {
 	// approval gate, and the persisted copy that lets a pending approval survive a
 	// restart. Same lifecycle as pendingEdits; promoted onto the entry on success.
 	pendingPlans *planStore
+	// pendingKnowledge parks knowledge_search turn state while Create is in flight.
+	pendingKnowledge *knowledgeTurnState
 	// tokens holds the Passport OAuth tokens (memory + DPAPI persistence); it is
 	// also the engine's TokenSource. passportUser caches /api/me for PassportStatus.
 	// loginCancel cancels an in-flight browser login wait.
@@ -292,6 +300,7 @@ func newWithBuild(sink EventSink, build host.BuildFunc) *App {
 	})
 	pc := passportConfig()
 	a.tokens = newTokenManager(pc.tokenURL(), pc.ClientID, passportHTTP(), func() {
+		a.cancelQuestionAdmissions()
 		a.mu.Lock()
 		a.passportUser = nil
 		a.mu.Unlock()
@@ -390,6 +399,9 @@ func (s hostSinkAdapter) Emit(env protocol.Envelope) {
 	switch env.Event {
 	case EventTurnEnd, EventTurnError:
 		s.app.noteTurnDone(env.SessionID)
+		if env.Event == EventTurnError {
+			s.app.noteKnowledgeTurnFailed(env.SessionID)
+		}
 	case EventToolEvent:
 		// 命令跑完看一眼：pip 刚装的新库里若有安全中心不认的程序文件，立刻请用户放行
 		// （见 trustwatch.go）。非麒麟机器上这一句直接返回。
@@ -659,6 +671,7 @@ var hostToolClasses = func() map[string]permissions.ToolClass {
 		runtimetool.Name:    permissions.ClassMutating,
 		browsertool.Name:    permissions.ClassMutating,
 		imageinput.ToolName: permissions.ClassReadOnly,
+		knowledgetool.Name:  permissions.ClassReadOnly,
 	}
 	for name, class := range oaToolClasses {
 		m[name] = class
@@ -825,6 +838,15 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 	// 工具。子代理跑在构建时那个模型上,给它 OA 工具等于给闸门开一条后门。
 	if oa := a.oaTools(cfg, sctx.ID); len(oa) > 0 {
 		opts.ExtraTools = append(opts.ExtraTools, oa...)
+	}
+	// knowledge_search：通行证会话按需检索；无选库时 Description 说明勿调用，Run 拒绝。
+	if kb := a.knowledgeTools(cfg, sctx.ID, sctx.Emit); len(kb) > 0 {
+		opts.ExtraTools = append(opts.ExtraTools, kb...)
+		appendSystemPrompt(cfg, knowledgeAgentPrompt)
+	} else {
+		a.mu.Lock()
+		a.pendingKnowledge = nil
+		a.mu.Unlock()
 	}
 
 	// 上下文审核观测器只在测试版接线;正式版连回调都不装,功能整体不存在。
@@ -993,9 +1015,21 @@ func (a *App) buildSessionModeHeld(ctx context.Context, cfg engine.Config, passp
 
 func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, passport bool, tenantID string, focus, restoreModel bool, refs ...modelReference) (SessionInfo, error) {
 	requested := cfg.Model
+	if isKnowledgeChatID(cfg.Resume) || isKnowledgeChatID(cfg.SessionID) {
+		return SessionInfo{}, errors.New("知识库会话必须通过宿主路由恢复")
+	}
 	cfg, err := restoredContextModel(ctx, cfg, restoreModel)
 	if err != nil {
 		return SessionInfo{}, err
+	}
+	resumeID := cfg.Resume
+	if resumeID == "" {
+		resumeID = cfg.SessionID
+	}
+	if resumeID != "" {
+		if err := checkKnowledgeHistory(ctx, cfg.CWD, resumeID, cfg.SessionBackend); err != nil {
+			return SessionInfo{}, err
+		}
 	}
 	if passport && requested != "" && cfg.Model != requested && !a.keepRestoredPlatformModel(ctx, tenantID, cfg.Model) {
 		debugLog("resume: sidecar model %q is not a platform model; using %q", cfg.Model, requested)
@@ -1051,8 +1085,8 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 		}
 	}
 	a.mu.Lock()
-	pendingEdits, pendingPlans, pendingEmit := a.pendingEdits, a.pendingPlans, a.pendingEmit
-	a.pendingEdits, a.pendingPlans, a.pendingEmit = nil, nil, nil
+	pendingEdits, pendingPlans, pendingEmit, pendingKnowledge := a.pendingEdits, a.pendingPlans, a.pendingEmit, a.pendingKnowledge
+	a.pendingEdits, a.pendingPlans, a.pendingEmit, a.pendingKnowledge = nil, nil, nil, nil
 	if err != nil {
 		a.mu.Unlock()
 		return SessionInfo{}, err
@@ -1063,7 +1097,9 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 	// 登记顺带把 focused 与 workspace 一起切到新会话(见 focusLocked)。
 	a.registerSessionModeLocked(id, cfg.CWD, pendingEdits, pendingPlans, pendingEmit, focus)
 	entry := a.entryLocked(id)
+	entry.knowledgeTurn = pendingKnowledge
 	entry.connectionConfig, entry.passport, entry.tenantID = cfg, passport, strings.TrimSpace(tenantID)
+	a.bindKnowledgeLocked(entry)
 	entry.modelRef = modelRef
 	// 锁跟着会话进内存:此后闸门、模型切换拦截、出网工具封锁读的都是这一份。
 	oaLock, oaLocked := readOALock(cfg.CWD, id)
@@ -1121,6 +1157,17 @@ func (a *App) closeCurrentHeld() error {
 //   - true —— 用户主动关掉这条会话。它从界面上整个消失了,留着只是占内存,
 //     还会让"打开中的会话"列表多出一条已经死掉的。
 func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) error {
+	if e != nil && e.chat != nil {
+		// 先关闭准入，再等待运行取消；否则旧轮结束到关闭之间可能接收新问题。
+		e.questionMu.Lock()
+		a.mu.Lock()
+		e.closed = true
+		a.mu.Unlock()
+		e.questionMu.Unlock()
+		if err := a.stopKnowledgeChat(ctx, e); err != nil {
+			return err
+		}
+	}
 	if e == nil {
 		return nil
 	}
@@ -1130,7 +1177,7 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 		id = e.id
 	}
 	a.mu.Unlock()
-	if id != "" {
+	if id != "" && e.chat == nil {
 		if err := a.mgr.Close(ctx, id); err != nil {
 			return fmt.Errorf("关闭会话失败，可重试: %w", err)
 		}
@@ -1156,7 +1203,10 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	}
 	a.mu.Unlock()
 	a.dropArtifacts(e.id)
-	a.stopPreview(previewWorkspaceOf(e))
+	// 知识库从未持有预览引用，关闭时不能释放同工作区普通会话的服务器。
+	if e.chat == nil {
+		a.stopPreview(previewWorkspaceOf(e))
+	}
 	return nil
 }
 
@@ -1172,6 +1222,7 @@ func (a *App) registerSessionLocked(id, workspace string, edits *editStore, plan
 func (a *App) registerSessionModeLocked(id, workspace string, edits *editStore, plans *planStore, emit func(string, any), focus bool) {
 	a.sessionSeq++
 	entry := &sessionEntry{id: id, seq: a.sessionSeq, workspace: workspace, emit: emit, edits: edits, plans: plans}
+	a.bindKnowledgeLocked(entry)
 	// Configure 一定在 Create 成功前跑过,所以这两个不该为 nil;真为 nil 时用兜底
 	// 存储顶上,免得后面每个取用点都要判空。
 	if entry.edits == nil {
@@ -1287,6 +1338,9 @@ func (a *App) Reset(sessionID string) error {
 
 // Status returns the current session's display state.
 func (a *App) Status(sessionID string) (SessionInfo, error) {
+	if e, err := a.entryOf(sessionID); err == nil && e.chat != nil {
+		return a.knowledgeChatInfo(e)
+	}
 	session, err := a.sessionHandleOf(sessionID)
 	if err != nil {
 		return SessionInfo{}, wireError(err)
@@ -1298,6 +1352,7 @@ func (a *App) Status(sessionID string) (SessionInfo, error) {
 // live preview base URL.
 func (a *App) sessionInfo(st engine.Status) SessionInfo {
 	return SessionInfo{
+		Kind:               "agent",
 		SessionID:          st.SessionID,
 		Model:              st.Model,
 		CWD:                st.CWD,

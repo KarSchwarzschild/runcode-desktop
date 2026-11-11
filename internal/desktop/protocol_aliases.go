@@ -37,6 +37,7 @@ const (
 	EventHarmAutoAllow     = protocol.EventHarmAutoAllow
 	EventPlanUpdated       = protocol.EventPlanUpdated
 	EventPassportChanged   = protocol.EventPassportChanged
+	EventKnowledgeContext  = protocol.EventKnowledgeContext
 )
 
 // 阶段化计划模式的阶段与运行状态值,同样再导出(文档在 protocol 包)。
@@ -60,6 +61,16 @@ const (
 //
 //nolint:revive // 再导出别名:文档以定义方的 protocol 包为准(见上)
 type (
+	CreateKnowledgeChatRequest      = protocol.CreateKnowledgeChatRequest
+	KnowledgeBaseSummary            = protocol.KnowledgeBaseSummary
+	QuestionKnowledge               = protocol.QuestionKnowledge
+	KnowledgeOverride               = protocol.KnowledgeOverride
+	KnowledgeContextStatus          = protocol.KnowledgeContextStatus
+	KnowledgeSource                 = protocol.KnowledgeSource
+	KnowledgeListRequest            = protocol.KnowledgeListRequest
+	KnowledgePage                   = protocol.KnowledgePage
+	SessionKnowledgeView            = protocol.SessionKnowledgeView
+	SetSessionKnowledgeRequest      = protocol.SetSessionKnowledgeRequest
 	ModelReference                  = protocol.ModelReference
 	ModelContextValues              = protocol.ModelContextValues
 	ModelContextOverride            = protocol.ModelContextOverride
@@ -71,7 +82,7 @@ type (
 	SubmitQuestionRequest           = protocol.SubmitQuestionRequest
 	QuestionReceipt                 = hostproto.QuestionReceipt
 	// Turn stream, session state and approval — the engine host's contract.
-	SessionInfo       = hostproto.SessionInfo
+	SessionInfo       = protocol.ConversationInfo
 	AssistantDelta    = hostproto.AssistantDelta
 	Warning           = hostproto.Warning
 	TurnError         = hostproto.TurnError

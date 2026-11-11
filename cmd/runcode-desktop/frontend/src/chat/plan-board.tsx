@@ -31,9 +31,10 @@ function stageProgress(run: PlanRun): { done: number; active: number } {
 // PlanStageBar 是规划期间的进度条：模型走到哪一阶段、下一阶段是什么，一眼可见。
 // 模型本该一个回合连跑三个阶段；万一中途收尾了，这里给一个「继续规划」把它接上，
 // 而不是让用户自己猜该说什么。
-export function PlanStageBar({ run, busy, onResume, onCancel }: {
+export function PlanStageBar({ run, busy, sendBlock = '', onResume, onCancel }: {
   run: PlanRun
   busy: boolean
+  sendBlock?: string
   onResume: () => void
   onCancel: () => void
 }) {
@@ -63,10 +64,11 @@ export function PlanStageBar({ run, busy, onResume, onCancel }: {
       </HScroll>
       <div className="flex-1" />
       {stalled && (
-        <button onClick={onResume} className="flex-none text-[13px] text-primaryink font-medium hover:brightness-110 cursor-pointer">
+        <button onClick={() => { if (!sendBlock) onResume() }} disabled={!!sendBlock} title={sendBlock || undefined} className="flex-none text-[13px] text-primaryink font-medium hover:brightness-110 cursor-pointer disabled:opacity-40 disabled:cursor-default">
           继续规划
         </button>
       )}
+      {stalled && sendBlock && <span role="status" className="text-[12px] text-amberink">{sendBlock}</span>}
       <button onClick={onCancel} className="flex-none text-[13px] text-muted hover:text-ink cursor-pointer">
         取消规划
       </button>
@@ -77,12 +79,13 @@ export function PlanStageBar({ run, busy, onResume, onCancel }: {
 // PlanBoard 是审批板：目标、可编辑的步骤清单、审查发现与风险，以及两种执行模式的确认
 // 按钮。它钉在输入区上方而不是随对话滚走——这是一道必须有人应答的闸门。
 export function PlanBoard({
-  run, draft, approving, busy, actions, onApprove, onCancel,
+  run, draft, approving, busy, sendBlock = '', actions, onApprove, onCancel,
 }: {
   run: PlanRun
   draft: PlanDoc | null
   approving: boolean
   busy: boolean
+  sendBlock?: string
   actions: {
     move: (index: number, delta: number) => void
     remove: (index: number) => void
@@ -94,7 +97,7 @@ export function PlanBoard({
   onCancel: () => void
 }) {
   const steps = draft?.steps ?? []
-  const ready = canApprove(draft) && !approving && !busy
+  const ready = canApprove(draft) && !approving && !busy && !sendBlock
   return (
     <div className="flex-none border-t border-primary bg-surface max-h-[52vh] overflow-y-auto">
       <div className="mx-auto max-w-[1200px] px-6 py-4">
@@ -143,15 +146,16 @@ export function PlanBoard({
         ) : null}
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
-          <button onClick={() => onApprove('interactive')} disabled={!ready} className={`${BTN} ${BTN_PRIMARY} text-[13px] py-2`}>
+          <button onClick={() => { if (ready) onApprove('interactive') }} disabled={!ready} className={`${BTN} ${BTN_PRIMARY} text-[13px] py-2`}>
             确认并执行（交互模式）
           </button>
-          <button onClick={() => onApprove('judge')} disabled={!ready} className={`${BTN} text-[13px] py-2`}>
+          <button onClick={() => { if (ready) onApprove('judge') }} disabled={!ready} className={`${BTN} text-[13px] py-2`}>
             确认并执行（智能模式）
           </button>
           <button onClick={onCancel} disabled={approving} className={`${BTN} text-[13px] py-2 !border-transparent !text-muted`}>
             取消
           </button>
+          {sendBlock && <span role="status" className="text-[12px] text-amberink">{sendBlock}</span>}
           {!canApprove(draft) && (
             <span className="text-[12px] text-faint">清单为空，至少留一条步骤才能执行</span>
           )}

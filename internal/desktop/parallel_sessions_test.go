@@ -26,10 +26,15 @@ import (
 // 它只替换执行，不替换编号、事件发射与回合记账——那些正是要验的东西，由真的
 // Manager 负责。
 type fakeHostSession struct {
-	id      string
-	cwd     string        // 会话的工作区，与真会话一样从 Status 报出来
-	started chan string   // 回合真的开跑了
-	release chan struct{} // 放它收尾
+	id                string
+	cwd               string // 会话的工作区，与真会话一样从 Status 报出来
+	model             string
+	permissionMode    string
+	planMode          bool
+	thinkingEffort    string
+	reasoningScenario string
+	started           chan string   // 回合真的开跑了
+	release           chan struct{} // 放它收尾
 }
 
 func newFakeHostSession() *fakeHostSession {
@@ -53,17 +58,38 @@ func (s *fakeHostSession) RunTurnWithImages(ctx context.Context, text string, _ 
 func (s *fakeHostSession) Inject(string, []llm.ImageSource) error { return nil }
 func (s *fakeHostSession) SessionID() string                      { return s.id }
 func (s *fakeHostSession) Status() engine.Status {
-	return engine.Status{SessionID: s.id, CWD: s.cwd}
+	return engine.Status{
+		SessionID:         s.id,
+		CWD:               s.cwd,
+		Model:             s.model,
+		PermissionMode:    s.permissionMode,
+		PlanMode:          s.planMode,
+		ThinkingEffort:    s.thinkingEffort,
+		ReasoningScenario: s.reasoningScenario,
+	}
 }
 
-func (s *fakeHostSession) History() []llm.Message         { return nil }
-func (s *fakeHostSession) EstimateContextTokens() int     { return 0 }
-func (s *fakeHostSession) SetModel(string) error          { return nil }
-func (s *fakeHostSession) SetPermissionMode(string) error { return nil }
-func (s *fakeHostSession) SetPlanMode(bool)               {}
-func (s *fakeHostSession) SetThinkingEffort(string) error { return nil }
-func (s *fakeHostSession) SetReasoningScenario(string)    {}
-func (s *fakeHostSession) Close(context.Context) error    { return nil }
+func (s *fakeHostSession) History() []llm.Message { return nil }
+func (s *fakeHostSession) EstimateContextTokens() int {
+	return 0
+}
+func (s *fakeHostSession) SetModel(model string) error {
+	s.model = model
+	return nil
+}
+func (s *fakeHostSession) SetPermissionMode(mode string) error {
+	s.permissionMode = mode
+	return nil
+}
+func (s *fakeHostSession) SetPlanMode(on bool) { s.planMode = on }
+func (s *fakeHostSession) SetThinkingEffort(effort string) error {
+	s.thinkingEffort = effort
+	return nil
+}
+func (s *fakeHostSession) SetReasoningScenario(scenario string) {
+	s.reasoningScenario = scenario
+}
+func (s *fakeHostSession) Close(context.Context) error { return nil }
 
 // newParallelApp 造一个用替身建会话的 App，并把每次 Build 出来的替身交给调用方。
 func newParallelApp(t *testing.T) (*App, *recordingSink, chan *fakeHostSession) {
@@ -72,7 +98,7 @@ func newParallelApp(t *testing.T) (*App, *recordingSink, chan *fakeHostSession) 
 	built := make(chan *fakeHostSession, 8)
 	app := newWithBuild(sink, func(cfg engine.Config, _ engine.Options) (host.Session, error) {
 		s := newFakeHostSession()
-		s.id, s.cwd = cfg.SessionID, cfg.CWD
+		s.id, s.cwd, s.model = cfg.SessionID, cfg.CWD, cfg.Model
 		built <- s
 		return s, nil
 	})

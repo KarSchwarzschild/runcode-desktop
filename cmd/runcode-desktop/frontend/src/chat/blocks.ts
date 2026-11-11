@@ -1,7 +1,7 @@
 // Pure conversation-model logic for the chat UI: the block/group data model and the
 // reducers that fold streaming tool events into it. Kept free of React so it can be
 // unit-tested directly (see chat.test.ts).
-import type { ToolEvent, PlanSnapshot, PlanItem, EditRecord, ResumedBlock } from '@/core/bridge'
+import type { ToolEvent, PlanSnapshot, PlanItem, EditRecord, ResumedBlock, QuestionKnowledge } from '@/core/bridge'
 import { isEditRecord } from '@/core/bridge'
 import { type RecordingMark } from '@/recorder/minutes'
 
@@ -9,7 +9,7 @@ import { type RecordingMark } from '@/recorder/minutes'
 // the streamed assistant text and the child tool events (merged by tool-use id).
 export type AgentNested = { agent: string; text: string; tools: ToolEvent[]; usage?: { inTok: number; outTok: number; durMs?: number } }
 export type Block =
-  | { kind: 'user'; id: string; questionId?: string; text: string; ts: string; attachments?: string[] }
+  | { kind: 'user'; id: string; questionId?: string; knowledge?: QuestionKnowledge; text: string; ts: string; attachments?: string[] }
   | { kind: 'assistant'; id: string; text: string; thinking?: string; streaming: boolean; ts: string }
   | { kind: 'tool'; id: string; tool: ToolEvent; nested?: AgentNested }
   | { kind: 'error'; id: string; text: string }
@@ -32,6 +32,10 @@ export type Block =
 
 // ToolBlock narrows Block to a tool row; taskgroup members are always Task tools.
 export type ToolBlock = Extract<Block, { kind: 'tool' }>
+
+export function resumedQuestionBlock(b: ResumedBlock, id: string, text = b.text ?? ''): Extract<Block, { kind: 'user' }> {
+  return { kind: 'user', id, questionId: b.questionId, knowledge: b.knowledge, text, ts: '', attachments: b.images?.map(i => i.name) }
+}
 
 export type Group =
   | { kind: 'block'; block: Block }

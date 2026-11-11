@@ -5,6 +5,9 @@ import (
 	"testing"
 )
 
+var parentProcessConfigDir string
+var useLiveTestProfile bool
+
 // TestMain 关掉自动更新检查。
 //
 // 它是 newWithBuild 起的一个 goroutine：睡 8 秒再去查更新，途中会在 UserCacheDir
@@ -23,7 +26,41 @@ func TestMain(m *testing.M) {
 	if IsAskpass() {
 		os.Exit(RunAskpass(os.Args))
 	}
+	parentProcessConfigDir, _ = os.UserConfigDir()
 	autoUpdateEnabled = false
 	debugLogEnabled = false
-	os.Exit(m.Run())
+	// Keep even a late background refresh inside a disposable process-level root.
+	// Individual test Setenv cleanups restore this sandbox, never the user's login.
+	useLiveTestProfile = os.Getenv("RUNCODE_STAGE4_LIVE") == "1" || os.Getenv("RUNCODE_STAGE4_OAUTH_LOGIN") == "1" || os.Getenv("RUNCODE_LIVE") == "1"
+	sandbox := ""
+	if !useLiveTestProfile {
+		var err error
+		sandbox, err = os.MkdirTemp("", "runcode-desktop-tests-")
+		if err != nil {
+			panic(err)
+		}
+		for _, key := range []string{"APPDATA", "XDG_CONFIG_HOME", "HOME", "USERPROFILE", "LOCALAPPDATA", "XDG_CACHE_HOME"} {
+			if err := os.Setenv(key, sandbox); err != nil {
+				panic(err)
+			}
+		}
+	}
+	code := m.Run()
+	if sandbox != "" {
+		_ = os.RemoveAll(sandbox)
+	}
+	os.Exit(code)
+}
+
+func TestDesktopTestProcessDoesNotUseParentConfig(t *testing.T) {
+	if useLiveTestProfile {
+		t.Skip("explicit live harness uses its configured test profile")
+	}
+	current, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current == parentProcessConfigDir {
+		t.Fatal("desktop test process can write the invoking user configuration directory")
+	}
 }

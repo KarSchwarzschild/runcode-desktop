@@ -19,8 +19,10 @@ import { ThinkingPanel } from './thinking-panel'
 import { AgentTaskCard } from './agent-task'
 import { ExecutionCard } from './execution-card'
 import { RecordingCard } from './recorder-card'
+import { KnowledgeSources } from './knowledge-sources'
 
-export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled }: {
+export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false }: {
+  textOnly?: boolean
   block: Block
   onRetryQuestion?: (id: string) => void
   onEditQuestion?: (id: string) => void
@@ -49,6 +51,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
             )}
             {block.text && <div className="whitespace-pre-wrap break-words">{block.text}</div>}
           </div>
+          <KnowledgeSources knowledge={block.knowledge} />
           {block.questionId && (onRetryQuestion || onEditQuestion) && (
             <div className="flex items-center opacity-60 group-hover:opacity-100 focus-within:opacity-100">
               <GhostBtn disabled={questionActionsDisabled} onClick={() => onRetryQuestion?.(block.questionId!)} title="重新生成：从这条提问重新开始；原记录保留，文件不会撤销">
@@ -83,7 +86,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                 onScroll={block.streaming ? aScroll.onScroll : undefined}
                 className={`text-[15px] text-ink2 leading-[1.75] break-words${block.streaming ? ' max-h-[58vh] overflow-y-auto pr-1' : ''}`}
               >
-                <Markdown onOpenFile={onOpenFile} resolveFile={resolveFile}>{block.text}</Markdown>
+                <Markdown textOnly={textOnly} onOpenFile={onOpenFile} resolveFile={resolveFile}>{block.text}</Markdown>
                 {block.streaming && <span className="caret">▍</span>}
               </div>
             )}

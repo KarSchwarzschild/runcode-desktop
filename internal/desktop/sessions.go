@@ -102,13 +102,23 @@ func (a *App) ListSessions() ([]SessionSummary, error) {
 	for _, info := range infos {
 		// Prefer the model-generated session name; fall back to the raw prompts.
 		title := firstNonEmpty(info.Title, info.LastUser, info.FirstUser, info.ID)
+		// 旧扩展没有可靠账号绑定，不能把引擎忽略字段后得到的正文当作安全预览。
+		if err := checkKnowledgeHistory(context.Background(), ws, info.ID, sessions.BackendJSONL); err != nil {
+			title = "旧版或损坏记录（无法安全恢复）"
+		}
 		out = append(out, SessionSummary{
+			Kind:  "agent",
 			ID:    info.ID,
 			Title: title,
 			When:  humanizeSince(info.ModTime),
 			Turns: info.Turns,
 		})
 	}
+	knowledge, err := a.knowledgeChatSummaries(ws)
+	if err != nil {
+		return nil, wireError(err)
+	}
+	out = append(out, knowledge...)
 	return out, nil
 }
 
@@ -120,6 +130,9 @@ func (a *App) ListSessions() ([]SessionSummary, error) {
 // 回合会把它重新创建出来——留下一个只含删除后内容、历史却已丢失的僵尸会话,反而
 // 比不删更糟。要删就先关闭对应会话（仅切换焦点不够）。
 func (a *App) DeleteSession(id string) error {
+	if isKnowledgeChatID(id) {
+		return a.deleteKnowledgeChat(strings.TrimSpace(id))
+	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
 	a.mu.Lock()
@@ -148,6 +161,9 @@ func (a *App) DeleteSession(id string) error {
 	if err := deleter.Delete(context.Background(), id); err != nil {
 		return wireError(err)
 	}
+	if err := deleteKnowledge(ws, id); err != nil {
+		return wireError(err)
+	}
 	return nil
 }
 
@@ -163,6 +179,9 @@ func (a *App) DeleteSession(id string) error {
 // 会话存储句柄）。这是可见且可撤销的——它们都列在「打开中」里，关掉是一个明确的
 // 动作；而"悄悄弄丢正在跑的活"既不可见也不可撤销。上限留给 host.Limits.MaxSessions。
 func (a *App) ResumeSession(id string) (ResumedSession, error) {
+	if isKnowledgeChatID(id) {
+		return a.resumeKnowledgeChat(strings.TrimSpace(id))
+	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
 	a.mu.Lock()

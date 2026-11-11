@@ -23,18 +23,20 @@ import { PlanStates, type PlanSnapshot } from '@/core/bridge'
 import { type Plan } from '@/session/use-plan'
 
 export function ChatPane({
-  blocks, busy, cwd, userName, plan, planOpen, onPlanToggle, planning,
+  blocks, busy, sendBlock = '', cwd, userName, plan, planOpen, onPlanToggle, planning, textOnly = false,
   harmAllows, oaBlocked, revertedEdits, files, tabs,
   scrollRef, onScroll,
   onAnswer, onOpenFile, onReviewEdit, onUndoEdit, resolveFile,
   recorderCard,
   onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled,
 }: {
+  textOnly?: boolean
   onRetryQuestion?: (id: string) => void
   onEditQuestion?: (id: string) => void
   questionActionsDisabled?: boolean
   blocks: Block[]
   busy: boolean
+  sendBlock?: string
   cwd?: string
   userName?: string
   plan: PlanSnapshot | null
@@ -84,6 +86,7 @@ export function ChatPane({
         <PlanStageBar
           run={planning.run}
           busy={busy}
+          sendBlock={sendBlock}
           onResume={planning.resume}
           onCancel={() => void planning.cancel()}
         />
@@ -132,7 +135,7 @@ export function ChatPane({
             g.kind === 'exec' ? (
               <BotRow key={g.id}><ExecutionCard tools={g.tools} harmAllows={harmAllows} oaBlocked={oaBlocked} /></BotRow>
             ) : g.kind === 'ask' ? (
-              <BotRow key={g.id}><AskCard tool={g.tool} busy={busy} onAnswer={onAnswer} /></BotRow>
+              <BotRow key={g.id}><AskCard tool={g.tool} busy={busy} sendBlock={sendBlock} onAnswer={onAnswer} /></BotRow>
             ) : g.kind === 'edits' ? (
               <BotRow key={g.id}><EditedCards edits={g.edits} reverted={revertedEdits} onReview={onReviewEdit} onUndo={onUndoEdit} /></BotRow>
             ) : g.kind === 'analyze' ? (
@@ -143,8 +146,8 @@ export function ChatPane({
               <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} /></BotRow>
             ) : (
               <div key={g.block.id}>
-                <BlockView onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} />
-                {g.block.kind === 'assistant' && (
+                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} />
+                {!textOnly && g.block.kind === 'assistant' && (
                   <ReplyArtifacts text={g.block.text} files={files} tabs={tabs} onOpen={onOpenFile} />
                 )}
               </div>
@@ -164,6 +167,7 @@ export function ChatPane({
       {/* 审批板钉在输入区上方，不随对话滚走：这是一道必须有人应答的闸门。 */}
       {showBoard && (
         <PlanBoard
+          sendBlock={sendBlock}
           run={planning.run}
           draft={planning.draft}
           approving={planning.approving}

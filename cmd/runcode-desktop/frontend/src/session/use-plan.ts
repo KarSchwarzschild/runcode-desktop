@@ -23,8 +23,9 @@ const IDLE: PlanRun = { state: PlanStates.Idle }
 
 export type Plan = ReturnType<typeof usePlan>
 
-export function usePlan({ sessionId, onSend, onApproved, showToast }: {
+export function usePlan({ sessionId, sendBlock = '', onSend, onApproved, showToast }: {
   sessionId?: string
+  sendBlock?: string
   // onSend 发出后端拼好的执行指令(确认方案后的第一条消息)。
   onSend: (text: string) => void
   // onApproved 采纳审批带来的会话变化(计划模式已关、权限模式已切)。
@@ -34,6 +35,8 @@ export function usePlan({ sessionId, onSend, onApproved, showToast }: {
   const [run, setRun] = useState<PlanRun>(IDLE)
   const [draft, setDraft] = useState<PlanDoc | null>(null)
   const [approving, setApproving] = useState(false)
+  const sendBlockRef = useRef(sendBlock)
+  sendBlockRef.current = sendBlock
 
   // 草稿的基线：模型每记一个阶段就以新文档为准重置草稿（它刚刚推翻了旧的）。
   // 但我们自己保存的回声不能重置——保存前会 cleanDoc，用户刚点出来还没写字的空步骤
@@ -65,6 +68,8 @@ export function usePlan({ sessionId, onSend, onApproved, showToast }: {
   // 跟着回到那道闸门前。
   useEffect(() => {
     let stale = false
+    // 没有智能体会话 ID（含知识库模式）时不走后端的“当前会话”回退查询。
+    if (!sessionId) { baseAt.current = ''; setRun(IDLE); return }
     planStatus(sessionId ?? '')
       .then((r) => { if (!stale) { baseAt.current = ''; setRun(r ?? IDLE) } })
       .catch(() => { if (!stale) setRun(IDLE) })
@@ -100,6 +105,7 @@ export function usePlan({ sessionId, onSend, onApproved, showToast }: {
   // approve 跨过审批闸门：后端存下用户这一版、退出计划模式、切到选定的权限模式，
   // 并把执行指令拼好返回；这里只负责把它发出去。
   async function approve(permissionMode: string) {
+    if (sendBlockRef.current) { showToast(sendBlockRef.current); return }
     if (!draft || approving) return
     setApproving(true)
     try {
@@ -119,6 +125,7 @@ export function usePlan({ sessionId, onSend, onApproved, showToast }: {
   // plan_write 的返回值就是下一阶段的指令），但它也可能中途收尾——那时界面停在半截，
   // 用户需要一个明确的"接着来"，而不是自己揣摩该说什么。
   function resume() {
+    if (sendBlockRef.current) { showToast(sendBlockRef.current); return }
     onSend('继续按阶段推进方案规划：接着调用 plan_write 记录下一阶段，直到方案审查完成。')
   }
 

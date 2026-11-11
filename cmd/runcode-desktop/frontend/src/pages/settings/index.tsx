@@ -38,6 +38,8 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   // path the composer's in-chat picker uses — no new session, history preserved.
   onSwitchModel: (choice: ModelOption) => void
 }) {
+  // 选库不锁设置页；仅真实只读历史限制改写。
+  const sessionRestriction = info?.readOnlyReason || ''
   // The session's model is now switched live (see 模型 field below), so it is read
   // straight from the running session, not a form field. Permission mode still prefers
   // the live session. Saving this form never sends connection fields.
@@ -69,6 +71,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   const switchOpts = toModelOptions(platformModels, customModels)
   const modelOpts = toModelOptions(platformModels, [])
   async function save() {
+    if (sessionRestriction) return
     setSaving(true)
     setSaved(false)
     setError('')
@@ -109,6 +112,8 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
             <Toggle on={skipLogin} onChange={setSkipLogin} />
           </label>
         </Section>
+        {sessionRestriction && <p role="status" className="text-[12px] text-amberink">{sessionRestriction}</p>}
+        <fieldset disabled={!!sessionRestriction} className="min-w-0">
         <SessionSection
           currentModel={info?.model ?? ''}
           switchOpts={switchOpts}
@@ -122,6 +127,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
           onHarmJudgeVotes={setHarmJudgeVotes}
           modelOpts={modelOpts}
         />
+        </fieldset>
         <CustomModelsSection models={customModels} onChanged={setCustomModels} />
         <VisionSection tenantId={activeTenantId} platform={platformModels} custom={customModels} onPlatformChanged={setPlatformModels} />
         <ProxySection />
@@ -144,7 +150,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
 
         {error && <InlineError variant="text">{error}</InlineError>}
         <div className="flex items-center gap-3 pb-2">
-          <button className={`${BTN} ${BTN_PRIMARY} px-7 py-2.5`} disabled={saving || accountBusy || (!!activeTenantId && !accountReady)} onClick={save}>{saving ? '保存中…' : accountBusy ? '正在同步租户…' : '保存设置'}</button>
+          <button className={`${BTN} ${BTN_PRIMARY} px-7 py-2.5`} disabled={!!sessionRestriction || saving || accountBusy || (!!activeTenantId && !accountReady)} onClick={save}>{saving ? '保存中…' : accountBusy ? '正在同步租户…' : '保存设置'}</button>
           {saved && <span className="text-green text-[13px]">✓ 已保存</span>}
         </div>
     </PageShell>

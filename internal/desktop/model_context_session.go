@@ -15,7 +15,7 @@ func restoredContextModel(ctx context.Context, cfg engine.Config, restoreModel b
 	if cfg.Resume == "" && cfg.SessionID == "" && !cfg.Continue {
 		return cfg, nil
 	}
-	backend, err := sessions.OpenBackend(cfg.CWD, sessions.BackendJSONL)
+	backend, err := sessions.OpenBackend(cfg.CWD, cfg.SessionBackend)
 	if err != nil {
 		return cfg, err
 	}

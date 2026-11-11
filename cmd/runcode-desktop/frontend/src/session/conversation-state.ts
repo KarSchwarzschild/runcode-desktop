@@ -7,11 +7,16 @@
 // 这个模块是纯的（没有 React、没有 Wails），所以折叠规则可以单独测；use-conversation
 // 只负责订阅事件、把信封按 id 派发进来，以及把聚焦会话那一份交给界面渲染。
 import { type Block } from '@/chat/blocks'
-import { type ContextCompaction, type PlanSnapshot } from '@/core/bridge'
+import { type ContextCompaction, type PlanSnapshot, type QuestionKnowledge, type KnowledgeContextStatus } from '@/core/bridge'
 import { fmtTokens } from '@/core/format'
+import { cancelKnowledgeRuns, renderKnowledgeRun, type KnowledgeRun } from './knowledge-chat-state'
 
 /** ConversationState 是**一条**对话的全部可渲染状态。 */
 export interface ConversationState {
+  knowledgeRuns?: Record<string, KnowledgeRun>
+  knowledgeByQuestion?: Record<string, QuestionKnowledge>
+  stoppedQuestionRows?: Set<string>
+  stoppedQuestions?: Set<string>
   /** blocks 是消息流：用户气泡、助手回复、工具卡片、错误与警告。 */
   blocks: Block[]
   /** harmAllows 把 tool-use id 映到智能模式自动放行的理由，供工具卡标注。 */
@@ -51,6 +56,65 @@ export const emptyConversation: ConversationState = {
   ctxEstimated: false,
   compacting: false,
   revertedEdits: new Set(),
+}
+
+// Native events may beat the submit receipt. Keep their question identity until
+// that exact optimistic row is acknowledged; never attach to the latest draft.
+export function withQuestionKnowledge(state: ConversationState, event: KnowledgeContextStatus): ConversationState {
+  if (!event.questionId) return state
+  const previous = state.knowledgeByQuestion?.[event.questionId]
+  const knowledge = previous?.status === 'cancelled' || state.stoppedQuestions?.has(event.questionId)
+    ? cancelledKnowledge(event.knowledge) : event.knowledge
+  return {
+    ...state,
+    knowledgeByQuestion: { ...state.knowledgeByQuestion, [event.questionId]: knowledge },
+    blocks: state.blocks.map(b => b.kind === 'user' && b.questionId === event.questionId ? { ...b, knowledge } : b),
+  }
+}
+
+export function bindQuestionReceipt(state: ConversationState, blockId: string, questionId: string): ConversationState {
+  const stopped = state.stoppedQuestionRows?.has(blockId)
+  const stoppedQuestionRows = new Set(state.stoppedQuestionRows)
+  stoppedQuestionRows.delete(blockId)
+  const stoppedQuestions = new Set(state.stoppedQuestions)
+  if (stopped) stoppedQuestions.add(questionId)
+  const cached = state.knowledgeByQuestion?.[questionId]
+  const knowledge = stopped && cached ? cancelledKnowledge(cached) : cached
+  const next = { ...state, stoppedQuestionRows, stoppedQuestions,
+    knowledgeByQuestion: knowledge ? { ...state.knowledgeByQuestion, [questionId]: knowledge } : state.knowledgeByQuestion,
+    blocks: state.blocks.map(b => b.kind === 'user' && b.id === blockId
+      ? { ...b, questionId, knowledge: knowledge ?? b.knowledge } : b),
+  }
+  if (stopped && next.knowledgeRuns?.[questionId]) next.knowledgeRuns = { ...next.knowledgeRuns, [questionId]: { ...next.knowledgeRuns[questionId], phase: 'cancelled' } }
+  return renderKnowledgeRun(next, questionId)
+}
+
+export function reconcileQuestionBlocks(state: ConversationState, blocks: Block[]): Block[] {
+  return blocks.map(b => b.kind === 'user' && b.questionId && state.knowledgeByQuestion?.[b.questionId]
+    ? { ...b, knowledge: state.knowledgeByQuestion[b.questionId] } : b)
+}
+
+export function cancelPreparingKnowledge(state: ConversationState): ConversationState {
+  state = cancelKnowledgeRuns(state)
+  const stoppedQuestionRows = new Set(state.stoppedQuestionRows)
+  const stoppedQuestions = new Set(state.stoppedQuestions)
+  for (const b of state.blocks) {
+    if (b.kind !== 'user' || b.knowledge?.applied || (b.knowledge && !['pending', 'ready'].includes(b.knowledge.status))) continue
+    if (b.questionId) stoppedQuestions.add(b.questionId)
+    else stoppedQuestionRows.add(b.id)
+  }
+  const knowledgeByQuestion = Object.fromEntries(Object.entries(state.knowledgeByQuestion ?? {}).map(([id, knowledge]) => {
+    if (!knowledge.applied && ['pending', 'ready'].includes(knowledge.status)) stoppedQuestions.add(id)
+    return [id, stoppedQuestions.has(id) ? cancelledKnowledge(knowledge) : knowledge]
+  }))
+  return { ...state, stoppedQuestionRows, stoppedQuestions, knowledgeByQuestion,
+    blocks: state.blocks.map(b => b.kind === 'user' && b.knowledge && b.questionId && stoppedQuestions.has(b.questionId) ? { ...b, knowledge: cancelledKnowledge(b.knowledge) } : b),
+  }
+}
+
+function cancelledKnowledge(knowledge: QuestionKnowledge): QuestionKnowledge {
+  return !knowledge.applied && ['pending', 'ready', 'empty'].includes(knowledge.status)
+    ? { ...knowledge, status: 'cancelled', sources: [] } : knowledge
 }
 
 /**

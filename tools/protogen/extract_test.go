@@ -4,8 +4,63 @@ import (
 	"go/constant"
 	"go/token"
 	"go/types"
+	"strings"
 	"testing"
+
+	"golang.org/x/tools/go/packages"
 )
+
+func TestExtractCommandsExcludesNativePrepareExit(t *testing.T) {
+	pkgs, err := packages.Load(&packages.Config{
+		Mode: packages.NeedName | packages.NeedTypes,
+	}, desktopPkgPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pkgs) != 1 {
+		t.Fatalf("loaded %d desktop packages, want 1", len(pkgs))
+	}
+	if len(pkgs[0].Errors) > 0 {
+		t.Fatalf("load desktop package: %v", pkgs[0].Errors)
+	}
+
+	mapper := &typeMapper{protocolPaths: map[string]bool{}}
+	for _, path := range protocolPkgPaths {
+		mapper.protocolPaths[path] = true
+	}
+	commands, err := extractCommands(pkgs[0], mapper)
+	if err != nil {
+		t.Fatalf("extract frontend commands with native exit wiring: %v", err)
+	}
+	foundCloseAllSessions := false
+	for _, command := range commands {
+		if command.goName == "PrepareExit" {
+			t.Error("native PrepareExit must not become a frontend command")
+		}
+		if command.goName == "CloseAllSessions" {
+			foundCloseAllSessions = true
+			if command.kind != "trigger" {
+				t.Errorf("CloseAllSessions kind = %q, want trigger", command.kind)
+			}
+		}
+	}
+	if !foundCloseAllSessions {
+		t.Error("CloseAllSessions must remain a frontend command")
+	}
+}
+
+func TestExtractCommandRejectsNonProtocolType(t *testing.T) {
+	timePkg := types.NewPackage("time", "time")
+	duration := types.NewNamed(types.NewTypeName(token.NoPos, timePkg, "Duration", nil), types.Typ[types.Int64], nil)
+	params := types.NewTuple(types.NewVar(token.NoPos, nil, "limit", duration))
+	sig := types.NewSignatureType(nil, nil, nil, params, nil, false)
+	fn := types.NewFunc(token.NoPos, nil, "FrontendCommand", sig)
+
+	_, violations := extractCommand(fn, "", &typeMapper{})
+	if len(violations) != 1 || !strings.Contains(violations[0], "non-protocol type time.Duration") {
+		t.Fatalf("violations = %v, want rejection of non-protocol time.Duration", violations)
+	}
+}
 
 // parseJSONTag 必须对齐 encoding/json 的 tag 语义——尤其是 `,string`（值在线上是
 // JSON 字符串，常用于保 64 位整数精度）与 `-,`（字段名字面量为 "-"）；漏掉任何一个

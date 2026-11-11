@@ -2,6 +2,9 @@ import { useDirectoryAccess } from '@/session/use-directory-access'
 import { ArtifactActionsContext } from '@/chat/artifact-actions'
 import { useChatDrafts } from '@/session/use-chat-drafts'
 import { useQuestionRetry } from '@/session/use-question-retry'
+import { useKnowledge } from '@/session/use-knowledge'
+import { useKnowledgeMode } from '@/session/use-knowledge-mode'
+import { emptyDraft } from '@/session/question-draft'
 // App 只做两件事：把各个 hook 接起来（会话 / 对话 / 权限队列 / 预览栏 / 文件），
 // 以及按当前视图摆放 shell 组件。任何具体逻辑都不在这里——需要改行为时去
 // session/ 下对应的 hook，需要改样子去 shell/ 或各页面。
@@ -25,12 +28,14 @@ import { usePassportStatus } from '@/session/use-passport'
 import { useUpdate } from '@/session/use-update'
 import { TitleBar } from '@/shell/title-bar'
 import { StatusBar } from '@/shell/status-bar'
+import { KnowledgeSelection } from '@/shell/knowledge-selection'
 import { ChatPane } from '@/shell/chat-pane'
 import { PermissionModal } from '@/shell/permission-modal'
 import { AskpassModal } from '@/shell/askpass-modal'
 import { PreviewSide } from '@/shell/preview-side'
 import { Sidebar } from '@/shell/sidebar'
 import { Composer } from '@/composer'
+import type { ComposerEditorHandle } from '@/composer/inline-editor'
 import { type BuiltinAction } from '@/composer/scenario-bar'
 import { InstallOverlay } from '@/composer/install-overlay'
 import { LiveRecorderCard } from '@/chat/recorder-card'
@@ -49,7 +54,7 @@ export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 
 export default function App() {
   const [view, setView] = useState<View>('chat')
   // 输入草稿按会话存：在 A 里写了一半切到 B，那半句不该跟着过去。
-  const taRef = useRef<HTMLTextAreaElement>(null)
+  const taRef = useRef<ComposerEditorHandle>(null)
   // 侧栏折叠态：上提到这里，让折叠开关能放到主栏顶部状态条（「空闲」前），
   // 而侧栏本身按此 prop 变宽窄。
   const [sidebarCollapsed, toggleSidebar] = usePersistentBool('sidebar.collapsed', false)
@@ -70,9 +75,10 @@ export default function App() {
   const permissions = usePermissionQueue(focusedId)
   // sudo 密码框：请求可能来自任何一条会话（不只是当前聚焦的），所以挂在最外层。
   const askpass = useAskpass()
-  const workspace = useWorkspaceFiles(focusedId, () => infoRef.current?.cwd ?? '')
+  const toolSessionId = infoRef.current?.kind === 'knowledge' || infoRef.current?.readOnlyReason ? '' : focusedId
+  const workspace = useWorkspaceFiles(toolSessionId, () => infoRef.current?.cwd ?? '')
   const preview = usePreviewPanel(focusedId, toast.show)
-  const directoryAccess = useDirectoryAccess(focusedId)
+  const directoryAccess = useDirectoryAccess(toolSessionId)
   // 登录用户的通行证状态：欢迎语称呼（经 passportDisplayName）与侧栏用户区
   // （头像/用户名/退出登录）共用同一份订阅。未登录时名字为空串、头像为 undefined。
   const passport = usePassportStatus()
@@ -122,7 +128,11 @@ export default function App() {
 
 
   const { sendRecordingRequest } = useRecordingMinutes({
-    sessionId: focusedId, recording: recorder.info, send: async (...args) => { await conversation.send(...args) },
+    sessionId: focusedId, recording: recorder.info, send: async (text, paths, display) => {
+      if (infoRef.current?.kind === 'knowledge' || infoRef.current?.readOnlyReason) throw new Error('此会话仅支持文字问答，请新建普通会话生成文件')
+      if (knowledge.sendBlock) throw new Error(knowledge.sendBlock)
+      await conversation.send(text, paths, display, knowledge.state.revision)
+    },
     pushRecording: conversation.pushRecording, notify: toast.show,
   })
   const session = useSession({
@@ -130,11 +140,19 @@ export default function App() {
     conversation,
     showToast: toast.show,
     onEnterChat: () => setView('chat'),
+    onKnowledgeInvalidated: ids => { ids.forEach(id => drafts.update(id, emptyDraft)); preview.closeAll() },
   })
+  const knowledge = useKnowledge(session.info?.sessionId ?? '')
+  const knowledgeMode = useKnowledgeMode({
+    info: session.info, knowledge, drafts, hasHistory: conversation.blocks.length > 0,
+    create: session.openKnowledge, notify: toast.show,
+  })
+  // 选库不进入「文字问答」专属态；仅真实只读历史收窄预览／上下文。
+  const restrictedConversation = !!session.info?.readOnlyReason
   const questionRetry = useQuestionRetry({
     sessionId: focusedId,
-    blocked: conversation.busy || conversation.compacting || session.switching,
-    drafts, conversation, session, textarea: taRef, notify: toast.show,
+    blocked: conversation.busy || conversation.compacting || session.switching || !!session.info?.readOnlyReason,
+    drafts, conversation, session, textarea: taRef, notify: toast.show, knowledge: knowledgeMode.knowledge,
   })
   useEffect(() => {
     infoRef.current = session.info
@@ -145,8 +163,9 @@ export default function App() {
   // 那条执行指令由后端拼好，这里原样走 conversation.send——busy、用户气泡、回合生命
   // 周期因此完全复用普通消息的链路，不另起一套。
   const planning = usePlan({
-    sessionId: session.info?.sessionId,
-    onSend: (text) => void conversation.send(text),
+    sessionId: restrictedConversation ? undefined : session.info?.sessionId,
+    sendBlock: knowledge.sendBlock,
+    onSend: (text) => void conversation.send(text, [], undefined, knowledge.state.revision),
     onApproved: session.setInfo,
     showToast: toast.show,
   })
@@ -156,15 +175,15 @@ export default function App() {
   // useCallback([]) 的稳定引用,而 workspace 对象每次渲染都是新的。
   const reloadFiles = workspace.reload
   useEffect(() => {
-    if (session.started) reloadFiles()
-  }, [session.started, session.info?.sessionId, reloadFiles])
+    if (session.started && !restrictedConversation) reloadFiles()
+  }, [session.started, session.info?.sessionId, reloadFiles, restrictedConversation])
 
   useAutoPreview({
     sessionID: focusedId,
     busy: conversation.busy,
     blocks: conversation.blocks,
     cwd: session.info?.cwd ?? '',
-    enabled: preview.autoOpen,
+    enabled: preview.autoOpen && !restrictedConversation,
     opens: preview.opens,
     open: preview.openFile,
   })
@@ -190,7 +209,7 @@ export default function App() {
     )
   }
 
-  const showPreview = view === 'chat' && (preview.tabs.length > 0 || preview.browseOpen)
+  const showPreview = !restrictedConversation && view === 'chat' && (preview.tabs.length > 0 || preview.browseOpen)
 
   // 会话列表的行由三处拼起来：后端的 OpenSessions（是谁、哪条聚焦）、对话状态
   // （有没有回合在跑）、授权队列（有几个在等）。刻意不让后端一次性给全——
@@ -206,6 +225,7 @@ export default function App() {
   // 没有它整栏都长一个样。
   const openRows = session.openList.map((s) => ({
     id: s.sessionId,
+    kind: s.kind,
     title: session.titles[s.sessionId] || conversation.lastUserBySession[s.sessionId] || '新对话',
     running: !!conversation.busyBySession[s.sessionId],
     waiting: permissions.waiting[s.sessionId] ?? 0,
@@ -242,6 +262,8 @@ export default function App() {
           onPickWorkspace={(dir) => { if (!session.switching) void session.openWorkspace(dir) }}
           onSwitchWorkspace={() => { if (!session.switching) void session.pickWorkspaceAndOpen() }}
           onDelete={session.deleteRecent}
+          onRenameKnowledge={session.renameKnowledge}
+          onExportKnowledge={session.exportKnowledge}
           view={view}
           onNav={setView}
           onNew={() => {
@@ -266,6 +288,8 @@ export default function App() {
 
         <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-surface">
           <StatusBar
+            textOnly={restrictedConversation}
+            knowledgeSelection={<KnowledgeSelection knowledge={knowledgeMode.knowledge} onFocusComposer={() => taRef.current?.focus()} onNotify={toast.show} />}
             busy={conversation.busy}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={toggleSidebar}
@@ -304,11 +328,13 @@ export default function App() {
           ) : view === 'plugins' ? (
             <PluginsPage
               onUseSkill={(skillName) => {
+                if (restrictedConversation) { toast.show('此会话不支持技能，请新建普通会话'); return }
                 setView('chat')
                 setInput((prev) => (prev.trim() ? prev + ' ' : '') + `请使用「${skillName}」技能完成：`)
                 requestAnimationFrame(() => taRef.current?.focus())
               }}
               onUseAgent={(agentName) => {
+                if (restrictedConversation) { toast.show('此会话不支持子代理，请新建普通会话'); return }
                 setView('chat')
                 setInput((prev) => (prev.trim() ? prev + ' ' : '') + `请委派「${agentName}」子代理完成：`)
                 requestAnimationFrame(() => taRef.current?.focus())
@@ -317,12 +343,14 @@ export default function App() {
           ) : view === 'market' ? (
             <MarketPage />
           ) : view === 'permissions' ? (
-            <PermissionsPage sessionID={focusedId} directoryAccess={directoryAccess} mode={session.info?.permissionMode} onPickMode={session.pickMode} />
+            restrictedConversation ? <p className="p-6 text-muted">此会话不使用工具或文件授权。请新建普通会话管理权限。</p> : <PermissionsPage sessionID={focusedId} directoryAccess={directoryAccess} mode={session.info?.permissionMode} onPickMode={session.pickMode} />
           ) : view === 'memory' ? (
             <MemoryPage />
           ) : (
             <>
               <ArtifactActionsContext.Provider value={preview.actions}><ChatPane
+                textOnly={restrictedConversation}
+                sendBlock={knowledge.sendBlock}
                 onRetryQuestion={(id) => void questionRetry.retry(id)}
                 onEditQuestion={(id) => void questionRetry.edit(id)}
                 questionActionsDisabled={questionRetry.disabled}
@@ -341,12 +369,12 @@ export default function App() {
                 tabs={preview.tabs}
                 scrollRef={conversation.scrollRef}
                 onScroll={conversation.onChatScroll}
-                onAnswer={(text) => void conversation.send(text)}
+                onAnswer={(text) => { if (!knowledge.sendBlock) void conversation.send(text, [], undefined, knowledge.state.revision) }}
                 onOpenFile={preview.openFile}
                 onReviewEdit={preview.openDiff}
                 onUndoEdit={(id) => void conversation.undo(id)}
                 resolveFile={workspace.resolve}
-                recorderCard={<LiveRecorderCard rec={recorder} onOpenWindow={() => void showRecorderWindow()} />}
+                recorderCard={restrictedConversation ? undefined : <LiveRecorderCard rec={recorder} onOpenWindow={() => void showRecorderWindow()} />}
                 onGenerateMinutes={(m) => void sendRecordingRequest(m, 'doc')}
               /></ArtifactActionsContext.Provider>
 
@@ -361,11 +389,12 @@ export default function App() {
 
               <Composer
                 key={focusedId}
+                knowledge={questionRetry.knowledge}
                 attachments={drafts.attachments}
                 setAttachments={drafts.setAttachments}
                 retry={questionRetry.editing}
                 retryDisabled={questionRetry.disabled}
-                submitting={questionRetry.pending || session.switching || conversation.compacting}
+                submitting={questionRetry.pending || knowledgeMode.pending || session.switching || conversation.compacting || planning.approving}
                 onCancelRetry={questionRetry.cancel}
                 onRemoveOriginal={questionRetry.removeImage}
                 input={input}

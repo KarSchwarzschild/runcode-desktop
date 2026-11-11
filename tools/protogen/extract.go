@@ -46,6 +46,8 @@ import (
 // 手工表的代价是会忘记改,所以 extractEvents 做**双向**核对:常量多了(漏加表行)报
 // missing,表行多了(常量已删)报 stale。表本身不是真理,与源码对上的表才是。
 var eventPayloads = map[string]string{
+	"EventKnowledgeChat":          "KnowledgeChatEvent",
+	"EventKnowledgeContext":       "KnowledgeContextStatus",
 	"EventDirectoryAccessChanged": "DirectoryAccessChanged",
 	"EventAssistantDelta":         "AssistantDelta",
 	"EventAssistantThinking":      "AssistantDelta",
@@ -60,7 +62,7 @@ var eventPayloads = map[string]string{
 	"EventPermissionRequest":      "PermissionRequest",
 	"EventPlanUpdated":            "PlanRun",
 	"EventSessionRenamed":         "SessionRenamed",
-	"EventSessionStatus":          "SessionInfo",
+	"EventSessionStatus":          "ConversationInfo",
 	"EventOABlocked":              "OABlocked",
 	"EventSkillInstall":           "SkillInstallProgress",
 	"EventUpdate":                 "UpdateInfo",
@@ -76,14 +78,15 @@ var eventPayloads = map[string]string{
 
 // excludedMethods are App methods that are shell wiring, not wire commands.
 //
-// 中文:App 上的导出方法**默认全是前端命令**,这里是唯一的例外名单。四个都是 Wails 外壳
-// 自己调的接线方法(装设备、启动、收尾),前端永远够不着,生成出来只会是四个调了必炸的
+// 中文:App 上的导出方法**默认全是前端命令**,这里是唯一的例外名单。这些都是 Wails 外壳
+// 自己调的接线方法(装设备、启动、收尾),前端永远够不着,生成出来只会是调了必炸的
 // TS 函数。
 //
 // 加进来的方法同时会从 methodSet 里消失,所以**必须一并从 internal/protocol.CommandKinds
 // 里删掉**,否则 extractCommands 的交叉核对会把它判成 orphaned(登记了却没有对应方法)。
 // 这个连带关系是故意的:排除一个命令是件需要两处都点头的事。
 var excludedMethods = map[string]bool{
+	"PrepareExit": true, // bounds native exit cleanup; called by the Wails shell, never the frontend
 	"SetCapturer": true, // installs the system audio capturer; called by the Wails shell, never the frontend
 	"SetDialoger": true, // installs the native file-dialog provider; called by the Wails shell, never the frontend
 	"SetQuitter":  true, // installs the app-quit provider (版本更新装完要退出); called by the Wails shell, never the frontend

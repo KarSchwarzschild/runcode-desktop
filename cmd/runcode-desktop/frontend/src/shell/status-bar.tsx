@@ -1,10 +1,13 @@
 // 主栏顶部的次级状态条（整条也是窗口拖拽区）：侧栏折叠开关 + 运行/空闲指示，
-// 右侧是上下文用量计与预览面板开关。
+// 右侧是已选知识库、上下文用量计与预览面板开关。
+import type { ReactNode } from 'react'
 import { Icon } from '@/ui/icons'
 import { DRAG, NO_DRAG } from '@/ui/tokens'
 import { ContextMeter } from '@/chat/context-meter'
 
-export function StatusBar({ busy, sidebarCollapsed, onToggleSidebar, waitingElsewhere, onGoWaiting, ctxTokens, ctxBudget, ctxModel, ctxEstimated, compacting, onCompact, onTogglePreview }: {
+export function StatusBar({ busy, sidebarCollapsed, onToggleSidebar, waitingElsewhere, onGoWaiting, ctxTokens, ctxBudget, ctxModel, ctxEstimated, compacting, onCompact, onTogglePreview, knowledgeSelection, textOnly = false }: {
+  textOnly?: boolean
+  knowledgeSelection?: ReactNode
   busy: boolean
   sidebarCollapsed: boolean
   onToggleSidebar: () => void
@@ -49,11 +52,13 @@ export function StatusBar({ busy, sidebarCollapsed, onToggleSidebar, waitingElse
           </button>
         )}
       </div>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 min-w-0">
+        {knowledgeSelection}
         <div className="flex items-center gap-[18px] text-muted text-[13px]" style={NO_DRAG}>
-          <ContextMeter used={ctxTokens} budget={ctxBudget} model={ctxModel} estimated={ctxEstimated} onCompact={onCompact} compacting={compacting} busy={busy} />
+          {textOnly ? <span className="text-[12px]">文字问答</span> : <ContextMeter used={ctxTokens} budget={ctxBudget} model={ctxModel} estimated={ctxEstimated} onCompact={onCompact} compacting={compacting} busy={busy} />}
         </div>
         <button
+          disabled={textOnly}
           style={NO_DRAG}
           className="text-muted hover:text-ink text-[13px] px-2"
           title="文件预览"

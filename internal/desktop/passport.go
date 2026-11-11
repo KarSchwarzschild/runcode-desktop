@@ -20,11 +20,12 @@ import (
 // passportSettings 是登录与 Bridge 访问的端点配置，默认值为 AI 环境实测值，
 // 均可用环境变量覆盖。
 type passportSettings struct {
-	Authority     string // 如 https://passport-ai.ouchn.edu.cn
-	ClientID      string
-	Scopes        string
-	BridgeBaseURL string // 如 https://bridge-aibase.ouc-online.com.cn（不含 /v1）
-	RedirectURI   string // BridgeBaseURL + /oauth/callback
+	Authority        string // 如 https://passport-ai.ouchn.edu.cn
+	ClientID         string
+	Scopes           string
+	BridgeBaseURL    string // 如 https://bridge-aibase.ouc-online.com.cn（不含 /v1）
+	KnowledgeBaseURL string // Defaults to BridgeBaseURL; a trusted test gateway may override knowledge routes only.
+	RedirectURI      string // Registered OAuth relay; defaults to BridgeBaseURL + /oauth/callback.
 }
 
 func passportConfig() passportSettings {
@@ -44,9 +45,12 @@ func passportConfig() passportSettings {
 		//
 		// 可覆盖：万一通行证那边没给这个客户端放开 manageapi，登录会直接
 		// invalid_scope 失败；那时用环境变量退回旧的一串即可，不必等新包。
-		Scopes:        envOr("RUNCODE_PASSPORT_SCOPES", "openid profile offline_access passportapi manageapi"),
-		BridgeBaseURL: bridge,
-		RedirectURI:   bridge + "/oauth/callback",
+		Scopes:           envOr("RUNCODE_PASSPORT_SCOPES", "openid profile offline_access passportapi manageapi"),
+		BridgeBaseURL:    bridge,
+		KnowledgeBaseURL: strings.TrimRight(envOr("RUNCODE_KNOWLEDGE_BRIDGE_BASE_URL", bridge), "/"),
+		// Local API testing must not invent a callback that Passport has never
+		// registered. This trusted startup setting changes only the OAuth relay.
+		RedirectURI: envOr("RUNCODE_PASSPORT_REDIRECT_URI", bridge+"/oauth/callback"),
 	}
 }
 
@@ -189,6 +193,7 @@ func (a *App) PassportCancelLogin() {
 // PassportLogout 清除本地令牌（不调 Passport endsession——桌面登出不应
 // 顺带登出浏览器里的 SSO 会话）。
 func (a *App) PassportLogout() {
+	a.cancelQuestionAdmissions()
 	a.tokens.Clear()
 	a.mu.Lock()
 	a.passportUser = nil

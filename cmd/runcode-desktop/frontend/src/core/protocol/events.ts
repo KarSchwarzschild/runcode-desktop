@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Events } from '@wailsio/runtime';
-import type { AskpassDone, AskpassRequest, AssistantDelta, ContextCompaction, ContextUsage, DirectoryAccessChanged, Envelope, HarmAutoAllow, OABlocked, PassportStatus, PermissionRequest, PlanRun, RecorderLevel, RecorderState, RecorderTranscript, RetryNotice, RuntimeInfo, SessionInfo, SessionRenamed, SkillInstallProgress, ToolEvent, TurnEnd, TurnError, TurnQueued, UpdateInfo, Warning } from './types';
+import type { AskpassDone, AskpassRequest, AssistantDelta, ContextCompaction, ContextUsage, ConversationInfo, DirectoryAccessChanged, Envelope, HarmAutoAllow, KnowledgeChatEvent, KnowledgeContextStatus, OABlocked, PassportStatus, PermissionRequest, PlanRun, RecorderLevel, RecorderState, RecorderTranscript, RetryNotice, RuntimeInfo, SessionRenamed, SkillInstallProgress, ToolEvent, TurnEnd, TurnError, TurnQueued, UpdateInfo, Warning } from './types';
 
 // EventMap maps every wire event name to its payload type.
 export interface EventMap {
@@ -17,6 +17,8 @@ export interface EventMap {
   'context:usage': ContextUsage;
   'directory:changed': DirectoryAccessChanged;
   'harm:autoallow': HarmAutoAllow;
+  'knowledge:chat': KnowledgeChatEvent;
+  'knowledge:context': KnowledgeContextStatus;
   'llm:retry': RetryNotice;
   'oa:blocked': OABlocked;
   'passport:changed': PassportStatus;
@@ -27,7 +29,7 @@ export interface EventMap {
   'recorder:transcript': RecorderTranscript;
   'runtimes:status': RuntimeInfo;
   'session:renamed': SessionRenamed;
-  'session:status': SessionInfo;
+  'session:status': ConversationInfo;
   'skill:install': SkillInstallProgress;
   'tool:event': ToolEvent;
   'turn:end': TurnEnd;

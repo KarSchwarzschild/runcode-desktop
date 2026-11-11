@@ -119,6 +119,15 @@ export function Icon({ name, size = 18, className }: Props) {
           <path d="M5 17.5a2 2 0 0 1 2-2h10.5" />
         </svg>
       )
+    // 三层圆柱：知识库入口／目录专用，与技能书本 book 区分；不改 TOOL_ICON.Skill。
+    case 'knowledge':
+      return (
+        <svg {...common} {...stroke}>
+          <ellipse cx="12" cy="5" rx="8" ry="3" />
+          <path d="M4 5v14c0 1.66 3.58 3 8 3s8-1.34 8-3V5" />
+          <path d="M4 12c0 1.66 3.58 3 8 3s8-1.34 8-3" />
+        </svg>
+      )
     case 'settings':
       return (
         <svg {...common} {...stroke}>

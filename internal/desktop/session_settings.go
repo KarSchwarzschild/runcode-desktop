@@ -22,6 +22,9 @@ import (
 
 // SetPermissionMode switches the permission mode at runtime.
 func (a *App) SetPermissionMode(sessionID, mode string) error {
+	if e, err := a.entryOf(sessionID); err == nil && e.chat != nil {
+		return wireError(errKnowledgeMode)
+	}
 	id, err := a.sessionIDOf(sessionID)
 	if err != nil {
 		return wireError(err)
@@ -64,6 +67,10 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 	if id == "" {
 		return SessionInfo{}, nil
 	}
+	// 全局设置仍可保存；知识库没有引擎权限模式，无需向 Manager 派发。
+	if e.chat != nil {
+		return a.knowledgeChatInfo(e)
+	}
 	if err := a.SetPermissionMode(id, req.PermissionMode); err != nil {
 		return SessionInfo{}, err
 	}
@@ -72,6 +79,9 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 
 // SetModel uses the same budget-aware rebuild as the model picker.
 func (a *App) SetModel(sessionID, model string) error {
+	if e, err := a.entryOf(sessionID); err == nil && e.chat != nil {
+		return wireError(errKnowledgeMode)
+	}
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return wireError(errors.New("模型为空"))
@@ -109,6 +119,9 @@ func (a *App) SetModel(sessionID, model string) error {
 // SwitchModel rebuilds the target session so model, tools and context budgets
 // change together. Running turns are never interrupted to apply a preference.
 func (a *App) SwitchModel(sessionID, kind, name string) (SessionInfo, error) {
+	if e, err := a.entryOf(sessionID); err == nil && e.chat != nil {
+		return SessionInfo{}, wireError(errKnowledgeMode)
+	}
 	kind = strings.TrimSpace(kind)
 	name = strings.TrimSpace(name)
 	debugLog("SwitchModel kind=%q name=%q", kind, name)
@@ -285,6 +298,9 @@ func (a *App) rebuildResumingWithConnectionHeld(cfg engine.Config, resumeID stri
 		return SessionInfo{}, wireError(errBusy)
 	}
 	cfg.Resume, cfg.Continue, cfg.SessionID, cfg.CWD = resumeID, false, "", a.workspaceOfSession(resumeID)
+	if err := a.checkEntryKnowledgeHistory(context.Background(), e, e.id); err != nil {
+		return SessionInfo{}, wireError(err)
+	}
 	// Check defaults/authorization before closing a usable old connection.
 	if _, err := a.applyModelContext(context.Background(), cfg, a.referenceForBuild(cfg, passport, tenantID, refs)); err != nil {
 		return SessionInfo{}, wireError(err)
@@ -359,6 +375,9 @@ func (a *App) adoptRebuiltSession(id string, directoryGrants []permissions.Direc
 // SetPlanMode toggles plan mode on the active session and returns the updated
 // status so the UI reflects it.
 func (a *App) SetPlanMode(sessionID string, on bool) (SessionInfo, error) {
+	if e, err := a.entryOf(sessionID); err == nil && e.chat != nil {
+		return SessionInfo{}, wireError(errKnowledgeMode)
+	}
 	id, err := a.sessionIDOf(sessionID)
 	if err != nil {
 		return SessionInfo{}, wireError(err)
@@ -382,6 +401,9 @@ func (a *App) SetPlanMode(sessionID string, on bool) (SessionInfo, error) {
 // SetReasoningScenario switches the in-conversation "thinking model"
 // (off/auto/<scenario>) and returns the updated status.
 func (a *App) SetReasoningScenario(sessionID, scenario string) (SessionInfo, error) {
+	if e, err := a.entryOf(sessionID); err == nil && e.chat != nil {
+		return SessionInfo{}, wireError(errKnowledgeMode)
+	}
 	id, err := a.sessionIDOf(sessionID)
 	if err != nil {
 		return SessionInfo{}, wireError(err)
@@ -396,6 +418,9 @@ func (a *App) SetReasoningScenario(sessionID, scenario string) (SessionInfo, err
 // (off/low/medium/high) at runtime and returns the updated status. This is the
 // knob that makes a reasoning model emit the reasoning content shown in the UI.
 func (a *App) SetThinkingEffort(sessionID, effort string) (SessionInfo, error) {
+	if e, err := a.entryOf(sessionID); err == nil && e.chat != nil {
+		return SessionInfo{}, wireError(errKnowledgeMode)
+	}
 	id, err := a.sessionIDOf(sessionID)
 	if err != nil {
 		return SessionInfo{}, wireError(err)

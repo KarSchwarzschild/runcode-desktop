@@ -4,6 +4,9 @@ package protocol
 // package streams during a turn. They are stable strings the UI subscribes to;
 // payload types are documented alongside each constant.
 const (
+	EventKnowledgeChat = "knowledge:chat"
+	// EventKnowledgeContext carries KnowledgeContextStatus.
+	EventKnowledgeContext = "knowledge:context"
 	// EventDirectoryAccessChanged carries DirectoryAccessChanged.
 	EventDirectoryAccessChanged = "directory:changed"
 	// EventSessionRenamed carries a SessionRenamed when a turn's generated title is

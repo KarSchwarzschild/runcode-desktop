@@ -17,6 +17,8 @@ export const Events = {
   ContextUsage: 'context:usage',
   DirectoryAccessChanged: 'directory:changed',
   HarmAutoAllow: 'harm:autoallow',
+  KnowledgeChat: 'knowledge:chat',
+  KnowledgeContext: 'knowledge:context',
   OABlocked: 'oa:blocked',
   PassportChanged: 'passport:changed',
   PermissionRequest: 'permission:request',
@@ -292,6 +294,30 @@ export interface ContextUsage {
   iteration: number;
 }
 
+// Mirrors protocol.ConversationInfo. ConversationInfo 是桌面会话显示契约，Kind 区分普通引擎和宿主知识库问答。 保留既有引擎 SessionInfo 的显示字段，新增桌面模式无需修改引擎协议。
+export interface ConversationInfo {
+  kind?: string;
+  readOnlyReason?: string;
+  sessionId: string;
+  model: string;
+  cwd: string;
+  permissionMode: string;
+  planMode: boolean;
+  reasoningScenario: string;
+  thinkingEffort: string;
+  maxContextTokens: number;
+  inputPricePerMTok: number;
+  outputPricePerMTok: number;
+  pricingSource: string;
+  previewBaseURL: string;
+}
+
+// Mirrors protocol.CreateKnowledgeChatRequest. CreateKnowledgeChatRequest references a verified platform session.
+export interface CreateKnowledgeChatRequest {
+  sourceSessionId: string;
+  libraryIds: string[] | null;
+}
+
 // Mirrors protocol.CustomModel. CustomModel 是用户自定义的直连模型接入点，与通行证平台模型并列显示在模型 选择器里。Provider 通常是引擎 provider registry 的名称（openai/ openai-responses/anthropic），由 llm.IsRegistered 校验而非本仓库的名单；旧配置 没有该字段时由桌面端按 openai 兼容处理。 唯一的例外是 "codex"：它是**外壳层**的服务商，引擎注册表里没有这个名字。 桌面端在解析时把它翻译成 openai-responses（Codex 说的就是 Responses 协议）， 并把 Base URL 指向本地那个负责补凭据与指纹头的小代理，见 internal/codexproxy。密钥字段仅用于桌面端持久化， ListCustomModels 对外返回时必须清空，只通过 HasAPIKey 暴露是否已配置。
 export interface CustomModel {
   supportsImages?: boolean;
@@ -390,6 +416,78 @@ export interface HarmAutoAllow {
 export interface Info {
   protocolVersion: number;
   appVersion?: string;
+}
+
+// Mirrors protocol.KnowledgeBaseSummary. KnowledgeBaseSummary describes a catalog entry without document contents.
+export interface KnowledgeBaseSummary {
+  id: string;
+  title: string;
+  description: string;
+  path: string;
+  source: string;
+  documentCount: number;
+  documentCountKnown: boolean;
+  directoryUrl?: string;
+  unavailableReason?: string;
+  failureKind?: string;
+}
+
+// Mirrors protocol.KnowledgeChatEvent. KnowledgeChatEvent belongs to the host session's ordered event stream.
+export interface KnowledgeChatEvent {
+  sessionId: string;
+  questionId: string;
+  runId: string;
+  seq: number;
+  phase: string;
+  error?: string;
+  text?: string;
+  thinking?: string;
+  sources?: KnowledgeSource[] | null;
+  inputTokens?: number;
+  outputTokens?: number;
+  truncated?: boolean;
+}
+
+// Mirrors protocol.KnowledgeContextStatus. KnowledgeContextStatus updates one accepted question within its session envelope.
+export interface KnowledgeContextStatus {
+  questionId: string;
+  knowledge: QuestionKnowledge;
+}
+
+// Mirrors protocol.KnowledgeListRequest. KnowledgeListRequest explicitly addresses the session's catalog.
+export interface KnowledgeListRequest {
+  sessionId: string;
+  query: string;
+  page: number;
+  pageSize: number;
+}
+
+// Mirrors protocol.KnowledgeOverride. KnowledgeOverride explicitly replaces the selection of a verified retry branch.
+export interface KnowledgeOverride {
+  libraryIds: string[] | null;
+}
+
+// Mirrors protocol.KnowledgePage. KnowledgePage distinguishes real, explicitly enabled demo, and unavailable catalogs.
+export interface KnowledgePage {
+  items: KnowledgeBaseSummary[] | null;
+  page: number;
+  pageSize: number;
+  total: number;
+  hasMore: boolean;
+  mode: string;
+  unavailableReason: string;
+  maxSelection: number;
+  failureKind?: string;
+}
+
+// Mirrors protocol.KnowledgeSource. KnowledgeSource exposes provenance only, never retrieved document text.
+export interface KnowledgeSource {
+  id: string;
+  libraryId: string;
+  documentId: string;
+  chunkId: string;
+  title: string;
+  sourceUrl?: string;
 }
 
 // Mirrors protocol.MCPServerInfo. MCPServerInfo is one configured MCP server plus its live connection state, for the UI's MCP management page.
@@ -506,6 +604,7 @@ export interface OABlocked {
 
 // Mirrors protocol.OpenSessionInfo. OpenSessionInfo 描述**此刻开着**的一条会话，供界面画会话列表。 与 SessionSummary 的分工：那个是工作区里**存下来**的历史会话（标题、时间、 回合数），这个是当前进程里活着的会话。界面上是两栏：「打开中」与「历史」。 只带后端独有的事实。标题走 session:renamed 事件与 SessionSummary，待审批数在 前端的授权队列里——都不必在这里重复一遍，重复就会出现两个版本互相矛盾。
 export interface OpenSessionInfo {
+  kind?: string;
   sessionId: string;
   workspace: string;
   running: boolean;
@@ -572,7 +671,7 @@ export interface PlanApproveRequest {
 
 // Mirrors protocol.PlanApproveResult. PlanApproveResult 把审批的两件后果一起带回前端：会话状态已变（计划模式关、权限模式 切好），以及应当作为下一条消息发出去的执行指令。指令由后端拼是为了让措辞与清单编号 只有一个来源（也便于单测），发送仍走前端既有的 send 路径，这样 busy、用户气泡、回合 生命周期全部复用原有链路。
 export interface PlanApproveResult {
-  info: SessionInfo;
+  info: ConversationInfo;
   executionPrompt: string;
 }
 
@@ -620,6 +719,7 @@ export interface ProjectContextInfo {
 
 // Mirrors protocol.QuestionDraft. QuestionDraft is the actual submitted text, not the bubble's shortened label.
 export interface QuestionDraft {
+  knowledge?: QuestionKnowledge;
   source: QuestionReference;
   text: string;
   images: QuestionImage[] | null;
@@ -630,6 +730,16 @@ export interface QuestionImage {
   index: number;
   name: string;
   mediaType: string;
+}
+
+// Mirrors protocol.QuestionKnowledge. QuestionKnowledge describes a frozen selection and its engine preparation status.
+export interface QuestionKnowledge {
+  libraries: KnowledgeBaseSummary[] | null;
+  status: string;
+  applied: boolean;
+  sources: KnowledgeSource[] | null;
+  error?: string;
+  truncated?: boolean;
 }
 
 // Mirrors protocol.QuestionReceipt. QuestionReceipt binds an accepted user input to its durable question identity.
@@ -750,6 +860,7 @@ export interface ResultImage {
 
 // Mirrors protocol.ResumedBlock. ResumedBlock is one rendered item of a reopened conversation.
 export interface ResumedBlock {
+  knowledge?: QuestionKnowledge;
   questionId?: string;
   thinking?: string;
   images?: QuestionImage[] | null;
@@ -761,7 +872,7 @@ export interface ResumedBlock {
 // Mirrors protocol.ResumedSession. ResumedSession carries a reopened session's status plus its prior conversation as rendered blocks so the frontend can repaint it.
 export interface ResumedSession {
   source?: QuestionReference;
-  info: SessionInfo;
+  info: ConversationInfo;
   blocks: ResumedBlock[] | null;
   contextTokens: number;
 }
@@ -885,6 +996,15 @@ export interface SessionInfo {
   previewBaseURL: string;
 }
 
+// Mirrors protocol.SessionKnowledgeView. SessionKnowledgeView is the last durably confirmed selection.
+export interface SessionKnowledgeView {
+  sessionId: string;
+  revision: number;
+  libraries: KnowledgeBaseSummary[] | null;
+  mode: string;
+  unavailableReason: string;
+}
+
 // Mirrors protocol.SessionRenamed. SessionRenamed announces a session's freshly generated title.
 export interface SessionRenamed {
   id: string;
@@ -893,6 +1013,7 @@ export interface SessionRenamed {
 
 // Mirrors protocol.SessionSummary. SessionSummary describes a saved session for the sidebar's recent list.
 export interface SessionSummary {
+  kind?: string;
   id: string;
   title: string;
   when: string;
@@ -903,6 +1024,13 @@ export interface SessionSummary {
 export interface SetPlatformImageCapabilityRequest {
   model: ModelReference;
   supportsImages?: boolean;
+}
+
+// Mirrors protocol.SetSessionKnowledgeRequest. SetSessionKnowledgeRequest replaces the entire selection using a revision check.
+export interface SetSessionKnowledgeRequest {
+  sessionId: string;
+  libraryIds: string[] | null;
+  expectedRevision: number;
 }
 
 // Mirrors protocol.SettingsView. SettingsView 是脱敏只读视图，不包含凭据或存储记录。
@@ -1016,12 +1144,15 @@ export interface StartSessionRequest {
 
 // Mirrors protocol.SubmitQuestionRequest. SubmitQuestionRequest supports ordinary input and a prepared retry branch.
 export interface SubmitQuestionRequest {
+  submissionId?: string;
+  knowledgeOverride?: KnowledgeOverride;
   sessionId: string;
   text: string;
   imagePaths: string[] | null;
   source?: QuestionReference;
   originalImages: number[] | null;
   allowSteering: boolean;
+  knowledgeRevision?: number;
 }
 
 // Mirrors protocol.ToolEvent. ToolEvent is the wire form of one tool-lifecycle update.

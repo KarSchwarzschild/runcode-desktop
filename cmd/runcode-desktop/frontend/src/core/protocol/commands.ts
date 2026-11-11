@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, Info, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionInfo, SessionSummary, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateKnowledgeChatRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -127,6 +127,12 @@ export function contextAuditStatus(): Promise<ContextAuditInfo> {
   return call<ContextAuditInfo>('ContextAuditStatus');
 }
 
+// CreateKnowledgeChat 从已验证的平台连接创建独立宿主会话，不复制源聊天历史。 请求只能携带源会话 ID 和库 ID，不能注入账号、租户或任意模型服务地址。
+// kind: trigger
+export function createKnowledgeChat(req: CreateKnowledgeChatRequest): Promise<ConversationInfo> {
+  return call<ConversationInfo>('CreateKnowledgeChat', req);
+}
+
 // DeleteAgent removes a sub-agent file in the given scope and returns the list.
 // kind: idempotent-set
 export function deleteAgent(name: string, scope: string): Promise<AgentList> {
@@ -175,10 +181,16 @@ export function downloadUpdate(): Promise<UpdateInfo> {
   return call<UpdateInfo>('DownloadUpdate');
 }
 
+// ExportKnowledgeChat 返回纯文本问答和来源元数据；不导出凭据或检索片段。
+// kind: query
+export function exportKnowledgeChat(sessionID: string): Promise<string> {
+  return call<string>('ExportKnowledgeChat', sessionID);
+}
+
 // FocusSession 把聚焦切到指定会话，并返回它的状态。 聚焦不只是界面高亮：没带会话 id 的命令都打给它（见 entryOf），而工作区寻址的 那批命令（文件列表、技能、子代理、MCP、记忆、会话列表）读的是 a.workspace， 所以这里必须一并把工作区搬过去——否则切到另一个目录的会话后，文件浏览器还 停在上一条会话的目录上，而且不会有任何报错。
 // kind: trigger
-export function focusSession(sessionID: string): Promise<SessionInfo> {
-  return call<SessionInfo>('FocusSession', sessionID);
+export function focusSession(sessionID: string): Promise<ConversationInfo> {
+  return call<ConversationInfo>('FocusSession', sessionID);
 }
 
 // ForkQuestion saves a separate prefix and opens it without focusing or executing it.
@@ -203,6 +215,18 @@ export function getProtocolInfo(): Promise<Info> {
 // kind: query
 export function getQuestion(ref: QuestionReference): Promise<QuestionDraft> {
   return call<QuestionDraft>('GetQuestion', ref);
+}
+
+// GetSessionKnowledge reads and revalidates the session's durable selection.
+// kind: query
+export function getSessionKnowledge(sessionID: string): Promise<SessionKnowledgeView> {
+  return call<SessionKnowledgeView>('GetSessionKnowledge', sessionID);
+}
+
+// GetSessionKnowledgeSnapshot 只读本地已确认选择与标题摘要，不发 HTTP。
+// kind: query
+export function getSessionKnowledgeSnapshot(sessionID: string): Promise<SessionKnowledgeView> {
+  return call<SessionKnowledgeView>('GetSessionKnowledgeSnapshot', sessionID);
 }
 
 // GetVisionSettings returns credential-free image routing preferences.
@@ -295,6 +319,12 @@ export function listFiles(): Promise<string[] | null> {
   return call<string[] | null>('ListFiles');
 }
 
+// ListKnowledgeBases lists the explicit session's authenticated catalog.
+// kind: query
+export function listKnowledgeBases(req: KnowledgeListRequest): Promise<KnowledgePage> {
+  return call<KnowledgePage>('ListKnowledgeBases', req);
+}
+
 // ListMCPServers returns every configured MCP server (from the shared config.toml), annotated with live connection state from the running session.
 // kind: query
 export function listMCPServers(): Promise<MCPServerInfo[] | null> {
@@ -345,8 +375,8 @@ export function mcpMarket(): Promise<McpMarketEntry[] | null> {
 
 // NewSession opens a fresh session in the same workspace (a new id, empty history), reusing the active session's provider/model/credentials.
 // kind: trigger
-export function newSession(): Promise<SessionInfo> {
-  return call<SessionInfo>('NewSession');
+export function newSession(): Promise<ConversationInfo> {
+  return call<ConversationInfo>('NewSession');
 }
 
 // OpenArtifact resolves a UI request in its named session, never the focus.
@@ -361,10 +391,16 @@ export function openExternal(reference: string): Promise<void> {
   return call<void>('OpenExternal', reference);
 }
 
+// OpenKnowledgeDirectory opens a selected library after fresh authorization.
+// kind: trigger
+export function openKnowledgeDirectory(sessionID: string, libraryID: string): Promise<void> {
+  return call<void>('OpenKnowledgeDirectory', sessionID, libraryID);
+}
+
 // OpenSession **再开**一条会话，不关掉已经开着的那些。 workspace 为空是"就在当前工作区再开一条"；给了目录就在那个目录开——这是 **多工作区并行**的唯一入口。每条会话记着自己的目录（sessionEntry.workspace）， 工作区寻址的那批命令跟着聚焦走（见 focusLocked），预览服务器按目录共享并计数 （见 previewRef）。 它同时取代了原来的 SwitchWorkspace（关掉当前那条、在新目录重开一条）：换目录 不再意味着丢掉手上正在跑的会话。真要丢，从「打开中」里关掉它——那是一个明确的 动作，而不是换目录的副作用。 复用当前会话的 provider / 模型 / 凭据（与 NewSession 同一套 a.config），所以 并行的几条会话共用同一条连接——每会话独立连接不在本期范围内，见 docs/multi-session.md。模型倒是每会话可以不同：SetModel 本来就按会话生效。
 // kind: trigger
-export function openSession(workspace: string): Promise<SessionInfo> {
-  return call<SessionInfo>('OpenSession', workspace);
+export function openSession(workspace: string): Promise<ConversationInfo> {
+  return call<ConversationInfo>('OpenSession', workspace);
 }
 
 // OpenSessions 列出此刻**开着**的会话，供界面画会话列表。 只报后端独有的事实：是谁、在哪个目录、有没有回合在跑、哪条是聚焦的。标题走 session:renamed 事件与 ListSessions（工作区里存下来的标题），待审批数在前端的 授权队列里（usePermissionQueue 的 waiting）——都不必在这里重复一遍。 **按打开先后排序，不是按 map 的遍历序。** Go 的 map 遍历是随机的：不排的话， 界面每回读一次列表，行就重新洗一次牌。用户点一行、列表跳一下、再点同一个位置 就点到了别人身上——而这一栏里每行右侧都有一颗关闭按钮，代价是关掉一条正在跑 的会话，没有任何报错。
@@ -523,6 +559,12 @@ export function removeRuntime(id: string): Promise<void> {
   return call<void>('RemoveRuntime', id);
 }
 
+// RenameKnowledgeChat 只修改宿主记录，不调用标题模型或普通引擎。
+// kind: idempotent-set
+export function renameKnowledgeChat(sessionID: string, title: string): Promise<void> {
+  return call<void>('RenameKnowledgeChat', sessionID, title);
+}
+
 // RenderOfficePDF 将来源引用的授权快照转成 PDF，返回绑定同一引用的受控 URL。 私有转换文件不对外服务；缓存命中与 HTTP 读取仍须检查源权限。 同一份文件重复打开命中缓存直接返回;源文件改了(大小或修改时间变了)键就变了, 于是自然重转,不需要额外的失效逻辑。
 // kind: query
 export function renderOfficePDF(reference: string): Promise<string> {
@@ -639,8 +681,8 @@ export function saveRecorderSettings(s: RecorderSettings): Promise<void> {
 
 // SaveSettings 只写设置页拥有的字段，不重新解析或切换连接。 startMu 与会话/连接切换共用；持久化成功后才更新下一场会话的配置。
 // kind: idempotent-set
-export function saveSettings(req: SaveSettingsRequest): Promise<SessionInfo> {
-  return call<SessionInfo>('SaveSettings', req);
+export function saveSettings(req: SaveSettingsRequest): Promise<ConversationInfo> {
+  return call<ConversationInfo>('SaveSettings', req);
 }
 
 // SaveSkill writes a skill's SKILL.md to its scope's root and returns the list.
@@ -717,8 +759,8 @@ export function setPermissionMode(sessionID: string, mode: string): Promise<void
 
 // SetPlanMode toggles plan mode on the active session and returns the updated status so the UI reflects it.
 // kind: idempotent-set
-export function setPlanMode(sessionID: string, on: boolean): Promise<SessionInfo> {
-  return call<SessionInfo>('SetPlanMode', sessionID, on);
+export function setPlanMode(sessionID: string, on: boolean): Promise<ConversationInfo> {
+  return call<ConversationInfo>('SetPlanMode', sessionID, on);
 }
 
 // SetPlatformImageCapability sets or removes one tenant-scoped local override.
@@ -729,8 +771,14 @@ export function setPlatformImageCapability(req: SetPlatformImageCapabilityReques
 
 // SetReasoningScenario switches the in-conversation "thinking model" (off/auto/<scenario>) and returns the updated status.
 // kind: idempotent-set
-export function setReasoningScenario(sessionID: string, scenario: string): Promise<SessionInfo> {
-  return call<SessionInfo>('SetReasoningScenario', sessionID, scenario);
+export function setReasoningScenario(sessionID: string, scenario: string): Promise<ConversationInfo> {
+  return call<ConversationInfo>('SetReasoningScenario', sessionID, scenario);
+}
+
+// SetSessionKnowledge performs authorization without lifecycle/storage locks, then reacquires the existing lock order and CAS before durable publication.
+// kind: idempotent-set
+export function setSessionKnowledge(req: SetSessionKnowledgeRequest): Promise<SessionKnowledgeView> {
+  return call<SessionKnowledgeView>('SetSessionKnowledge', req);
 }
 
 // SetSkillEnabled 在 scope("user"/"project")开关一个技能。下次新建会话生效。
@@ -741,8 +789,8 @@ export function setSkillEnabled(name: string, scope: string, enabled: boolean): 
 
 // SetThinkingEffort switches provider-native reasoning strength (off/low/medium/high) at runtime and returns the updated status.
 // kind: idempotent-set
-export function setThinkingEffort(sessionID: string, effort: string): Promise<SessionInfo> {
-  return call<SessionInfo>('SetThinkingEffort', sessionID, effort);
+export function setThinkingEffort(sessionID: string, effort: string): Promise<ConversationInfo> {
+  return call<ConversationInfo>('SetThinkingEffort', sessionID, effort);
 }
 
 // SetToolEnabled 在 scope("user"/"project")开关一个工具。下次新建会话生效。
@@ -771,14 +819,14 @@ export function startRecording(req: StartRecordingRequest): Promise<RecordingInf
 
 // StartSession opens (or reopens) the session for a workspace and returns its display state.
 // kind: trigger
-export function startSession(req: StartSessionRequest): Promise<SessionInfo> {
-  return call<SessionInfo>('StartSession', req);
+export function startSession(req: StartSessionRequest): Promise<ConversationInfo> {
+  return call<ConversationInfo>('StartSession', req);
 }
 
 // Status returns the current session's display state.
 // kind: query
-export function status(sessionID: string): Promise<SessionInfo> {
-  return call<SessionInfo>('Status', sessionID);
+export function status(sessionID: string): Promise<ConversationInfo> {
+  return call<ConversationInfo>('Status', sessionID);
 }
 
 // StopRecording 结束录音，返回这一场的最终记录。 会等服务端 flush 最后一块（上限 stopTimeout）——实测「说完话 → 出确认文本」 约 1.5 秒，等这一下换来的是最后一句话不丢。
@@ -795,8 +843,8 @@ export function submitQuestion(req: SubmitQuestionRequest): Promise<QuestionRece
 
 // SwitchModel rebuilds the target session so model, tools and context budgets change together.
 // kind: trigger
-export function switchModel(sessionID: string, kind: string, name: string): Promise<SessionInfo> {
-  return call<SessionInfo>('SwitchModel', sessionID, kind, name);
+export function switchModel(sessionID: string, kind: string, name: string): Promise<ConversationInfo> {
+  return call<ConversationInfo>('SwitchModel', sessionID, kind, name);
 }
 
 // UpdateStatus returns the current update snapshot without network access.

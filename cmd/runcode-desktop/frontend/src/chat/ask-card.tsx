@@ -8,13 +8,13 @@ import { askPayload } from './tool-text'
 
 // AskCard renders an AskUser tool call as an interactive question: the user picks
 // a suggested option or types a custom reply, which is sent as the next message.
-export function AskCard({ tool, busy, onAnswer }: { tool: ToolEvent; busy: boolean; onAnswer: (text: string) => void }) {
+export function AskCard({ tool, busy, sendBlock = '', onAnswer }: { tool: ToolEvent; busy: boolean; sendBlock?: string; onAnswer: (text: string) => void }) {
   const { question, options } = askPayload((tool as ToolEvent & { input?: unknown }).input)
   const [custom, setCustom] = useState('')
   const [answered, setAnswered] = useState<string | null>(null)
   function answer(text: string) {
     const t = text.trim()
-    if (!t || answered || busy) return
+    if (!t || answered || busy || sendBlock) return
     setAnswered(t)
     onAnswer(t)
   }
@@ -30,13 +30,14 @@ export function AskCard({ tool, busy, onAnswer }: { tool: ToolEvent; busy: boole
           <div className="text-[13px] text-muted">已回复：<span className="text-ink">{answered}</span></div>
         ) : (
           <>
+            {sendBlock && <p role="status" className="mb-2 text-[12px] text-amberink">{sendBlock}</p>}
             {options.length > 0 && (
               <div className="flex flex-col gap-1.5 mb-2.5">
                 {options.map((opt, i) => (
                   <button
                     key={i}
                     onClick={() => answer(opt)}
-                    disabled={busy}
+                    disabled={busy || !!sendBlock}
                     className="text-left text-[14px] text-ink bg-surface2 border border-line2 rounded-btn px-3.5 py-2 cursor-pointer hover:border-primary hover:bg-primarysoft disabled:opacity-40"
                   >
                     {opt}
@@ -58,7 +59,7 @@ export function AskCard({ tool, busy, onAnswer }: { tool: ToolEvent; busy: boole
               />
               <button
                 onClick={() => answer(custom)}
-                disabled={!custom.trim() || busy}
+                disabled={!custom.trim() || busy || !!sendBlock}
                 className="text-[13px] font-semibold text-white bg-primary px-3.5 rounded-btn cursor-pointer hover:brightness-105 disabled:opacity-40 disabled:cursor-default"
               >
                 发送
