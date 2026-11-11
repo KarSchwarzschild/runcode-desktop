@@ -49,6 +49,7 @@ var eventPayloads = map[string]string{
 	"EventKnowledgeChat":          "KnowledgeChatEvent",
 	"EventKnowledgeContext":       "KnowledgeContextStatus",
 	"EventDirectoryAccessChanged": "DirectoryAccessChanged",
+	"EventPreviewLifecycle":       "PreviewLifecycle",
 	"EventAssistantDelta":         "AssistantDelta",
 	"EventAssistantThinking":      "AssistantDelta",
 	"EventContextUsage":           "ContextUsage",

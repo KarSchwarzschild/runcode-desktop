@@ -35,6 +35,7 @@ import {
 } from '@/chat/blocks'
 import { basename } from '@/core/paths'
 import { withKnowledgeChat } from './knowledge-chat-state'
+import { clearInlineFiles } from './inline-preview-status'
 import { digestDisplayText, docDisplayText, minutesDisplayText, parseRecordingMarker, type RecordingMark } from '@/recorder/minutes'
 import {
   bindQuestionReceipt, withQuestionKnowledge, reconcileQuestionBlocks, cancelPreparingKnowledge, convOf, dropConv, lastUserText, patchConv, sessionOf, withReverted, withContextCompaction,
@@ -124,6 +125,19 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
       }),
       onEnvelope(Events.KnowledgeContext, env => {
         patch(sessionOf(env), s => withQuestionKnowledge(s, env.payload))
+      }),
+      // 同 ID 会话重建 / 关闭：丢掉该会话的内联文件状态，避免旧 generation 结果复活。
+      onEnvelope(Events.PreviewLifecycle, (env) => {
+        const sid = env.payload.sessionId || sessionOf(env)
+        if (!sid) return
+        if (env.payload.phase === 'invalidating' || env.payload.phase === 'closed') {
+          clearInlineFiles(sid)
+          sessionGenerations.current.set(sid, (sessionGenerations.current.get(sid) ?? 0) + 1)
+        }
+      }),
+      onEnvelope(Events.DirectoryAccessChanged, () => {
+        // 目录授权变化：所有会话的内联文件缓存都可能失效（路径权限变了）。
+        for (const sid of sessionGenerations.current.keys()) clearInlineFiles(sid)
       }),
       onEnvelope(Events.AssistantDelta, (env) => {
         const { text } = env.payload
@@ -612,6 +626,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   const dropSession = (id: string) => {
     sessionGenerations.current.set(id, (sessionGenerations.current.get(id) ?? 0) + 1)
     pendingKnowledge.current.delete(id)
+    clearInlineFiles(id)
     setConvs((m) => dropConv(m, id))
   }
 

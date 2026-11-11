@@ -9,6 +9,9 @@ const (
 	EventKnowledgeContext = "knowledge:context"
 	// EventDirectoryAccessChanged carries DirectoryAccessChanged.
 	EventDirectoryAccessChanged = "directory:changed"
+	// EventPreviewLifecycle carries PreviewLifecycle for same-ID session rebuilds
+	// and closes so inline file previews can drop stale caches.
+	EventPreviewLifecycle = "preview:lifecycle"
 	// EventSessionRenamed carries a SessionRenamed when a turn's generated title is
 	// ready, so the sidebar can refresh that session's name.
 	EventSessionRenamed = "session:renamed"
