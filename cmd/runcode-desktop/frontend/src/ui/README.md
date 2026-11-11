@@ -175,7 +175,7 @@
 
 | 导出 | 用途 |
 | --- | --- |
-| `Markdown` | 助手文本渲染（GFM + 代码高亮），块代码保留 highlight.js 配色、行内代码是紧凑 chip |
+| `Markdown` | 助手文本渲染（GFM + 代码高亮），块代码保留 highlight.js 配色、行内代码是紧凑 chip。可选 `renderCodeBlock` 插槽：传入时用 hast 原文偏移与拼接文本（不是 `String(children)`）把围栏交给调用方；返回 `null` 或不传则行为与原来完全一致。`textOnly` 下插槽不生效。业务层（`chat/assistant-markdown`）负责静态预览识别，本层不反向导入 `chat`/`preview` |
 | `Icon` / `Logo` / `toolIcon` / `TOOL_ICON` | 内联 SVG（`stroke=currentColor`），无图标字体、无网络请求。`TOOL_ICON` 把工具/内置子代理名映射到图标，对话工具行与插件管理页共用，**同一能力在哪都是同一个字形** |
 | `CheckMark` / `WarnTriangle` / `Spinner`（`glyphs.tsx`） | 画出来的小状态图形（完成/警告/进行中）。与 `Icon` 分开是因为这些是**绘制**的，不是查表来的 |
 | `DiffStat` / `SourceBadge` / `sourceLabel`（`badges.tsx`） | `+N −N` 变更量；技能/子代理/工具的来源标（内置/用户/项目） |

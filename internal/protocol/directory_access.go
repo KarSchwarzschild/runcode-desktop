@@ -38,3 +38,12 @@ type ArtifactReference struct {
 type DirectoryAccessChanged struct {
 	Workspace string `json:"workspace"`
 }
+
+// PreviewLifecycle synchronizes desktop file-preview caches with session-instance
+// rebuilds. Phase is one of invalidating / ready / closed. Ready carries the new
+// host generation; invalidating/closed may leave Generation empty.
+type PreviewLifecycle struct {
+	SessionID  string `json:"sessionId"`
+	Phase      string `json:"phase"`
+	Generation string `json:"generation,omitempty"`
+}

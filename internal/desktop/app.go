@@ -1196,11 +1196,14 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	if e == nil {
 		return nil
 	}
+	// 关闭前先发 invalidating，让前端丢掉该会话的内联文件缓存与在途读取。
+	a.emitPreviewLifecycle(e, "invalidating", "")
 	a.mu.Lock()
 	id := ""
 	if !e.closed {
 		id = e.id
 	}
+	emit := e.emit
 	a.mu.Unlock()
 	if id != "" && e.chat == nil {
 		if err := a.mgr.Close(ctx, id); err != nil {
@@ -1231,6 +1234,9 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	// 知识库从未持有预览引用，关闭时不能释放同工作区普通会话的服务器。
 	if e.chat == nil {
 		a.stopPreview(previewWorkspaceOf(e))
+	}
+	if e.chat == nil {
+		emitPreviewLifecycleTo(emit, e.id, "closed", "")
 	}
 	return nil
 }

@@ -1,6 +1,6 @@
 // ChatPane 是对话流本身：顶部的计划进度胶囊、可滚动的消息区（把 groupBlocks 分好
 // 的组映射成各类卡片）、空态与"思考中"指示。纯展示——所有交互都经 props 回调。
-import { type ReactNode } from 'react'
+import { useCallback, useRef, type ReactNode } from 'react'
 import { Logo } from '@/ui/icons'
 import { BRAND } from '@/core/brand'
 import { shortenPath } from '@/core/paths'
@@ -65,6 +65,18 @@ export function ChatPane({
   onGenerateMinutes?: (mark: RecordingMark) => void
 }) {
   const groups = groupBlocks(blocks)
+  // 内联预览高度晚于文本：只在用户本来贴底时跟随。贴底标记在此维护，不经 App.tsx
+  //（App 属 W5），避免与用量窗口抢同一文件。
+  const stick = useRef(true)
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    onScroll()
+  }, [scrollRef, onScroll])
+  const onContentHeightChange = useCallback(() => {
+    const el = scrollRef.current
+    if (el && stick.current) el.scrollTo({ top: el.scrollHeight })
+  }, [scrollRef])
   // 计划胶囊上的聚合数字：本会话改过的文件数与累计增删行数。
   const fileSet = new Set<string>()
   let planAdds = 0
@@ -106,7 +118,7 @@ export function ChatPane({
           />
         </div>
       )}
-      <div className="flex-1 overflow-y-auto bg-surface px-6 pt-3 pb-8" ref={scrollRef} onScroll={onScroll}>
+      <div className="flex-1 overflow-y-auto bg-surface px-6 pt-3 pb-8" ref={scrollRef} onScroll={handleScroll}>
         <div className="mx-auto max-w-[1200px] flex flex-col gap-6">
           {blocks.length === 0 && (
             <div className="mt-[16vh] text-center text-faint">
@@ -149,7 +161,7 @@ export function ChatPane({
               <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} /></BotRow>
             ) : (
               <div key={g.block.id}>
-                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} />
+                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} onContentHeightChange={onContentHeightChange} />
                 {!textOnly && g.block.kind === 'assistant' && (
                   <ReplyArtifacts text={g.block.text} files={files} tabs={tabs} onOpen={onOpenFile} />
                 )}

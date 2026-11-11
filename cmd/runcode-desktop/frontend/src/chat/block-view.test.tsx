@@ -11,6 +11,13 @@ it('renders knowledge answer links and images as text without opening model-prov
   expect(html).not.toContain('title="预览')
 })
 
+it('keeps generated-image-unrelated assistant svg fences on the inline preview path without touching image tool cards', () => {
+  const svg = '```svg\n<svg viewBox="0 0 10 10"><rect width="5" height="5"/></svg>\n```'
+  const html = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a1', text: svg, streaming: false, ts: '' }} />)
+  expect(html).toContain('min-h-12')
+  expect(html).not.toContain('language-svg')
+})
+
 describe('retry notice', () => {
   it('uses a quiet note, keeps the attempt count and moves diagnostics to the tooltip', () => {
     const reason = '模型仅返回思考或空内容，未返回回答或工具调用'

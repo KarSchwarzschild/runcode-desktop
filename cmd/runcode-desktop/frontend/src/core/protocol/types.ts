@@ -23,6 +23,7 @@ export const Events = {
   PassportChanged: 'passport:changed',
   PermissionRequest: 'permission:request',
   PlanUpdated: 'plan:updated',
+  PreviewLifecycle: 'preview:lifecycle',
   RecorderLevel: 'recorder:level',
   RecorderState: 'recorder:state',
   RecorderTranscript: 'recorder:transcript',
@@ -770,6 +771,13 @@ export interface PlanStep {
 export interface PlatformImageCapability {
   model: ModelReference;
   supportsImages: boolean;
+}
+
+// Mirrors protocol.PreviewLifecycle. PreviewLifecycle synchronizes desktop file-preview caches with session-instance rebuilds.
+export interface PreviewLifecycle {
+  sessionId: string;
+  phase: string;
+  generation?: string;
 }
 
 // Mirrors protocol.ProjectContextInfo. ProjectContextInfo is the workspace's project-instructions file (RUNCODE.md or AGENT.md), for viewing and editing.

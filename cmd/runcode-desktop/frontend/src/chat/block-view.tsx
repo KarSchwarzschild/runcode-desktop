@@ -7,8 +7,8 @@
 // 重试各自手写了一遍同样的分割线，四种形状表达同一件事。
 import { GhostBtn } from '@/ui/ghost-btn'
 import { Icon } from '@/ui/icons'
-import { Markdown } from '@/ui/markdown'
 import { SystemNote } from '@/ui/feedback'
+import { AssistantMarkdown } from './assistant-markdown'
 import { WarnTriangle } from '@/ui/glyphs'
 import { fmtDuration, fmtTokens } from '@/core/format'
 import { useStickToBottom } from '@/hooks/use-stick-to-bottom'
@@ -21,7 +21,7 @@ import { ExecutionCard } from './execution-card'
 import { RecordingCard } from './recorder-card'
 import { KnowledgeSources } from './knowledge-sources'
 
-export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false }: {
+export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange }: {
   textOnly?: boolean
   block: Block
   onRetryQuestion?: (id: string) => void
@@ -30,6 +30,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
   onOpenFile?: (relPath: string) => void
   resolveFile?: (token: string) => string | null
   onGenerateMinutes?: (mark: RecordingMark) => void
+  onContentHeightChange?: () => void
 }) {
   // While an assistant answer streams, keep it in a fixed-height window pinned to
   // the newest text (consistent with the tool/agent cards); release to full height
@@ -86,7 +87,16 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                 onScroll={block.streaming ? aScroll.onScroll : undefined}
                 className={`text-[15px] text-ink2 leading-[1.75] break-words${block.streaming ? ' max-h-[58vh] overflow-y-auto pr-1' : ''}`}
               >
-                <Markdown textOnly={textOnly} onOpenFile={onOpenFile} resolveFile={resolveFile}>{block.text}</Markdown>
+                <AssistantMarkdown
+                  messageId={block.id}
+                  streaming={block.streaming}
+                  textOnly={textOnly}
+                  onOpenFile={onOpenFile}
+                  resolveFile={resolveFile}
+                  onContentHeightChange={onContentHeightChange}
+                >
+                  {block.text}
+                </AssistantMarkdown>
                 {block.streaming && <span className="caret">▍</span>}
               </div>
             )}
