@@ -112,11 +112,11 @@
 ### `PageShell` —— 管理页骨架
 
 ```tsx
-<PageShell title="设置" hint="模型与权限模式即时生效…" width={640}>…</PageShell>
+<PageShell title="设置" hint="按目录定位设置…" width={864} scrollRef={…} contentClassName="settings-shell">…</PageShell>
 <PageShell title="MCP 服务器" hint={<>…含 <code>标记</code> 的富文本…</>} action={<button/>}>…</PageShell>
 ```
 
-滚动列 + 居中版心 + 标题/副标题 + 可选右上动作。`width` 是阅读版心（默认 720；设置页 640，因为它是表单不是文档）。mcp / memory / settings 三页用它——此前各写一遍，已经在内边距和标题字号上漂开过。
+滚动列 + 居中版心 + 标题/副标题 + 可选右上动作。`width` 是阅读版心（默认 720；设置页 864，容纳左侧目录 200 + 间距 24 + 右栏 640）。mcp / memory / settings 三页用它——此前各写一遍，已经在内边距和标题字号上漂开过。
 
 `width` 走内联 style 而非 `max-w-[…]` 类：Tailwind 靠扫源码里的**字面**类名生成 CSS，运行时拼的类名根本不会被产出。
 
