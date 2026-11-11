@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateKnowledgeChatRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationCatalog, ImageGenerationSettings, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionImageGenerationView, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionImageGenerationRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateKnowledgeChatRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationCatalog, ImageGenerationSettings, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionImageGenerationView, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionImageGenerationRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -239,6 +239,24 @@ export function getSessionKnowledge(sessionID: string): Promise<SessionKnowledge
 // kind: query
 export function getSessionKnowledgeSnapshot(sessionID: string): Promise<SessionKnowledgeView> {
   return call<SessionKnowledgeView>('GetSessionKnowledgeSnapshot', sessionID);
+}
+
+// GetUsageDimensions 读取按模型或供应商分组的汇总，也是历史模型筛选项的来源。
+// kind: query
+export function getUsageDimensions(req: UsageDimensionsQuery): Promise<UsageDimensionsPage> {
+  return call<UsageDimensionsPage>('GetUsageDimensions', req);
+}
+
+// GetUsageOverview 读取当前租户、所选范围的用量汇总、趋势与口径。
+// kind: query
+export function getUsageOverview(req: UsageQuery): Promise<UsageOverview> {
+  return call<UsageOverview>('GetUsageOverview', req);
+}
+
+// GetUsageRequests 读取一页请求日志；范围必须是总览返回的 effectiveRange。
+// kind: query
+export function getUsageRequests(req: UsageRequestsQuery): Promise<UsageRequestsPage> {
+  return call<UsageRequestsPage>('GetUsageRequests', req);
 }
 
 // GetVisionSettings returns credential-free image routing preferences.

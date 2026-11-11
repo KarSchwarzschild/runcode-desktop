@@ -500,6 +500,14 @@ export function Icon({ name, size = 18, className }: Props) {
           <path d="M18 2.8v4.4M15.8 5h4.4" />
         </svg>
       )
+    // 用量统计：基线上三根高低不一的柱。
+    case 'chart':
+      return (
+        <svg {...common} {...stroke}>
+          <path d="M4 20h16" />
+          <path d="M7 16v-5M12 16V6M17 16v-8" />
+        </svg>
+      )
     default:
       return null
   }

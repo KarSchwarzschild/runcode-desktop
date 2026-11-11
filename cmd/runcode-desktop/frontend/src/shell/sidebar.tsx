@@ -22,11 +22,15 @@ export interface OpenSessionRow {
   workspace: string
 }
 
+// NavView 是侧栏能切到的视图，与 App 的 View 一致。
+type NavView = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
+
 // PROFILE_NAV 是收在底部用户区菜单里的几个入口：配置类的，配好之后很少再动。
 //
 // 与顶部那三个（对话/插件/市场）分开，是因为它们的使用频次差一个数量级——六个入口
 // 并排会让每天要点很多次的那几个和一周点不了一次的挤在一起抢注意力。
 const PROFILE_NAV = [
+  { label: '用量统计', name: 'chart', view: 'usage' as const },
   { label: '记忆', name: 'file', view: 'memory' as const },
   { label: '权限', name: 'shield', view: 'permissions' as const },
   { label: '设置', name: 'settings', view: 'settings' as const },
@@ -67,8 +71,8 @@ export function Sidebar({
   onDelete: (id: string) => void
   onRenameKnowledge?: (id: string, title: string) => Promise<void>
   onExportKnowledge?: (id: string) => Promise<void>
-  view: 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory'
-  onNav: (v: 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory') => void
+  view: NavView
+  onNav: (v: NavView) => void
   onNew: () => void
   onResume: (id: string) => void
   // 已登录用户的展示名与头像;未登录为空——此时用户区照样渲染(里面装着设置/权限/
