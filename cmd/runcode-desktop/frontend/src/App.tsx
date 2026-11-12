@@ -384,7 +384,10 @@ export default function App() {
                 setAttachments={drafts.setAttachments}
                 retry={questionRetry.editing}
                 retryDisabled={questionRetry.disabled}
-                submitting={questionRetry.pending || knowledge.state.saving || session.switching || conversation.compacting || planning.approving}
+                // knowledge.state.saving 不进 submitting：否则 Composer 整区 locked，
+                // 选择器行全部 disabled:opacity-50，落盘时页面发灰并挡连选。
+                // 发送仍由 knowledge.sendBlock 在保存中闸住。
+                submitting={questionRetry.pending || session.switching || conversation.compacting || planning.approving}
                 onCancelRetry={questionRetry.cancel}
                 onRemoveOriginal={questionRetry.removeImage}
                 input={input}
