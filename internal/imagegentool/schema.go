@@ -2,27 +2,24 @@ package imagegentool
 
 import "gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 
-// Name is the model-facing tool id and permission class key.
+// Name 是面向模型的工具 id，也是权限类键。
 const Name = "image_generate"
 
-// BindingKind names the authorization target family: the platform Bridge's
-// image generation route, pinned per frozen turn destination.
+// BindingKind 命名授权目标族：平台 Bridge 生图路由，按冻结回合目的地钉死。
 const BindingKind = "platform-image-generation"
 
 const (
-	// MaxPromptRunes bounds the trimmed prompt (design §5).
+	// MaxPromptRunes 限制去空白后的 prompt 字数（设计第 5 节）。
 	MaxPromptRunes = 2000
-	// MaxResultBytes bounds the JSON shared by tool content and UI data.
+	// MaxResultBytes 限制工具正文与 UI Data 共用的 JSON 体积。
 	MaxResultBytes  = 8 * 1024
 	maxMessageRunes = 400
-	// maxRememberedTurns bounds the per-tool replay/budget memory. The host's
-	// persistent ledger, not this cache, is the cross-process authority.
+	// maxRememberedTurns 限制进程内回放／预算缓存；跨进程权威是宿主持久账本，不是这里。
 	maxRememberedTurns = 64
 )
 
-// InputSchema is the frozen JSON schema advertised to the model. Only the
-// prompt and an optional size are model-controlled; model id, tenant, user,
-// count, credentials, gateway and output path all belong to the host.
+// InputSchema 是向模型公布的冻结 JSON schema。模型只控 prompt 与可选 size；
+// 模型 id、租户、用户、张数、凭据、网关与落盘路径一律归宿主。
 func InputSchema() tool.Schema {
 	return tool.Schema{
 		Type:                 tool.SchemaTypeObject,

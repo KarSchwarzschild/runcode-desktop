@@ -12,10 +12,8 @@ import (
 // 默认生图模型与尺寸：按「账号指纹 + Bridge + 租户」分区保存在 desktop.json 里，
 // 不保存任何凭据。显式保存；保存时复核目录与权限，读取不发网络请求。
 
-// imageGenerationPreference is one scope's saved default. SupportedSizes is
-// the catalog profile validated at save time, so a turn can bound the model's
-// size argument without a catalog round-trip; the pre-submit check still
-// revalidates against the live catalog.
+// imageGenerationPreference 是某一作用域已保存的默认。SupportedSizes 在保存时
+// 已对照目录档案校验，回合可据此约束模型的 size 而不再拉目录；提交前仍对活目录复核。
 type imageGenerationPreference struct {
 	Revision       int64           `json:"revision"`
 	DefaultModel   *modelReference `json:"defaultModel,omitempty"`
@@ -24,8 +22,7 @@ type imageGenerationPreference struct {
 	ResponseFormat string          `json:"responseFormat,omitempty"`
 }
 
-// preferredResponseFormat prefers url (smaller response) and falls back to
-// b64_json when that is all the profile offers (design 6.2).
+// preferredResponseFormat 优先 url（响应更小）；档案只提供 b64_json 时再回落（设计 6.2）。
 func preferredResponseFormat(formats []string) string {
 	if slices.Contains(formats, "url") {
 		return "url"
@@ -56,8 +53,7 @@ func imageGenerationPreferenceFor(cfg desktopConfig, scope string) imageGenerati
 	return cfg.ImageGenerationPreferences[scope]
 }
 
-// GetImageGenerationSettings returns the current account's saved default for
-// tenantID. It never contacts the Bridge.
+// GetImageGenerationSettings 返回当前账号在 tenantID 下已保存的默认；从不访问 Bridge。
 func (a *App) GetImageGenerationSettings(tenantID string) (appwire.ImageGenerationSettings, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	account, _, err := a.imageGenerationAccount()
@@ -68,9 +64,8 @@ func (a *App) GetImageGenerationSettings(tenantID string) (appwire.ImageGenerati
 	return imageGenerationPreferenceFor(loadRawConfig(), scope).view(scope), nil
 }
 
-// SaveImageGenerationSettings replaces the scope's default after checking the
-// model against the live catalog. Repeating the confirmed target returns it
-// unchanged; a different target with a stale revision is rejected.
+// SaveImageGenerationSettings 对照活目录校验后替换作用域默认。
+// 重复提交已确认目标原样返回；目标变了但修订号过期则拒绝。
 func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSettingsRequest) (appwire.ImageGenerationSettings, error) {
 	tenantID := strings.TrimSpace(req.TenantID)
 	account, epoch, err := a.imageGenerationAccount()

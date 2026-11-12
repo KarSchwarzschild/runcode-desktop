@@ -7,13 +7,10 @@ import (
 	appwire "github.com/wt68/runcode/internal/protocol"
 )
 
-// imageGenerationBlocks attaches image_generate results to a reopened
-// conversation. The session's ledger is authoritative (final status and any
-// recorded accounting observation); the persisted tool content is the
-// fallback — a fork has the source's history prefix but no ledger of its own.
-// A ledger record whose tool result never reached history (the process stopped
-// after saving) is added once under its original question. Replay never
-// submits anything: an interrupted submission shows as unknown.
+// imageGenerationBlocks 把 image_generate 结果挂回重开的对话。会话账本是权威
+// （终态与已记的记账观察）；持久化工具正文是回落——分叉会话有源历史前缀但没有
+// 自己的账本。账本有记录、工具结果却从未写入历史（进程在保存后中断）时，按原
+// 提问补一条。回放绝不重新提交：中断的提交显示为 unknown。
 func imageGenerationBlocks(workspace, sessionID string, blocks []ResumedBlock) []ResumedBlock {
 	records, err := listImageGenerationLedgers(workspace, sessionID)
 	if err != nil {
@@ -82,8 +79,7 @@ func imageGenerationBlocks(workspace, sessionID string, blocks []ResumedBlock) [
 	return append(out, orphans...)
 }
 
-// imageGenerationResultFromContent reads the bounded result JSON the tool
-// returned to the model (the same document the live card rendered).
+// imageGenerationResultFromContent 读取工具回给模型的有界结果 JSON（与现场卡片同源）。
 func imageGenerationResultFromContent(content string) (appwire.ImageGenerationResult, bool) {
 	var r appwire.ImageGenerationResult
 	if json.Unmarshal([]byte(content), &r) != nil || r.Version != 1 || r.Status == "" {

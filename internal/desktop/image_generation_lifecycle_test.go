@@ -16,12 +16,12 @@ import (
 
 func TestImageGenerationLifecycleFrozenTargetSurvivesSettingsChange(t *testing.T) {
 	f := newImageGenFlow(t)
-	// The user saves another default while the call awaits approval.
+	// 调用尚在审批／执行时用户另存默认：当前回合必须仍用冻结目标。
 	saveImageModel(t, f.app, "tenant-a", "image-only-url", "2048x2048")
 	if got := f.run(t, "tu_1", `{"prompt":"海报"}`); got.Status != "succeeded" || f.bridge.models.Load() != "image-only-b64" {
 		t.Fatalf("running turn changed model: %+v model=%v", got, f.bridge.models.Load())
 	}
-	// The next independent turn uses the new default.
+	// 下一个独立回合才改用新默认。
 	f.app.freezeImageGenerationTurn(f.entry)
 	if snap := f.state.snapshot(); snap.Model != "image-only-url" || snap.Size != "2048x2048" {
 		t.Fatalf("next turn = %+v", snap)
@@ -33,11 +33,11 @@ func TestImageGenerationLifecycleInjectedMessagesKeepTheBudget(t *testing.T) {
 	if got := f.run(t, "tu_1", `{"prompt":"海报"}`); got.Status != "succeeded" {
 		t.Fatalf("first = %+v", got)
 	}
-	// An injected "再生成一张" stays in the same turn: no refreeze, no new budget.
+	// 注入的「再生成一张」仍属同一回合：不重冻、不加预算。
 	if got := f.run(t, "tu_2", `{"prompt":"再来一张"}`); got.Code != "turn_budget_exhausted" {
 		t.Fatalf("injected request = %+v", got)
 	}
-	// A rebuilt tool instance (or restarted process) for the same turn is refused by the durable marker.
+	// 同回合重建工具实例（或进程重启）须被持久回合标记拒绝。
 	other := f.app.newImageGenerationTool(f.state)
 	r, _ := other.Run(context.Background(), json.RawMessage(`{"prompt":"再来一张"}`), &tool.Context{SessionID: f.id, MessageID: "q", ToolUseID: "tu_3"}, nil)
 	if !r.IsError || f.bridge.posts.Load() != 1 {

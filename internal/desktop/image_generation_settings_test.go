@@ -9,7 +9,7 @@ import (
 	appwire "github.com/wt68/runcode/internal/protocol"
 )
 
-// imageGenSettingsApp serves the fixture catalog and logs in as sub.
+// imageGenSettingsApp：提供 fixture 目录并以 sub 登录。
 func imageGenSettingsApp(t *testing.T, sub string) *App {
 	t.Helper()
 	isolateConfigDir(t)
@@ -124,7 +124,7 @@ func TestImageGenerationSettingsFailurePreservesConfirmedValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The destination becomes a directory: atomic replacement fails on every platform.
+	// 目标路径变成目录：各平台上原子替换都会失败。
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
 	}

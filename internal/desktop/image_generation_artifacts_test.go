@@ -33,7 +33,7 @@ func fixturePNG(t *testing.T) []byte {
 	return data
 }
 
-// pngHeaderOnly is a PNG signature plus a valid IHDR claiming w×h pixels.
+// pngHeaderOnly：PNG 签名 + 声明 w×h 的合法 IHDR。
 func pngHeaderOnly(w, h uint32) []byte {
 	var ihdr bytes.Buffer
 	_ = binary.Write(&ihdr, binary.BigEndian, w)
@@ -48,7 +48,7 @@ func pngHeaderOnly(w, h uint32) []byte {
 	return out.Bytes()
 }
 
-// webpLossless is a minimal VP8L header for w×h (decoding the pixels is not needed).
+// webpLossless：w×h 的最小 VP8L 头（不必解码像素）。
 func webpLossless(w, h int) []byte {
 	bits := uint32(w-1) | uint32(h-1)<<14
 	payload := append([]byte{0x2f}, byte(bits), byte(bits>>8), byte(bits>>16), byte(bits>>24))
@@ -82,7 +82,7 @@ func b64Item(data []byte) imageGenerationWireImage {
 	return imageGenerationWireImage{B64JSON: base64.StdEncoding.EncodeToString(data)}
 }
 
-// allowLoopbackDownloads lets the test server (127.0.0.1) stand in for a public image host.
+// allowLoopbackDownloads：让测试服 127.0.0.1 冒充公开图床。
 func allowLoopbackDownloads(t *testing.T) {
 	t.Helper()
 	restore := imageDownloadAddrAllowed

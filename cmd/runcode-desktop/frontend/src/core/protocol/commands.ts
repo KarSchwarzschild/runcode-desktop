@@ -187,7 +187,7 @@ export function forkQuestion(ref: QuestionReference): Promise<ResumedSession> {
   return call<ResumedSession>('ForkQuestion', ref);
 }
 
-// GetImageGenerationSettings returns the current account's saved default for tenantID.
+// GetImageGenerationSettings 返回当前账号在 tenantID 下已保存的默认；从不访问 Bridge。
 // kind: query
 export function getImageGenerationSettings(tenantID: string): Promise<ImageGenerationSettings> {
   return call<ImageGenerationSettings>('GetImageGenerationSettings', tenantID);
@@ -211,7 +211,7 @@ export function getQuestion(ref: QuestionReference): Promise<QuestionDraft> {
   return call<QuestionDraft>('GetQuestion', ref);
 }
 
-// GetSessionImageGeneration reads the session's confirmed switch.
+// GetSessionImageGeneration 读取会话已确认的开关。记录损坏只禁用生图，普通聊天不受影响。
 // kind: query
 export function getSessionImageGeneration(sessionID: string): Promise<SessionImageGenerationView> {
   return call<SessionImageGenerationView>('GetSessionImageGeneration', sessionID);
@@ -337,7 +337,7 @@ export function listFiles(): Promise<string[] | null> {
   return call<string[] | null>('ListFiles');
 }
 
-// ListImageGenerationModels lists the image models the current account may see under tenantID.
+// ListImageGenerationModels 列出当前账号在 tenantID 下可见的生图模型。 查询失败必须是错误，绝不能用空目录冒充「没有模型」。
 // kind: query
 export function listImageGenerationModels(tenantID: string): Promise<ImageGenerationCatalog> {
   return call<ImageGenerationCatalog>('ListImageGenerationModels', tenantID);
@@ -667,7 +667,7 @@ export function saveCustomModel(req: SaveCustomModelRequest): Promise<CustomMode
   return call<CustomModel[] | null>('SaveCustomModel', req);
 }
 
-// SaveImageGenerationSettings replaces the scope's default after checking the model against the live catalog.
+// SaveImageGenerationSettings 对照活目录校验后替换作用域默认。 重复提交已确认目标原样返回；目标变了但修订号过期则拒绝。
 // kind: idempotent-set
 export function saveImageGenerationSettings(req: SaveImageGenerationSettingsRequest): Promise<ImageGenerationSettings> {
   return call<ImageGenerationSettings>('SaveImageGenerationSettings', req);
@@ -799,7 +799,7 @@ export function setReasoningScenario(sessionID: string, scenario: string): Promi
   return call<ConversationInfo>('SetReasoningScenario', sessionID, scenario);
 }
 
-// SetSessionImageGeneration changes the session's switch for the next turn.
+// SetSessionImageGeneration 改写下一回合的会话开关。回合进行中拒绝：当前回合 继续用冻结快照，开关变更本来也只在之后生效。
 // kind: idempotent-set
 export function setSessionImageGeneration(req: SetSessionImageGenerationRequest): Promise<SessionImageGenerationView> {
   return call<SessionImageGenerationView>('SetSessionImageGeneration', req);

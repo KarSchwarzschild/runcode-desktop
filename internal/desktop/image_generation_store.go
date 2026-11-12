@@ -26,8 +26,7 @@ const (
 	imageGenerationSidecarLimit = 64 * 1024
 )
 
-// validImageGenerationID accepts the opaque ids used as file names here
-// (session, generation and turn ids): letters, digits, '_' and '-'.
+// validImageGenerationID 接受此处用作文件名的不透明 id（会话／generation／回合）：字母数字与 _-。
 func validImageGenerationID(id string) bool {
 	if id == "" || len(id) > 128 {
 		return false
@@ -46,9 +45,8 @@ func newImageGenerationID(prefix string) string {
 	return prefix + hex.EncodeToString(b[:])
 }
 
-// readRootedFile reads rel under workspace. exists=false is a genuinely absent
-// file; an ancestor that is not a directory is a broken store, not absence
-// (Windows reports ENOENT in that case).
+// readRootedFile 读取工作区下的 rel。exists=false 才是文件确实不存在；
+// 祖先不是目录算存储损坏而非缺失（Windows 此时也会报 ENOENT）。
 func readRootedFile(workspace, rel string, limit int64) (data []byte, exists bool, err error) {
 	if workspace == "" {
 		return nil, false, errImageGenerationStorage
@@ -84,8 +82,7 @@ func readRootedFile(workspace, rel string, limit int64) (data []byte, exists boo
 	return data, true, nil
 }
 
-// writeRootedFileAtomic replaces rel with data durably: a reader sees either
-// the previous or the new content, never a torn file.
+// writeRootedFileAtomic 持久替换 rel：读者只见旧内容或新内容，不会读到半截。
 func writeRootedFileAtomic(workspace, rel string, data []byte) error {
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
@@ -113,7 +110,7 @@ func writeRootedFileAtomic(workspace, rel string, data []byte) error {
 	return nil
 }
 
-// imageGenerationSwitch is one identity partition's session switch.
+// imageGenerationSwitch 是某一身份分区下的会话开关。
 type imageGenerationSwitch struct {
 	Enabled  bool  `json:"enabled"`
 	Revision int64 `json:"revision"`
@@ -154,8 +151,7 @@ func readImageGenerationSession(workspace, id string) (imageGenerationSessionDis
 	return decoded, nil
 }
 
-// createRootedFileExclusive creates rel with data and syncs it; an existing
-// file is reported as os.ErrExist and never replaced.
+// createRootedFileExclusive 排他创建 rel 并 sync；已存在则回报 os.ErrExist，绝不覆盖。
 func createRootedFileExclusive(workspace, rel string, data []byte) error {
 	root, err := os.OpenRoot(workspace)
 	if err != nil {
@@ -229,9 +225,8 @@ func finalImageGenerationStatus(s string) bool {
 	return false
 }
 
-// finalized records result as this generation's outcome. The accounting
-// observation stays whatever a person recorded: a file or HTTP outcome never
-// upgrades or overwrites it.
+// finalized 把 result 记为本 generation 的结局。人工记下的记账观察保持不动：
+// 文件或 HTTP 结果永不升级／覆盖它。
 func (rec imageGenerationLedger) finalized(result appwire.ImageGenerationResult) imageGenerationLedger {
 	rec.Status = result.Status
 	if result.RequestID != "" {
@@ -245,9 +240,8 @@ func (rec imageGenerationLedger) finalized(result appwire.ImageGenerationResult)
 	return rec
 }
 
-// effectiveResult is what the record means now. A submission without a final
-// outcome (the process stopped, or it is still being written) is unknown: it
-// may have been generated and charged, and it is never resubmitted.
+// effectiveResult 是记录此刻的含义。已提交却无终态（进程中断或仍在写）视为
+// unknown：可能已生成并计费，绝不再提交。
 func (rec imageGenerationLedger) effectiveResult() appwire.ImageGenerationResult {
 	var out appwire.ImageGenerationResult
 	if finalImageGenerationStatus(rec.Status) && rec.Result != nil {
@@ -286,7 +280,7 @@ func imageGenerationLedgerPath(sessionID, generationID string) (string, error) {
 	return filepath.Join(dir, generationID+".json"), nil
 }
 
-// reserveImageGenerationTurn durably claims the turn's single attempt.
+// reserveImageGenerationTurn 持久占用本回合唯一一次尝试。
 func reserveImageGenerationTurn(workspace, sessionID, turnID, generationID string) error {
 	if !validImageGenerationID(sessionID) || !validImageGenerationID(turnID) || !validImageGenerationID(generationID) {
 		return errImageGenerationStorage
@@ -339,8 +333,7 @@ func readImageGenerationLedger(workspace, sessionID, generationID string) (image
 	return decodeImageGenerationLedger(data, sessionID, generationID)
 }
 
-// listImageGenerationLedgers returns every record of a session. A damaged
-// record is an error, not something to skip silently.
+// listImageGenerationLedgers 返回会话全部账本记录。损坏是错误，不能悄悄跳过。
 func listImageGenerationLedgers(workspace, sessionID string) ([]imageGenerationLedger, error) {
 	dir, err := imageGenerationLedgerDir(sessionID)
 	if err != nil {

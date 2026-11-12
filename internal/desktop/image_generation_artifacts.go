@@ -45,7 +45,7 @@ func publicImageAddr(ip net.IP) bool {
 		ip.IsLinkLocalMulticast() || ip.IsInterfaceLocalMulticast() || ip.IsMulticast() {
 		return false
 	}
-	// Carrier-grade NAT shared space is not a public image host either.
+	// 运营商级 NAT 共享段也不是公开图床。
 	if v4 := ip.To4(); v4 != nil && v4[0] == 100 && v4[1]&0xc0 == 64 {
 		return false
 	}
@@ -64,7 +64,7 @@ func imageDownloadClient() *http.Client {
 		},
 	}
 	transport := &http.Transport{
-		// Direct only: a proxy would hide the real destination from the check above.
+		// 只直连：代理会让上面的目标检查看不到真实地址。
 		Proxy:                 nil,
 		DialContext:           dialer.DialContext,
 		TLSHandshakeTimeout:   15 * time.Second,
@@ -123,8 +123,7 @@ func decodeGeneratedBase64(s string) ([]byte, error) {
 	return data, nil
 }
 
-// detectGeneratedImage identifies the real format from the bytes, never from
-// a name or declared MIME type.
+// detectGeneratedImage 按真实文件头识别格式，不信文件名或声明的 MIME。
 func detectGeneratedImage(data []byte) (ext, mime string, width, height int, err error) {
 	switch {
 	case bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")):
@@ -154,7 +153,7 @@ func detectGeneratedImage(data []byte) (ext, mime string, width, height int, err
 	return ext, mime, width, height, nil
 }
 
-// webpSize reads the canvas size from the first VP8/VP8L/VP8X chunk.
+// webpSize 从首个 VP8／VP8L／VP8X 块读取画布尺寸。
 func webpSize(data []byte) (int, int, error) {
 	bad := errors.New("WebP 图片无效")
 	if len(data) < 20 {
@@ -184,8 +183,7 @@ func webpSize(data []byte) (int, int, error) {
 	return 0, 0, bad
 }
 
-// saveGeneratedImage validates one generated result and writes it into a new
-// directory under the workspace. It never overwrites an existing file.
+// saveGeneratedImage 校验一张生成结果并写入工作区新目录；从不覆盖已有文件。
 func saveGeneratedImage(ctx context.Context, workspace, generationID string, item imageGenerationWireImage) (appwire.ImageGenerationArtifact, error) {
 	if !validImageGenerationID(generationID) || workspace == "" {
 		return appwire.ImageGenerationArtifact{}, errImageGenerationSave

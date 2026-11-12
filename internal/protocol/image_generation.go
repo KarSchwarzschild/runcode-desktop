@@ -5,9 +5,8 @@ package protocol
 // 状态、错误码与记账观察的取值集合见设计 10.1/6.4，由宿主私有常量与前端
 // core/image-generation.ts 各自声明。
 
-// ImageGenerationProfile is the gateway-declared parameter profile of one
-// image model. Available is false for combinations not yet verified, with
-// UnavailableReason saying why.
+// ImageGenerationProfile 是网关声明的单模型参数档案。
+// Available=false 表示组合尚未 verified，UnavailableReason 说明原因。
 type ImageGenerationProfile struct {
 	Available         bool     `json:"available"`
 	SupportedSizes    []string `json:"supportedSizes"`
@@ -16,21 +15,21 @@ type ImageGenerationProfile struct {
 	UnavailableReason string   `json:"unavailableReason,omitempty"`
 }
 
-// ImageGenerationModel is one candidate in the settings catalog.
+// ImageGenerationModel 是设置页目录中的一条候选。
 type ImageGenerationModel struct {
 	Model    ModelReference         `json:"model"`
 	Provider string                 `json:"provider"`
 	Profile  ImageGenerationProfile `json:"profile"`
 }
 
-// ImageGenerationCatalog lists the image models of one account/Bridge/tenant
-// scope. An empty Models is a real "no models"; a failed lookup is an error.
+// ImageGenerationCatalog 列出某一账号／Bridge／租户作用域下的生图模型。
+// Models 为空表示「确实没有」；查询失败必须是错误，不能冒充空目录。
 type ImageGenerationCatalog struct {
 	ScopeID string                 `json:"scopeId"`
 	Models  []ImageGenerationModel `json:"models"`
 }
 
-// ImageGenerationSettings is the saved default of one scope.
+// ImageGenerationSettings 是某一作用域已保存的默认项。
 type ImageGenerationSettings struct {
 	ScopeID      string          `json:"scopeId"`
 	Revision     int64           `json:"revision"`
@@ -38,9 +37,8 @@ type ImageGenerationSettings struct {
 	DefaultSize  string          `json:"defaultSize"`
 }
 
-// SaveImageGenerationSettingsRequest replaces one scope's default. A nil
-// DefaultModel clears it. It carries no Bridge or account field: the host
-// derives the scope from the current identity and rejects a stale ScopeID.
+// SaveImageGenerationSettingsRequest 替换某一作用域的默认。DefaultModel 为 nil
+// 表示清除。不带 Bridge／账号字段：宿主从当前身份推导作用域，并拒绝过期 ScopeID。
 type SaveImageGenerationSettingsRequest struct {
 	TenantID         string          `json:"tenantId"`
 	ScopeID          string          `json:"scopeId"`
@@ -49,9 +47,8 @@ type SaveImageGenerationSettingsRequest struct {
 	DefaultSize      string          `json:"defaultSize"`
 }
 
-// SessionImageGenerationView is one session's switch. Enabled is what the user
-// chose; Available says whether the next turn can actually generate, with
-// Reason when it cannot.
+// SessionImageGenerationView 是单会话开关视图。Enabled 是用户选择；Available
+// 表示下一回合能否真正生成，不能时带 Reason。
 type SessionImageGenerationView struct {
 	SessionID string          `json:"sessionId"`
 	Enabled   bool            `json:"enabled"`
@@ -62,14 +59,14 @@ type SessionImageGenerationView struct {
 	Size      string          `json:"size,omitempty"`
 }
 
-// SetSessionImageGenerationRequest changes one session's switch with a revision check.
+// SetSessionImageGenerationRequest 带修订号检查地改写单会话开关。
 type SetSessionImageGenerationRequest struct {
 	SessionID        string `json:"sessionId"`
 	Enabled          bool   `json:"enabled"`
 	ExpectedRevision int64  `json:"expectedRevision"`
 }
 
-// ImageGenerationArtifact is one saved image, addressed relative to the workspace.
+// ImageGenerationArtifact 是一张已保存图片，路径相对工作区。
 type ImageGenerationArtifact struct {
 	Path     string `json:"path"`
 	MIMEType string `json:"mimeType"`
@@ -78,12 +75,10 @@ type ImageGenerationArtifact struct {
 	Height   int    `json:"height"`
 }
 
-// ImageGenerationResult is the bounded result shared by the model's tool
-// content, the live tool event and history replay. It never carries image
-// bytes, Base64, signed URLs or credentials. Status is one of succeeded /
-// failed / unknown / cancelled / save_failed; AccountingStatus is one of
-// verified / unverified / ambiguous / observed_mismatch and is independent of
-// Status — an automatic result is always unverified.
+// ImageGenerationResult 是模型工具正文、现场工具事件与历史回放共用的有界结果。
+// 从不携带图片字节、Base64、签名 URL 或凭据。Status 为 succeeded／failed／
+// unknown／cancelled／save_failed；AccountingStatus 为 verified／unverified／
+// ambiguous／observed_mismatch，与 Status 独立——自动路径一律 unverified。
 type ImageGenerationResult struct {
 	Version          int                       `json:"version"`
 	GenerationID     string                    `json:"generationId"`

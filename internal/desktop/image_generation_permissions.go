@@ -11,16 +11,15 @@ import (
 	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 )
 
-// imageGenerationResolver only adds display text to image_generate approvals:
-// which model, tenant, size and prompt this paid call is frozen to. The
-// authorization target itself is the tool's AuthorizationBinding; this layer
-// never changes the action's identity or class.
+// imageGenerationResolver 只给 image_generate 审批补展示文案：本次付费调用冻结到
+// 哪个模型／租户／尺寸／提示词。授权目标本身仍是工具的 AuthorizationBinding；
+// 本层绝不改动 action 的身份或分类。
 type imageGenerationResolver struct {
 	inner permissions.Resolver
 	state func(sessionID string) *imageGenerationTurnState
 }
 
-// Resolve implements permissions.Resolver.
+// Resolve 实现 permissions.Resolver。
 func (r imageGenerationResolver) Resolve(ctx context.Context, req permissions.ResolveRequest) (permissions.Action, error) {
 	action, err := r.inner.Resolve(ctx, req)
 	if err != nil || req.ToolName != imagegentool.Name || r.state == nil || req.Context == nil {

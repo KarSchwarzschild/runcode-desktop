@@ -57,8 +57,7 @@ func TestImageGenerationReplayMergesLedgerByToolUseID(t *testing.T) {
 
 func TestImageGenerationReplayRecoversUnwrittenToolUnderOriginalQuestion(t *testing.T) {
 	ws := t.TempDir()
-	// The image was saved and the ledger finalized, but the process stopped before
-	// the tool result reached history.
+	// 图已落盘且账本已终态，但进程在工具结果写入历史前中断——回放须按原提问补回。
 	writeReplayLedger(t, ws, "sess_1", "q_1", "tu_1", "gen_1", "succeeded", "")
 	writeReplayLedger(t, ws, "sess_1", "q_2", "tu_2", "gen_2", "submitted", "")
 	blocks := []ResumedBlock{

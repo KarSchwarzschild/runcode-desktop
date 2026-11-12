@@ -16,8 +16,7 @@ import (
 
 type ImageGenerationProfile = appwire.ImageGenerationProfile
 
-// Capability values a catalog entry may declare. A model with image_generation
-// but without chat must never be offered for any text purpose.
+// 目录条目可声明的能力。仅有 image_generation、没有 chat 的模型绝不可进入任何文本用途。
 const (
 	capabilityChat            = "chat"
 	capabilityImageGeneration = "image_generation"
@@ -64,10 +63,8 @@ func parseImageSize(size string) (int, int, bool) {
 	return width, height, width*height <= imageGenerationMaxPixels
 }
 
-// normalizeImageGenerationProfile copies a declared profile and marks it
-// unavailable when it cannot be used safely: a selectable profile must name
-// its sizes, a default among them, and only response formats this client
-// can store.
+// normalizeImageGenerationProfile 复制声明档案；无法安全使用时标为不可选：
+// 可选档案必须列出尺寸、其中的默认值，且响应格式只能是本客户端能落盘的那些。
 func normalizeImageGenerationProfile(p *ImageGenerationProfile) ImageGenerationProfile {
 	if p == nil {
 		return ImageGenerationProfile{SupportedSizes: []string{}, ResponseFormats: []string{}, UnavailableReason: "模型目录未提供生图参数，暂不可用"}
@@ -115,8 +112,7 @@ func normalizeImageGenerationProfile(p *ImageGenerationProfile) ImageGenerationP
 	return out
 }
 
-// imageGenerationCandidates lists every declared image model of the catalog,
-// pinned to the current Bridge and the given tenant, in catalog order.
+// imageGenerationCandidates 按目录顺序列出全部声明的生图模型，钉在当前 Bridge 与给定租户。
 func imageGenerationCandidates(models []PassportModel, tenantID string) []appwire.ImageGenerationModel {
 	out := []appwire.ImageGenerationModel{}
 	seen := map[string]bool{}
@@ -142,8 +138,7 @@ func (c modelCatalog) imageGenerationModels() []PassportModel {
 	return out
 }
 
-// imageGenerationAccount is the stable account fingerprint that partitions
-// image generation state on disk, plus the in-memory login epoch.
+// imageGenerationAccount 返回落盘分区用的稳定账号指纹，以及内存中的登录代际。
 func (a *App) imageGenerationAccount() (account, epoch string, err error) {
 	if a.tokens == nil || !a.tokens.LoggedIn() {
 		return "", "", errImageGenerationLogin
@@ -162,15 +157,13 @@ func imageGenerationBridge() string {
 	return strings.TrimRight(passportConfig().BridgeBaseURL, "/")
 }
 
-// imageGenerationScope partitions settings and session switches by account,
-// Bridge and tenant: switching tenant or account never reuses another
-// partition's paid model choice.
+// imageGenerationScope 按账号／Bridge／租户分区设置与会话开关：
+// 切租户或换账号绝不复用另一分区的付费模型选择。
 func imageGenerationScope(account, bridge, tenantID string) string {
 	return digestVision([]string{imageGenerationScopeVersion, account, strings.TrimRight(bridge, "/"), strings.TrimSpace(tenantID)})
 }
 
-// freshImageGenerationCatalog always asks the Bridge, so a manual refresh and
-// the pre-submit check never answer from a cache entry.
+// freshImageGenerationCatalog 始终向 Bridge 取目录，手动刷新与提交前复核都不读缓存条目。
 func (a *App) freshImageGenerationCatalog(ctx context.Context, tenantID, actor string) (modelCatalog, error) {
 	scope := platformModelRef(tenantID, "")
 	if _, err := a.passportModelsContext(ctx, tenantID); err != nil {
@@ -188,8 +181,8 @@ func (a *App) freshImageGenerationCatalog(ctx context.Context, tenantID, actor s
 	return entry, nil
 }
 
-// ListImageGenerationModels lists the image models the current account may
-// see under tenantID. A failed lookup is an error, never an empty catalog.
+// ListImageGenerationModels 列出当前账号在 tenantID 下可见的生图模型。
+// 查询失败必须是错误，绝不能用空目录冒充「没有模型」。
 func (a *App) ListImageGenerationModels(tenantID string) (appwire.ImageGenerationCatalog, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	account, _, err := a.imageGenerationAccount()

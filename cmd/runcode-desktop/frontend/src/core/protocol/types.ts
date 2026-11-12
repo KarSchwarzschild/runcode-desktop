@@ -220,7 +220,7 @@ export interface ApprovalSummary {
   policyRule?: string;
 }
 
-// Mirrors protocol.ArtifactReference. ArtifactReference is a bounded, session-instance-bound file capability.
+// Mirrors protocol.ArtifactReference. ArtifactReference 是有界、绑定会话实例的文件能力句柄。
 export interface ArtifactReference {
   reference: string;
   sessionId: string;
@@ -333,12 +333,12 @@ export interface CustomModel {
   apiKeyProtected?: string;
 }
 
-// Mirrors protocol.DirectoryAccessChanged. DirectoryAccessChanged invalidates the directory view for one workspace.
+// Mirrors protocol.DirectoryAccessChanged. DirectoryAccessChanged 使某一工作区的目录视图失效。
 export interface DirectoryAccessChanged {
   workspace: string;
 }
 
-// Mirrors protocol.DirectoryAccessGrant. DirectoryAccessGrant is one scoped directory allow rule.
+// Mirrors protocol.DirectoryAccessGrant. DirectoryAccessGrant 是一条作用域内的目录允许规则。
 export interface DirectoryAccessGrant {
   directory: string;
   access: string;
@@ -346,7 +346,7 @@ export interface DirectoryAccessGrant {
   coveredBy: string[] | null;
 }
 
-// Mirrors protocol.DirectoryAccessRequest. DirectoryAccessRequest names the calling session, never the focus.
+// Mirrors protocol.DirectoryAccessRequest. DirectoryAccessRequest 指名调用会话，从不猜焦点会话。
 export interface DirectoryAccessRequest {
   confirmRoot?: boolean;
   sessionId: string;
@@ -355,7 +355,7 @@ export interface DirectoryAccessRequest {
   scope: string;
 }
 
-// Mirrors protocol.DirectoryAccessView. DirectoryAccessView lists directory rules for a named session.
+// Mirrors protocol.DirectoryAccessView. DirectoryAccessView 列出指定会话的目录规则。
 export interface DirectoryAccessView {
   sessionId: string;
   workspace: string;
@@ -414,7 +414,7 @@ export interface HarmAutoAllow {
   count: number;
 }
 
-// Mirrors protocol.ImageGenerationArtifact. ImageGenerationArtifact is one saved image, addressed relative to the workspace.
+// Mirrors protocol.ImageGenerationArtifact. ImageGenerationArtifact 是一张已保存图片，路径相对工作区。
 export interface ImageGenerationArtifact {
   path: string;
   mimeType: string;
@@ -423,20 +423,20 @@ export interface ImageGenerationArtifact {
   height: number;
 }
 
-// Mirrors protocol.ImageGenerationCatalog. ImageGenerationCatalog lists the image models of one account/Bridge/tenant scope.
+// Mirrors protocol.ImageGenerationCatalog. ImageGenerationCatalog 列出某一账号／Bridge／租户作用域下的生图模型。 Models 为空表示「确实没有」；查询失败必须是错误，不能冒充空目录。
 export interface ImageGenerationCatalog {
   scopeId: string;
   models: ImageGenerationModel[] | null;
 }
 
-// Mirrors protocol.ImageGenerationModel. ImageGenerationModel is one candidate in the settings catalog.
+// Mirrors protocol.ImageGenerationModel. ImageGenerationModel 是设置页目录中的一条候选。
 export interface ImageGenerationModel {
   model: ModelReference;
   provider: string;
   profile: ImageGenerationProfile;
 }
 
-// Mirrors protocol.ImageGenerationProfile. ImageGenerationProfile is the gateway-declared parameter profile of one image model.
+// Mirrors protocol.ImageGenerationProfile. ImageGenerationProfile 是网关声明的单模型参数档案。 Available=false 表示组合尚未 verified，UnavailableReason 说明原因。
 export interface ImageGenerationProfile {
   available: boolean;
   supportedSizes: string[] | null;
@@ -445,7 +445,7 @@ export interface ImageGenerationProfile {
   unavailableReason?: string;
 }
 
-// Mirrors protocol.ImageGenerationResult. ImageGenerationResult is the bounded result shared by the model's tool content, the live tool event and history replay.
+// Mirrors protocol.ImageGenerationResult. ImageGenerationResult 是模型工具正文、现场工具事件与历史回放共用的有界结果。 从不携带图片字节、Base64、签名 URL 或凭据。Status 为 succeeded／failed／ unknown／cancelled／save_failed；AccountingStatus 为 verified／unverified／ ambiguous／observed_mismatch，与 Status 独立——自动路径一律 unverified。
 export interface ImageGenerationResult {
   version: number;
   generationId: string;
@@ -459,7 +459,7 @@ export interface ImageGenerationResult {
   accountingStatus: string;
 }
 
-// Mirrors protocol.ImageGenerationSettings. ImageGenerationSettings is the saved default of one scope.
+// Mirrors protocol.ImageGenerationSettings. ImageGenerationSettings 是某一作用域已保存的默认项。
 export interface ImageGenerationSettings {
   scopeId: string;
   revision: number;
@@ -745,7 +745,7 @@ export interface PlatformImageCapability {
   supportsImages: boolean;
 }
 
-// Mirrors protocol.PreviewLifecycle. PreviewLifecycle synchronizes desktop file-preview caches with session-instance rebuilds.
+// Mirrors protocol.PreviewLifecycle. PreviewLifecycle 让桌面文件预览缓存与会话实例重建对齐。 Phase 为 invalidating／ready／closed。ready 携带新的 host generation； invalidating／closed 可将 Generation 留空。不覆盖聊天内静态 HTML 预览预算。
 export interface PreviewLifecycle {
   sessionId: string;
   phase: string;
@@ -1005,7 +1005,7 @@ export interface SaveCustomModelRequest {
   clearAPIKey?: boolean;
 }
 
-// Mirrors protocol.SaveImageGenerationSettingsRequest. SaveImageGenerationSettingsRequest replaces one scope's default.
+// Mirrors protocol.SaveImageGenerationSettingsRequest. SaveImageGenerationSettingsRequest 替换某一作用域的默认。DefaultModel 为 nil 表示清除。不带 Bridge／账号字段：宿主从当前身份推导作用域，并拒绝过期 ScopeID。
 export interface SaveImageGenerationSettingsRequest {
   tenantId: string;
   scopeId: string;
@@ -1041,7 +1041,7 @@ export interface SecretStorage {
   fix?: string;
 }
 
-// Mirrors protocol.SessionImageGenerationView. SessionImageGenerationView is one session's switch.
+// Mirrors protocol.SessionImageGenerationView. SessionImageGenerationView 是单会话开关视图。Enabled 是用户选择；Available 表示下一回合能否真正生成，不能时带 Reason。
 export interface SessionImageGenerationView {
   sessionId: string;
   enabled: boolean;
@@ -1098,7 +1098,7 @@ export interface SetPlatformImageCapabilityRequest {
   supportsImages?: boolean;
 }
 
-// Mirrors protocol.SetSessionImageGenerationRequest. SetSessionImageGenerationRequest changes one session's switch with a revision check.
+// Mirrors protocol.SetSessionImageGenerationRequest. SetSessionImageGenerationRequest 带修订号检查地改写单会话开关。
 export interface SetSessionImageGenerationRequest {
   sessionId: string;
   enabled: boolean;

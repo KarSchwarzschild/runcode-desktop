@@ -21,8 +21,8 @@ import (
 
 const imageGenerationOALocked = "本会话读取过 OA 数据，不能把对话内容发送给生图模型；本次未生成图片"
 
-// imageGenerationTools registers image_generate for a Passport main session.
-// ExtraTools never reach sub-agents, so they structurally cannot generate.
+// imageGenerationTools 为合格通行证主会话注册 image_generate。
+// ExtraTools 不会注入子代理，子代理结构上无法生图。
 func (a *App) imageGenerationTools(cfg *engine.Config, sessionID, generation string) []tool.Tool {
 	if !usingPassport(cfg) {
 		return nil
@@ -48,9 +48,8 @@ func imageGenerationEndpoint(snap imageGenerationSnapshot) string {
 	return snap.Bridge + tenantPathPrefix(snap.Tenant) + "/v1/Images/Generations"
 }
 
-// imageGenerationToolSnapshot is the tool's view of the frozen turn.
-// BindingIdentity pins approvals to everything that decides where the paid
-// request goes; the tool adds the effective size.
+// imageGenerationToolSnapshot 是工具看到的冻结回合视图。
+// BindingIdentity 钉死付费请求去向的全部决策因子；工具再叠加上生效尺寸。
 func (a *App) imageGenerationToolSnapshot(state *imageGenerationTurnState) imagegentool.Snapshot {
 	s := state.snapshot()
 	out := imagegentool.Snapshot{
@@ -75,8 +74,8 @@ func imageGenerationRejected(snap imageGenerationSnapshot, size, code, message s
 	return appwire.ImageGenerationResult{Version: 1, Status: "failed", Code: code, Model: snap.Model, Size: size, Images: []appwire.ImageGenerationArtifact{}, Message: message, AccountingStatus: "unverified"}
 }
 
-// checkImageGenerationLive confirms the frozen turn still belongs to the live
-// session instance and account. It holds App.mu only for the entry check.
+// checkImageGenerationLive 确认冻结回合仍归属当前会话实例与账号。
+// 仅在查 entry 时持 App.mu。
 func (a *App) checkImageGenerationLive(snap imageGenerationSnapshot, state *imageGenerationTurnState) (code string, err error) {
 	a.mu.Lock()
 	e := a.entryLocked(snap.SessionID)
@@ -95,7 +94,7 @@ func (a *App) checkImageGenerationLive(snap imageGenerationSnapshot, state *imag
 	return "", nil
 }
 
-// Generate implements imagegentool.Host.
+// Generate 实现 imagegentool.Host。
 func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input, meta imagegentool.CallMeta) (appwire.ImageGenerationResult, error) {
 	a, snap := h.app, h.state.snapshot()
 	if snap.TurnID != meta.TurnID || snap.SessionID != meta.SessionID || !snap.Available {
@@ -108,8 +107,7 @@ func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input
 		return imageGenerationRejected(snap, in.Size, "forbidden", imageGenerationOALocked), nil
 	}
 
-	// Authoritative check against the live catalog: a model withdrawn or a size
-	// dropped after approval is refused here, before anything is sent.
+	// 提交前对活目录做权威复核：审批后模型下线或尺寸收回，在此拒绝，零 POST。
 	checkCtx, cancel := context.WithTimeout(ctx, imageGenerationCatalogTimeout)
 	catalog, err := a.freshImageGenerationCatalog(checkCtx, snap.Tenant, a.visionAccountIdentity())
 	cancel()

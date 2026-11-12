@@ -20,8 +20,7 @@ import (
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 )
 
-// imageGenBridge is a fake Bridge: the fixture catalog (mutable) plus the
-// generation route answering with the b64 fixture.
+// imageGenBridge：假 Bridge——可变的 fixture 目录 + 以 b64 fixture 应答的生图路由。
 type imageGenBridge struct {
 	srv     *httptest.Server
 	catalog atomic.Value // []byte
@@ -90,8 +89,7 @@ type imageGenFlow struct {
 	tool   *imagegentool.Tool
 }
 
-// newImageGenFlow is a Passport session with image generation configured
-// (image-only-b64 @1024x1024) and enabled, its tool wired to the host.
+// newImageGenFlow：已配置并开启生图的通行证会话（image-only-b64 @1024x1024），工具接宿主。
 func newImageGenFlow(t *testing.T) *imageGenFlow {
 	t.Helper()
 	isolateConfigDir(t)

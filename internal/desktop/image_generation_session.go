@@ -19,14 +19,13 @@ import (
 
 const imageGenerationIneligibleReason = "仅平台通行证普通会话支持图片生成"
 
-// imageGenerationBinding is the identity a session's image generation state
-// belongs to. Account/Epoch come from the entry's immutable knowledge binding
-// (taken when the entry was published), never from whoever is logged in now.
+// imageGenerationBinding 是会话生图状态所属的身份分区。
+// Account／Epoch 来自 entry 发布时不可变的知识库绑定，不取「此刻谁登录」。
 type imageGenerationBinding struct {
 	Account, Epoch, Bridge, Tenant, Scope string
 }
 
-// imageGenerationSnapshot is frozen per independent turn.
+// imageGenerationSnapshot 按独立回合冻结一次。
 type imageGenerationSnapshot struct {
 	Enabled   bool
 	Available bool
@@ -47,7 +46,7 @@ type imageGenerationSnapshot struct {
 	ResponseFormat   string
 }
 
-// imageGenerationTurnState is one session instance's image generation state.
+// imageGenerationTurnState 是一个会话实例的生图状态。
 type imageGenerationTurnState struct {
 	mu         sync.Mutex
 	sessionID  string
@@ -74,8 +73,7 @@ func (s *imageGenerationTurnState) setSnapshot(snap imageGenerationSnapshot) {
 	s.snap = snap
 }
 
-// imageGenerationBindingOf returns the session's identity partition, or the
-// reason this session cannot use image generation at all.
+// imageGenerationBindingOf 返回会话的身份分区，或说明为何本会话根本不能生图。
 func (a *App) imageGenerationBindingOf(e *sessionEntry) (imageGenerationBinding, string) {
 	a.mu.Lock()
 	passport, account, epoch, tenant := e.passport, e.knowledge.Account, e.knowledge.Epoch, e.tenantID
@@ -94,15 +92,13 @@ func (a *App) imageGenerationBindingOf(e *sessionEntry) (imageGenerationBinding,
 	return imageGenerationBinding{Account: account, Epoch: epoch, Bridge: bridge, Tenant: tenant, Scope: imageGenerationScope(account, bridge, tenant)}, ""
 }
 
-// imageGenerationAccountCurrent reports whether the logged-in account is
-// still the one the session was bound to.
+// imageGenerationAccountCurrent 报告当前登录账号是否仍是会话绑定的那一个。
 func (a *App) imageGenerationAccountCurrent(b imageGenerationBinding) bool {
 	account, epoch, err := a.imageGenerationAccount()
 	return err == nil && account == b.Account && epoch == b.Epoch
 }
 
-// imageGenerationTarget resolves the scope's saved default for a session, or
-// why there is none.
+// imageGenerationTarget 解析会话作用域已保存的默认模型，或说明为何没有。
 func imageGenerationTarget(b imageGenerationBinding, cfg desktopConfig) (imageGenerationPreference, string) {
 	pref := imageGenerationPreferenceFor(cfg, b.Scope)
 	if pref.DefaultModel == nil {
@@ -140,8 +136,7 @@ func (a *App) sessionImageGenerationView(e *sessionEntry, b imageGenerationBindi
 	return view
 }
 
-// GetSessionImageGeneration reads the session's confirmed switch. A damaged
-// record disables image generation without failing ordinary chat.
+// GetSessionImageGeneration 读取会话已确认的开关。记录损坏只禁用生图，普通聊天不受影响。
 func (a *App) GetSessionImageGeneration(sessionID string) (appwire.SessionImageGenerationView, error) {
 	e, err := a.explicitImageGenerationEntry(sessionID)
 	if err != nil {
@@ -158,9 +153,8 @@ func (a *App) GetSessionImageGeneration(sessionID string) (appwire.SessionImageG
 	return a.sessionImageGenerationView(e, b, disk.Scopes[b.Scope], ""), nil
 }
 
-// SetSessionImageGeneration changes the session's switch for the next turn.
-// It is refused while a turn runs: that turn keeps its frozen snapshot, and a
-// changed switch would only take effect afterwards anyway.
+// SetSessionImageGeneration 改写下一回合的会话开关。回合进行中拒绝：当前回合
+// 继续用冻结快照，开关变更本来也只在之后生效。
 func (a *App) SetSessionImageGeneration(req appwire.SetSessionImageGenerationRequest) (appwire.SessionImageGenerationView, error) {
 	e, err := a.explicitImageGenerationEntry(req.SessionID)
 	if err != nil {
@@ -173,8 +167,7 @@ func (a *App) SetSessionImageGeneration(req appwire.SetSessionImageGenerationReq
 	if !a.imageGenerationAccountCurrent(b) {
 		return appwire.SessionImageGenerationView{}, wireError(errors.New("会话账号已变化，请重新打开会话"))
 	}
-	// questionMu keeps a submission from being prepared while the switch is
-	// being replaced; turnActive covers a turn already running.
+	// questionMu 避免换开关时同时准备提交；turnActive 覆盖已在跑的回合。
 	e.questionMu.Lock()
 	defer e.questionMu.Unlock()
 	a.mu.Lock()
@@ -205,9 +198,8 @@ func (a *App) SetSessionImageGeneration(req appwire.SetSessionImageGenerationReq
 	return a.sessionImageGenerationView(e, b, next, ""), nil
 }
 
-// freezeImageGenerationTurn reserves a fresh TurnID and freezes the target
-// for one independent turn. Only the turn-start hook calls it; injected
-// messages and resumed turns keep the snapshot they already have.
+// freezeImageGenerationTurn 为独立回合预留新 TurnID 并冻结目标。
+// 只由回合开始钩子调用；注入消息与恢复回合沿用已有快照。
 func (a *App) freezeImageGenerationTurn(e *sessionEntry) {
 	if e == nil {
 		return

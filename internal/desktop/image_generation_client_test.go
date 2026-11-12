@@ -37,8 +37,7 @@ type fixtureCases struct {
 	Cases               []fixtureCase `json:"cases"`
 }
 
-// imageGenClientApp is a logged-in app whose Bridge is srv; refreshes are
-// counted so a test can prove a sent POST is never refreshed-and-resent.
+// imageGenClientApp：已登录、Bridge 指向 srv；累计刷新次数，用于证明已发出的 POST 绝不以刷新令牌为由重发。
 func imageGenClientApp(t *testing.T, srv *httptest.Server) (*App, *atomic.Int32) {
 	t.Helper()
 	isolateConfigDir(t)
@@ -68,7 +67,7 @@ func serveFixtureCase(t *testing.T, c fixtureCase, posts *atomic.Int32) *httptes
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		posts.Add(1)
-		// Consuming the body lets the server notice the client hanging up.
+		// 读完正文，服务端才能察觉客户端挂起／断开。
 		_, _ = io.Copy(io.Discard, r.Body)
 		switch c.Bridge.Transport {
 		case "disconnect":

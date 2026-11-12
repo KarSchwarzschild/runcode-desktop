@@ -66,8 +66,8 @@ export function ChatPane({
   onGenerateMinutes?: (mark: RecordingMark) => void
 }) {
   const groups = groupBlocks(blocks)
-  // 内联预览高度晚于文本：只在用户本来贴底时跟随。贴底标记在此维护，不经 App.tsx
-  //（App 属 W5），避免与用量窗口抢同一文件。
+  // 内联预览高度晚于文本：只在用户本来贴底时跟随。贴底状态由 ChatPane 自己维护，
+  // 不经 App.tsx，避免与用量页等其它滚动容器抢同一份逻辑。
   const stick = useRef(true)
   const handleScroll = useCallback(() => {
     const el = scrollRef.current

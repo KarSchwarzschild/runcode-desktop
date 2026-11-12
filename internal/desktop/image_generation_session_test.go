@@ -11,8 +11,7 @@ import (
 	appwire "github.com/wt68/runcode/internal/protocol"
 )
 
-// imageGenSessionApp opens a Passport-bound ordinary session for sub/tenant
-// against the fixture catalog, on the fake engine build.
+// imageGenSessionApp：在假引擎上打开绑定通行证的普通会话（fixture 目录，sub／tenant）。
 func imageGenSessionApp(t *testing.T, sub, tenant string) (*App, string, string) {
 	t.Helper()
 	isolateConfigDir(t)

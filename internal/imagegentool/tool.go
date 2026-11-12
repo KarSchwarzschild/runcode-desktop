@@ -1,11 +1,9 @@
-// Package imagegentool implements the desktop's image_generate ExtraTool.
+// Package imagegentool 实现桌面侧 image_generate ExtraTool。
 //
-// The model supplies only a prompt and an optional size. Which model, tenant,
-// account and gateway are used is frozen by the host per independent turn
-// (Snapshot); the host callback performs the authoritative checks, the
-// durable submission ledger and the single POST. The tool itself enforces the
-// input contract, one generation attempt per turn and replay of a repeated
-// ToolUseID, and never turns a business failure into a retryable Go error.
+// 模型只能提交 prompt 与可选 size。实际使用的模型、租户、账号与网关由宿主按独立
+// 回合冻结（Snapshot）；宿主回调负责权威复核、持久化提交账本与唯一一次 POST。
+// 本工具只管输入契约、每回合一次生成预算、同 ToolUseID 回放，以及把业务失败写成
+// 结果而不是可重试的 Go error——unknown／取消／保存失败都不能换种方式再发。
 package imagegentool
 
 import (
@@ -23,20 +21,20 @@ import (
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 )
 
-// Input is the validated model input.
+// Input 是校验后的模型入参。
 type Input struct {
 	Prompt string
 	Size   string
 }
 
-// CallMeta is the trusted execution identity of one call.
+// CallMeta 是一次调用的可信执行身份（会话／消息／工具调用／回合）。
 type CallMeta struct {
 	SessionID, MessageID, ToolUseID, TurnID string
 }
 
-// Snapshot is the host's frozen view for the current independent turn.
-// BindingIdentity is the host's fingerprint of the destination (account
-// partition, Bridge, tenant, model, TurnID, revisions, session instance).
+// Snapshot 是宿主为本独立回合冻结的视图。
+// BindingIdentity 是目的地指纹：账号分区、Bridge、租户、模型、TurnID、修订号与
+// 会话实例；审批绑定钉在这上面，模型改参数不能复用旧授权。
 type Snapshot struct {
 	Enabled         bool
 	Available       bool
@@ -50,41 +48,40 @@ type Snapshot struct {
 	Endpoint        string
 }
 
-// Host performs the generation for the bound session. It returns a result
-// for every outcome it can describe; an error means it could not say what
-// happened.
+// Host 为绑定会话执行生图。凡能描述的结局都返回 Result；只有「说不清发生了什么」
+// 才返回 error（工具侧会落成 unknown，禁止重试）。
 type Host interface {
 	Generate(ctx context.Context, in Input, meta CallMeta) (protocol.ImageGenerationResult, error)
 }
 
-// Tool is the ExtraTools entry. Description reads the live SnapshotFunc so the
-// next turn's availability shows without rebuilding the engine session.
+// Tool 是 ExtraTools 条目。Description 读实时 SnapshotFunc，下一回合可用性变化时
+// 不必重建引擎会话。
 type Tool struct {
 	Host         Host
 	SnapshotFunc func() Snapshot
 
 	mu        sync.Mutex
-	spent     map[string]string      // turnID -> ToolUseID that used the turn's attempt
-	replay    map[string]tool.Result // turnID + "\x00" + ToolUseID -> result
-	known     map[string]bool        // turns present in turnOrder
+	spent     map[string]string      // turnID -> 已消耗该回合预算的 ToolUseID
+	replay    map[string]tool.Result // turnID + "\x00" + ToolUseID -> 回放结果
+	known     map[string]bool        // turnOrder 中已登记的回合
 	turnOrder []string
 }
 
-// Name implements tool.Tool.
+// Name 实现 tool.Tool。
 func (t *Tool) Name() string { return Name }
 
-// InputSchema implements tool.Tool.
+// InputSchema 实现 tool.Tool。
 func (t *Tool) InputSchema() tool.Schema { return InputSchema() }
 
-// IsConcurrencySafe is false: the per-turn attempt is serial.
+// IsConcurrencySafe 为 false：每回合预算串行，禁止并发生图。
 func (t *Tool) IsConcurrencySafe() bool { return false }
 
-// InputPresentation previews the prompt while the model composes the call.
+// InputPresentation 在模型拼装调用时预览 prompt（仅展示，不改授权）。
 func (t *Tool) InputPresentation() tool.InputPresentation {
 	return tool.InputPresentation{PrimaryField: "prompt"}
 }
 
-// Description implements tool.Tool.
+// Description 实现 tool.Tool。
 func (t *Tool) Description() string {
 	snap := t.snap()
 	var b strings.Builder
@@ -105,8 +102,8 @@ func (t *Tool) Description() string {
 	return b.String()
 }
 
-// AuthorizationBinding pins the approval to the frozen destination plus the
-// effective size, never to anything the model could vary to reuse an old grant.
+// AuthorizationBinding 把审批钉在冻结目的地 + 生效尺寸上；模型可变字段不得单独
+// 构成可复用旧授权的身份。
 func (t *Tool) AuthorizationBinding(raw json.RawMessage) (tool.AuthorizationBinding, error) {
 	snap := t.snap()
 	in, err := decodeInput(raw)
@@ -124,7 +121,7 @@ func (t *Tool) AuthorizationBinding(raw json.RawMessage) (tool.AuthorizationBind
 	}, nil
 }
 
-// Run implements tool.Tool.
+// Run 实现 tool.Tool。
 func (t *Tool) Run(ctx context.Context, raw json.RawMessage, tc *tool.Context, events chan<- tool.Event) (tool.Result, error) {
 	snap := t.snap()
 	if t.Host == nil {
@@ -180,8 +177,7 @@ func (t *Tool) snap() Snapshot {
 	return t.SnapshotFunc()
 }
 
-// rememberTurnLocked tracks turnID, forgetting the oldest turns beyond the
-// bound. Caller holds t.mu.
+// rememberTurnLocked 登记 turnID；超出上限时忘掉最旧回合的预算与回放。调用方持 t.mu。
 func (t *Tool) rememberTurnLocked(turnID string) {
 	if t.known == nil {
 		t.spent, t.replay, t.known = map[string]string{}, map[string]tool.Result{}, map[string]bool{}
@@ -204,8 +200,8 @@ func (t *Tool) rememberTurnLocked(turnID string) {
 	}
 }
 
-// finish normalizes the result, publishes it as tool event data for the UI and
-// returns the same bounded JSON to the model; replayKey caches it.
+// finish 规范化结果，经工具事件 Data 交给 UI，并把同一份有界 JSON 回给模型；
+// replayKey 非空时缓存供同 ToolUseID 回放。
 func (t *Tool) finish(replayKey *string, snap Snapshot, r protocol.ImageGenerationResult, events chan<- tool.Event) tool.Result {
 	r = normalize(r, snap)
 	text, _ := json.Marshal(r)
@@ -277,8 +273,7 @@ func statusMessage(status string) string {
 	}
 }
 
-// emit sends blocking: the engine's per-call forwarder drains its buffer until
-// Run returns, and the result event is what the chat card renders from.
+// emit 阻塞发送：引擎按调用转发的缓冲会排到 Run 返回；聊天卡片读的是结果事件 Data。
 func emit(events chan<- tool.Event, ev tool.Event) {
 	if events != nil {
 		events <- ev

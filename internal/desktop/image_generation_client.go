@@ -31,8 +31,8 @@ const (
 	imageGenerationMsgCancelled = "已停止等待；请求已发出，上游可能已生成或计费"
 )
 
-// bridgeImageErrors are the Bridge's own, provable rejections (design 6.3): the
-// request never reached Core. Each is accepted only with its declared status.
+// bridgeImageErrors 是 Bridge 自身可证明的拒绝（设计 6.3）：请求从未到达 Core。
+// 每条只在声明的 HTTP 状态下接受。
 var bridgeImageErrors = map[string]struct {
 	status  int
 	message string
@@ -59,16 +59,15 @@ type imageGenerationWireImage struct {
 	RevisedPrompt string `json:"revised_prompt,omitempty"`
 }
 
-// imageGenerationWireResponse mirrors Core's created/data[]. requestID comes
-// only from the Bridge's X-Request-ID header, never from the body.
+// imageGenerationWireResponse 对齐 Core 的 created／data[]。requestID 只来自
+// Bridge 的 X-Request-ID，绝不从正文猜。
 type imageGenerationWireResponse struct {
 	Created   int64                      `json:"created"`
 	Data      []imageGenerationWireImage `json:"data"`
 	requestID string
 }
 
-// imageGenerationFailure is a classified non-success outcome. Status is failed
-// only when the request provably produced nothing.
+// imageGenerationFailure 是已分类的非成功结局。仅当可证明请求未产出任何图时 Status=failed。
 type imageGenerationFailure struct {
 	Status    string
 	Code      string
@@ -78,7 +77,7 @@ type imageGenerationFailure struct {
 
 func (f *imageGenerationFailure) Error() string { return f.Message }
 
-// imageGenerationFailureOf classifies any error; an unclassified one is unknown.
+// imageGenerationFailureOf 分类任意错误；无法分类的一律 unknown。
 func imageGenerationFailureOf(err error) imageGenerationFailure {
 	if err == nil {
 		return imageGenerationFailure{}
@@ -104,18 +103,16 @@ func bridgeRequestID(h http.Header) string {
 
 func imageGenerationHTTPClient() *http.Client {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	// A fresh connection per generation: no reused-connection replay edge cases.
+	// 每次生图用新连接，避免复用连接带来的重放边角。
 	transport.DisableKeepAlives = true
 	return &http.Client{
 		Transport: transport,
-		// Never follow a redirect: it could carry the Bearer elsewhere, and a POST
-		// that was redirected is not a result we can confirm.
+		// 绝不跟随跳转：Bearer 可能被带到别处，且已跳转的 POST 无法确认结局。
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
 }
 
-// postImageGeneration sends exactly one generation request for the frozen
-// snapshot. The caller must have durably recorded the submission first.
+// postImageGeneration 为冻结快照发送恰好一次生图请求。调用方必须先持久化 submitted 账本。
 func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnapshot, in imagegentool.Input) (imageGenerationWireResponse, error) {
 	if snap.Account == "" || snap.Bridge == "" || snap.Model == "" || in.Size == "" || (snap.ResponseFormat != "url" && snap.ResponseFormat != "b64_json") {
 		return imageGenerationWireResponse{}, notSent("not_configured", "生图配置不完整，本次未生成图片")
@@ -160,15 +157,14 @@ func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnaps
 	}
 	var out imageGenerationWireResponse
 	if json.Unmarshal(raw, &out) != nil || len(out.Data) != 1 || (out.Data[0].URL == "" && out.Data[0].B64JSON == "") {
-		// 2xx without exactly one usable result may still have been generated and charged.
+		// 2xx 但不是恰好一张可用图：可能已生成并计费，只能记 unknown。
 		return imageGenerationWireResponse{}, &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID}
 	}
 	out.requestID = requestID
 	return out, nil
 }
 
-// interruptedOutcome is the result of a request that was sent (or may have
-// been) but produced no complete response.
+// interruptedOutcome 表示请求已发出（或可能已发出）但没有完整响应——禁止重发。
 func interruptedOutcome(ctx context.Context, requestID string) error {
 	if errors.Is(ctx.Err(), context.Canceled) {
 		return &imageGenerationFailure{Status: "cancelled", Message: imageGenerationMsgCancelled, RequestID: requestID}
@@ -192,7 +188,6 @@ func classifyImageGenerationStatus(status int, raw []byte, requestID string) err
 	if code == "unknown_outcome" {
 		return &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID}
 	}
-	// Anything else — Core's opaque 500s, internal service 401/403 wrapped by the
-	// Bridge, gateways' HTML pages — is not evidence that nothing was generated.
+	// 其余（Core 不透明 500、Bridge 包装的内部 401/403、网关 HTML）都不能证明「什么都没生成」。
 	return &imageGenerationFailure{Status: "unknown", Code: "generation_failed", Message: imageGenerationMsgGeneric, RequestID: requestID}
 }
