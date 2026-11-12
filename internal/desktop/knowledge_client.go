@@ -29,28 +29,37 @@ func withKnowledgeRefreshBudget(ctx context.Context) context.Context {
 	return context.WithValue(ctx, knowledgeRefreshKey{}, new(atomic.Bool))
 }
 
-// 并行会话可能短暂竞争 Token 读锁；最多等待 100ms 避免误报身份失效。
-// 调用方取消仍优先，不能因刷新持锁而无限等待或越过整轮操作期限。
+// knowledgeAccountForRequest waits for the token mutex under ctx.
+// Lifecycle paths keep TryLock via checkKnowledgeAccount so UI catalog work
+// fails closed quickly; Bridge request I/O must wait out an in-flight refresh
+// instead of spinning for 100ms and failing while the refresh still holds the lock.
 func (a *App) knowledgeAccountForRequest(ctx context.Context, e *sessionEntry) error {
-	deadline, cancel := context.WithTimeout(ctx, 100*time.Millisecond)
-	defer cancel()
-	tick := time.NewTicker(time.Millisecond)
-	defer tick.Stop()
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if a.tokens == nil {
+		return a.checkKnowledgeEntry(e)
+	}
+	done := make(chan error, 1)
+	go func() {
+		a.tokens.mu.Lock()
+		account := "anonymous"
+		if a.tokens.ts.AccessToken != "" || a.tokens.ts.RefreshToken != "" {
+			account = tokenIdentity(a.tokens.ts.AccessToken)
 		}
-		err := a.checkKnowledgeAccount(e)
-		if !errors.Is(err, errKnowledgeUnavailable) {
-			return err
+		current := e.knowledge.Epoch == a.tokens.identity && e.knowledge.Account == account
+		a.tokens.mu.Unlock()
+		if !current {
+			done <- errors.New("知识库会话账号已变化，请重新打开会话")
+			return
 		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-deadline.Done():
-			return errKnowledgeUnavailable
-		case <-tick.C:
-		}
+		done <- a.checkKnowledgeEntry(e)
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-done:
+		return err
 	}
 }
 
