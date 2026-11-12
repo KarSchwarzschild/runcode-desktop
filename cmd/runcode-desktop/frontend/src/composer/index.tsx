@@ -103,8 +103,10 @@ export function Composer({
   const sendingRef = useRef(false)
   const originalImages = (retry?.original.images ?? []).filter((i) => retry?.images.includes(i.index))
   const locked = submitting || sending || (!!retry && retryDisabled) || !!readOnlyReason
-  // 当前题已在后端冻结选择，生成时改库仅影响下一题；禁止的是第二次提交。
-  const knowledgeLocked = locked || busy
+  // 勾选与落盘／回合解耦：saving 只更新 pendingIds，不锁面板（锁了会 opacity 发灰挡连选）；
+  // busy/submitting 也不锁——生成中改库只影响下一题，禁止的是第二次发送（sendBlock）。
+  // 仅「修改原提问」且该入口被禁用、或只读历史时才锁知识库。
+  const knowledgeLocked = (!!retry && retryDisabled) || !!readOnlyReason
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
   const closeKnowledge = useCallback(() => { setKnowledgeOpen(false); requestAnimationFrame(() => taRef.current?.focus()) }, [taRef])
   const { state: knowledgeState, openCatalog, closeCatalog, cancelSearch } = knowledge
