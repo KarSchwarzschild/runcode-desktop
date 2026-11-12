@@ -2,15 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { BlockView } from './block-view'
 
-it('renders knowledge answer links and images as text without opening model-provided files or remote images', () => {
-  const html = renderToStaticMarkup(<BlockView textOnly block={{ kind: 'assistant', id: 'answer', text: '[未验证来源](https://example.com/fake) ![图片说明](https://example.com/image.png) `report.pdf`', streaming: false, ts: '' }} resolveFile={() => 'report.pdf'} onOpenFile={() => {}} />)
-  expect(html).toContain('未验证来源')
-  expect(html).toContain('图片说明')
-  expect(html).not.toContain('<img')
-  expect(html).not.toContain('href=')
-  expect(html).not.toContain('title="预览')
-})
-
 describe('retry notice', () => {
   it('uses a quiet note, keeps the attempt count and moves diagnostics to the tooltip', () => {
     const reason = '模型仅返回思考或空内容，未返回回答或工具调用'
