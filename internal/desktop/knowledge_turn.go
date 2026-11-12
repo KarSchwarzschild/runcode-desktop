@@ -1,7 +1,6 @@
 package desktop
 
 import (
-	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -87,45 +86,11 @@ func (a *App) freezeKnowledgeTurn(e *sessionEntry, questionID string) {
 	}
 	sel := disk.Selections[knowledgeScope(e)]
 	mode, _ := knowledgeMode(e)
-	libs := make([]knowledgetool.Overview, 0, len(sel.LibraryIDs))
-	if mode == "real" {
-		ctx, cancel := context.WithTimeout(context.Background(), knowledgeRequestTimeout)
-		defer cancel()
-		summaryByID := map[string]knowledgeSummary{}
-		for _, s := range sel.Summaries {
-			summaryByID[s.ID] = s
-		}
-		for _, id := range sel.LibraryIDs {
-			if !knowledgetool.ValidLibraryID(id) {
-				continue
-			}
-			title, desc := id, ""
-			if sum, ok := summaryByID[id]; ok {
-				if strings.TrimSpace(sum.Title) != "" {
-					title = sum.Title
-				}
-				desc = sum.Description
-			}
-			// D02: live detail — still-selected IDs that pass re-enter callable set.
-			if detail, err := a.knowledgeDetail(ctx, e, id); err == nil {
-				if strings.TrimSpace(detail.Title) != "" {
-					title = detail.Title
-				}
-				if strings.TrimSpace(detail.Description) != "" {
-					desc = detail.Description
-				}
-			} else {
-				continue // unavailable: omit from callable set; do not block ordinary send
-			}
-			if utf8.RuneCountInString(title) > knowledgeSummaryTitleMax {
-				title = string([]rune(title)[:knowledgeSummaryTitleMax])
-			}
-			if utf8.RuneCountInString(desc) > knowledgeSummaryDescMax {
-				desc = string([]rune(desc)[:knowledgeSummaryDescMax])
-			}
-			libs = append(libs, knowledgetool.Overview{ID: id, Title: title, Description: desc})
-		}
-	}
+	// Freeze from local selection/summaries only. Live ACL belongs in Retrieve
+	// (already re-checks knowledgeDetail per library) so ordinary turns without
+	// knowledge_search are not blocked on Bridge latency, and slow detail
+	// failures cannot silently drop still-selected libraries from the snapshot.
+	libs := knowledgeFreezeLibraries(mode, sel)
 	e.knowledgeTurn.setSnapshot(knowledgetool.Snapshot{
 		QuestionID: questionID,
 		Revision:   sel.Revision,
@@ -145,6 +110,38 @@ func (a *App) freezeKnowledgeTurn(e *sessionEntry, questionID string) {
 			},
 		})
 	}
+}
+
+// knowledgeFreezeLibraries builds the callable set without network I/O.
+func knowledgeFreezeLibraries(mode string, sel knowledgeSelection) []knowledgetool.Overview {
+	if mode != "real" {
+		return nil
+	}
+	summaryByID := map[string]knowledgeSummary{}
+	for _, s := range sel.Summaries {
+		summaryByID[s.ID] = s
+	}
+	libs := make([]knowledgetool.Overview, 0, len(sel.LibraryIDs))
+	for _, id := range sel.LibraryIDs {
+		if !knowledgetool.ValidLibraryID(id) {
+			continue
+		}
+		title, desc := id, ""
+		if sum, ok := summaryByID[id]; ok {
+			if strings.TrimSpace(sum.Title) != "" {
+				title = sum.Title
+			}
+			desc = sum.Description
+		}
+		if utf8.RuneCountInString(title) > knowledgeSummaryTitleMax {
+			title = string([]rune(title)[:knowledgeSummaryTitleMax])
+		}
+		if utf8.RuneCountInString(desc) > knowledgeSummaryDescMax {
+			desc = string([]rune(desc)[:knowledgeSummaryDescMax])
+		}
+		libs = append(libs, knowledgetool.Overview{ID: id, Title: title, Description: desc})
+	}
+	return libs
 }
 
 func (a *App) noteKnowledgeTurnOutcome(sessionID, questionID, outcome string) {
