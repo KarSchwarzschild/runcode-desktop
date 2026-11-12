@@ -153,7 +153,7 @@ func (a *App) emitKnowledgeToolContext(e *sessionEntry, status string, hits []kn
 }
 
 // knowledgeTools returns ExtraTools for knowledge_search when the session can use Bridge knowledge.
-func (a *App) knowledgeTools(cfg *engine.Config, sessionID string, emit func(string, any)) []tool.Tool {
+func (a *App) knowledgeTools(cfg *engine.Config, sessionID string) []tool.Tool {
 	if !usingPassport(cfg) {
 		return nil
 	}
@@ -171,6 +171,5 @@ func (a *App) knowledgeTools(cfg *engine.Config, sessionID string, emit func(str
 	a.mu.Lock()
 	a.pendingKnowledge = state
 	a.mu.Unlock()
-	_ = emit
 	return []tool.Tool{tl}
 }

@@ -396,9 +396,6 @@ func (s hostSinkAdapter) Emit(env protocol.Envelope) {
 	switch env.Event {
 	case EventTurnEnd, EventTurnError:
 		s.app.noteTurnDone(env.SessionID)
-		if env.Event == EventTurnError {
-			s.app.noteKnowledgeTurnFailed(env.SessionID)
-		}
 	case EventToolEvent:
 		// 命令跑完看一眼：pip 刚装的新库里若有安全中心不认的程序文件，立刻请用户放行
 		// （见 trustwatch.go）。非麒麟机器上这一句直接返回。
@@ -837,7 +834,7 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		opts.ExtraTools = append(opts.ExtraTools, oa...)
 	}
 	// knowledge_search：通行证会话按需检索；无选库时 Description 说明勿调用，Run 拒绝。
-	if kb := a.knowledgeTools(cfg, sctx.ID, sctx.Emit); len(kb) > 0 {
+	if kb := a.knowledgeTools(cfg, sctx.ID); len(kb) > 0 {
 		opts.ExtraTools = append(opts.ExtraTools, kb...)
 		appendSystemPrompt(cfg, knowledgeAgentPrompt)
 	} else {
