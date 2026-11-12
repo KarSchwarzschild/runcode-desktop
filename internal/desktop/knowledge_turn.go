@@ -45,11 +45,9 @@ func (s *knowledgeTurnState) setSnapshot(snap knowledgetool.Snapshot) {
 	s.snap = snap
 	s.snap.Libraries = append([]knowledgetool.Overview(nil), snap.Libraries...)
 	if s.tool != nil {
-		qid := snap.QuestionID
-		if qid == "" {
-			qid = "_"
-		}
-		s.tool.BeginQuestion(qid)
+		// onTurnStart freezes with an empty QuestionID every turn. BeginQuestion
+		// must still clear calls/replay so the 3/turn budget cannot stick.
+		s.tool.BeginQuestion(snap.QuestionID)
 	}
 }
 

@@ -126,15 +126,15 @@ func (t *Tool) InputSchema() tool.Schema { return InputSchema() }
 // IsConcurrencySafe is false: budget and Bridge retrieve are serial per turn.
 func (t *Tool) IsConcurrencySafe() bool { return false }
 
-// BeginQuestion resets per-question call budget. Call when a user turn starts.
+// BeginQuestion resets per-question call budget and replay cache.
+// Call once when a user turn starts. Always resets: host freezes often pass an
+// empty id (normalized to "_"), and skipping same-id would leave the previous
+// turn's MaxCallsPerTurn counter stuck for the rest of the session.
 func (t *Tool) BeginQuestion(questionID string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if questionID == "" {
 		questionID = "_"
-	}
-	if t.question == questionID {
-		return
 	}
 	t.question = questionID
 	t.calls = 0
