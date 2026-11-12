@@ -108,19 +108,18 @@ func (a *App) emitKnowledgeToolContext(e *sessionEntry, status string, hits []kn
 	if e == nil || e.emit == nil {
 		return
 	}
-	a.mu.Lock()
-	state := e.knowledgeTurn
 	questionID := messageID
 	libs := []KnowledgeBaseSummary{}
-	if state != nil {
+	// snap is guarded by knowledgeTurnState.mu, not App.mu — use snapshot().
+	if state := e.knowledgeTurn; state != nil {
+		snap := state.snapshot()
 		if questionID == "" {
-			questionID = state.snap.QuestionID
+			questionID = snap.QuestionID
 		}
-		for _, lib := range state.snap.Libraries {
+		for _, lib := range snap.Libraries {
 			libs = append(libs, KnowledgeBaseSummary{ID: lib.ID, Title: lib.Title, Description: lib.Description})
 		}
 	}
-	a.mu.Unlock()
 	sources := make([]KnowledgeSource, 0, len(hits))
 	for _, hit := range hits {
 		sources = append(sources, KnowledgeSource{
