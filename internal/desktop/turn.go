@@ -151,9 +151,9 @@ func (a *App) Compact(sessionID string) (CompactResult, error) {
 	return result, wireError(err)
 }
 
-// The host admits the turn before this callback, but cannot execute tools until
-// it returns. Freeze callable knowledge libraries for path A before the first
-// model/tool step.
+// onTurnStart：引擎准入回合后、首个模型／工具步之前调用。此处冻结本回合的编辑基线、
+// 计划记账、知识库选库与生图目标（含新 TurnID／一次生成预算）。注入消息不走这里，
+// 不得另开生图预算。
 func (a *App) onTurnStart(sessionID string) {
 	e, err := a.entryOf(sessionID)
 	if err != nil {
@@ -164,4 +164,5 @@ func (a *App) onTurnStart(sessionID string) {
 		e.plans.NoteUserTurn()
 	}
 	a.freezeKnowledgeTurn(e, "")
+	a.freezeImageGenerationTurn(e)
 }

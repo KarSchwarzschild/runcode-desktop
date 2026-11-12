@@ -34,9 +34,9 @@ var (
 	errImageGenerationLogin    = errors.New("请先登录通行证后使用图片生成")
 )
 
-// isChatModel reports whether a catalog entry may serve any text purpose. Only
-// an explicit image_generation-without-chat declaration removes a model; an
-// old catalog without capabilities keeps its chat behavior.
+// isChatModel：该条目能否进入任何文本用途（聊天／判定／子代理／上下文预算／识图候选）。
+// 仅当网关显式声明 image_generation 且未声明 chat 时才剔除；旧目录缺 capabilities
+// 一律保留可聊天。不按模型名或 supports_images（图片输入）猜测。
 func isChatModel(m PassportModel) bool {
 	if len(m.Capabilities) == 0 {
 		return true
@@ -45,8 +45,8 @@ func isChatModel(m PassportModel) bool {
 		!slices.Contains(m.Capabilities, capabilityImageGeneration)
 }
 
-// isImageGenerationModel reports whether the gateway declared image generation.
-// Whether it is selectable is decided by its normalized profile.
+// isImageGenerationModel：网关是否声明了图片输出能力。可选与否由规范化后的
+// image_generation 档案决定，此处只认 capabilities，不猜名字。
 func isImageGenerationModel(m PassportModel) bool {
 	return slices.Contains(m.Capabilities, capabilityImageGeneration)
 }
