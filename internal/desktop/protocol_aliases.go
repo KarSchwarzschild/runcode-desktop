@@ -61,10 +61,8 @@ const (
 //
 //nolint:revive // 再导出别名:文档以定义方的 protocol 包为准(见上)
 type (
-	CreateKnowledgeChatRequest      = protocol.CreateKnowledgeChatRequest
 	KnowledgeBaseSummary            = protocol.KnowledgeBaseSummary
 	QuestionKnowledge               = protocol.QuestionKnowledge
-	KnowledgeOverride               = protocol.KnowledgeOverride
 	KnowledgeContextStatus          = protocol.KnowledgeContextStatus
 	KnowledgeSource                 = protocol.KnowledgeSource
 	KnowledgeListRequest            = protocol.KnowledgeListRequest
@@ -82,7 +80,7 @@ type (
 	SubmitQuestionRequest           = protocol.SubmitQuestionRequest
 	QuestionReceipt                 = hostproto.QuestionReceipt
 	// Turn stream, session state and approval — the engine host's contract.
-	SessionInfo       = protocol.ConversationInfo
+	SessionInfo       = hostproto.SessionInfo
 	AssistantDelta    = hostproto.AssistantDelta
 	Warning           = hostproto.Warning
 	TurnError         = hostproto.TurnError

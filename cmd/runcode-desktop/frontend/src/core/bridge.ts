@@ -11,8 +11,8 @@
 
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
-  ConversationInfo as SessionInfo, CreateKnowledgeChatRequest, KnowledgeChatEvent,
-  KnowledgeSource, QuestionKnowledge, KnowledgeContextStatus, KnowledgeOverride,
+  SessionInfo,
+  KnowledgeSource, QuestionKnowledge, KnowledgeContextStatus,
   KnowledgeBaseSummary, KnowledgeListRequest, KnowledgePage, SessionKnowledgeView, SetSessionKnowledgeRequest,
  ArtifactReference, DirectoryAccessRequest, DirectoryAccessGrant, DirectoryAccessView,
   ModelContextValues, ModelContextOverride, ModelContextView, SaveModelContextSettingsRequest,
@@ -112,7 +112,6 @@ export type { EventMap } from './protocol/events'
 
 // ---- commands (generated; same lowerCamel names the old helpers used) ---------
 export {
-  createKnowledgeChat, renameKnowledgeChat, exportKnowledgeChat,
   listKnowledgeBases, getSessionKnowledge, getSessionKnowledgeSnapshot, setSessionKnowledge, openKnowledgeDirectory,
   getQuestion, forkQuestion, submitQuestion,
   getModelContextSettings, saveModelContextSettings,
@@ -240,7 +239,7 @@ import {
   readArtifactBytes as readArtifactBytesCmd,
   switchModel as switchModelCmd,
 } from './protocol/commands'
-import type { EditRecord, ConversationInfo as SessionInfo } from './protocol/types'
+import type { EditRecord, SessionInfo } from './protocol/types'
 
 // switchModel spans platform (passport) and custom direct-connection models: a
 // same-connection platform swap is in place, any connection change rebuilds the

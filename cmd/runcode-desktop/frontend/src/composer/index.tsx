@@ -1,7 +1,6 @@
 import type { QuestionDraft } from '@/core/bridge'
 import type { SessionKnowledge } from '@/session/use-knowledge'
 import { KnowledgeStatus, KnowledgePicker } from './knowledge-picker'
-import { InlineEditor, type ComposerEditorHandle } from './inline-editor'
 import { GhostBtn } from '@/ui/ghost-btn'
 // composer 是对话输入区：多行输入框、@技能 / /子代理 / #文件 三种触发的选择器、
 // 附件（选图、粘贴），以及底部工具条(拆到 ./toolbar)。选择器与附件等 UI 状态全部
@@ -63,7 +62,7 @@ export function Composer({
   onRemoveOriginal: (index: number) => void
   input: string
   onInputChange: (v: string) => void
-  taRef: RefObject<ComposerEditorHandle>
+  taRef: RefObject<HTMLTextAreaElement>
   chatScrollRef: RefObject<HTMLDivElement>
   busy: boolean
   toast: string
@@ -89,16 +88,14 @@ export function Composer({
   // input，那两样都归 App 持有。
   onPickScenario: (s: Scenario) => void
 }) {
-  const readOnlyReason = info?.readOnlyReason ?? ''
   const inputId = useId()
-  const editorElement = useRef<HTMLDivElement>(null)
-  const resize = useComposerResize(editorElement, chatScrollRef, knowledge.state.contextVersion)
+  const resize = useComposerResize(taRef, chatScrollRef)
   const [mention, setMention] = useState<{ query: string; start: number; sel: number; trigger: MentionTrigger } | null>(null)
   const closeMention = useCallback(() => setMention(null), [])
   const [sending, setSending] = useState(false)
   const sendingRef = useRef(false)
   const originalImages = (retry?.original.images ?? []).filter((i) => retry?.images.includes(i.index))
-  const locked = submitting || sending || (!!retry && retryDisabled) || !!readOnlyReason
+  const locked = submitting || sending || (!!retry && retryDisabled)
   // 当前题已在后端冻结选择，生成时改库仅影响下一题；禁止的是第二次提交。
   const knowledgeLocked = locked || busy
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
@@ -137,14 +134,13 @@ export function Composer({
 
   // Composer pickers: skills (@) and sub-agents (/) — refreshed per session.
   useEffect(() => {
-    if (readOnlyReason) return
     listSkills()
       .then((l) => setChatSkills(l?.skills ?? []))
       .catch(() => setChatSkills([]))
     listAgents()
       .then((l) => setChatAgents(l?.agents ?? []))
       .catch(() => setChatAgents([]))
-  }, [sessionId, readOnlyReason])
+  }, [sessionId])
 
   const fileMatches = mention?.trigger === '#' ? rankFileMatches(files, mention.query) : []
   const skillMatches = mention?.trigger === '@' ? matchByNameOrDesc(chatSkills, mention.query) : []
@@ -158,7 +154,6 @@ export function Composer({
   const mentionRegion = usePickerDismiss(mentionVisible && mention ? `${mention.trigger}:${mention.start}` : '', closeMention)
 
   function syncMention(value: string, cursor: number) {
-    if (readOnlyReason) return
     mentionRegion.keepOpen()
     const m = computeMention(value, cursor)
     if (m) closeScenario()
@@ -196,7 +191,6 @@ export function Composer({
   }
 
   function openFilePicker() {
-    if (readOnlyReason) return
     mentionRegion.keepOpen()
     closeScenario()
     const sep = input && !/\s$/.test(input) ? ' ' : ''
@@ -212,7 +206,6 @@ export function Composer({
   // typing the trigger at the composer start. Both are start-of-input commands that
   // replace the whole input on pick, so each opens a fresh one.
   function openTriggerPicker(trigger: '@' | '/') {
-    if (readOnlyReason) return
     mentionRegion.keepOpen()
     closeScenario()
     onInputChange(trigger)
@@ -222,7 +215,6 @@ export function Composer({
   // Pick an image from disk and attach it to the next message. The path is kept in
   // `attachments` and the bytes are read backend-side at send time.
   async function pickAttachment() {
-    if (readOnlyReason) return
     try {
       const p = await pickImageAttachment()
       if (p) addAttachment({ path: p, image: true })
@@ -244,7 +236,6 @@ export function Composer({
   // 串行处理：并发几个几 MB 的 base64 只会一起挤 WebView 那一条 IPC。
   async function intake(files: File[]) {
     // 必须在 savePastedFile 之前拒绝附件，避免纯文字模式仍把私有文件写进工作区。
-    if (readOnlyReason) { onNotify?.(readOnlyReason); return }
     for (const f of files) {
       const tooLarge = tooLargeMessage(f)
       if (tooLarge) {
@@ -261,7 +252,7 @@ export function Composer({
   }
 
   // 粘贴。收不收由 shouldIntakePaste 定（有文本就让路，理由在那儿）。
-  async function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
+  async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
     const data = e.clipboardData
     const files = Array.from(data?.files ?? [])
     if (!shouldIntakePaste(files.length, data?.getData('text/plain') ?? '')) return
@@ -321,7 +312,7 @@ export function Composer({
   const hoverMention = (i: number) => setMention((m) => (m ? { ...m, sel: i } : m))
   // 本次构建实际画得出来的分类：内置功能分类要有 App 交来的动作才算有（见
   // visibleScenarios），否则整类不画。
-  const categories = readOnlyReason ? [] : visibleScenarios(scenariosForProfile(BRAND.scenarioProfile), builtinScenarios)
+  const categories = visibleScenarios(scenariosForProfile(BRAND.scenarioProfile), builtinScenarios)
   const scenarioOpen = categories.find((c) => c.id === scenarioCat) ?? null
   const scenarioRegion = usePickerDismiss(!mention && scenarioOpen ? scenarioOpen.id : '', closeScenario)
 
@@ -367,7 +358,6 @@ export function Composer({
         )}
       </div>
       <div className="flow-root" ref={scenarioRegion.regionRef} {...scenarioRegion.pointerProps}>
-        {readOnlyReason && <p role="status" className="mb-2 text-[12px] text-amberink">{readOnlyReason}</p>}
         {info?.planMode && (
           <div className="flex items-center gap-2.5 mb-2 bg-primarysoft border border-primary rounded-xl px-3.5 py-2.5">
             <span className="text-primaryink flex-none"><Icon name="compass" size={16} /></span>
@@ -429,29 +419,24 @@ export function Composer({
           ))}
         </div>
       )}
-      <InlineEditor
-        key={knowledge.state.contextVersion}
+      <textarea
         ref={taRef}
-        elementRef={editorElement}
         id={inputId}
         style={{ height: resize.height }}
-        readOnly={submitting || sending || !!readOnlyReason}
+        readOnly={submitting || sending}
         className={`block w-full resize-none overflow-y-auto bg-surface text-ink border-x border-line2 px-4 py-3.5 outline-none placeholder:text-faint ${attachments.length > 0 ? '' : 'border-t rounded-t-card'}`}
         value={input}
-        libraries={[]}
-        knowledgeReadOnly
-        onKnowledgeChange={() => {}}
-        placeholder={readOnlyReason ? '此历史只读' : busy ? '回合进行中——输入后 Enter 立即补充，模型会在当前步骤结束后看到' : '继续对话，@ 技能，/ 子代理，# 文件；Enter 发送，Shift+Enter 换行'}
-        onChange={(text, caret) => {
-          onInputChange(text)
-          syncMention(text, caret)
+        placeholder={busy ? '回合进行中——输入后 Enter 立即补充，模型会在当前步骤结束后看到' : '继续对话，@ 技能，/ 子代理，# 文件；Enter 发送，Shift+Enter 换行'}
+        onChange={(e) => {
+          onInputChange(e.target.value)
+          syncMention(e.target.value, e.target.selectionStart ?? e.target.value.length)
         }}
         // 点回输入框只关闭候选；继续键入/移动光标才重新匹配，避免同一次点击又弹出。
         onClick={closeMention}
         onPaste={(e) => void handlePaste(e)}
         onKeyUp={(e) => {
           if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-            syncMention(input, taRef.current?.getSelection().start ?? input.length)
+            syncMention(input, e.currentTarget.selectionStart ?? input.length)
           }
         }}
         onKeyDown={(e) => {

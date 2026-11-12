@@ -9,11 +9,9 @@
 import { type Block } from '@/chat/blocks'
 import { type ContextCompaction, type PlanSnapshot, type QuestionKnowledge, type KnowledgeContextStatus } from '@/core/bridge'
 import { fmtTokens } from '@/core/format'
-import { cancelKnowledgeRuns, renderKnowledgeRun, type KnowledgeRun } from './knowledge-chat-state'
 
 /** ConversationState 是**一条**对话的全部可渲染状态。 */
 export interface ConversationState {
-  knowledgeRuns?: Record<string, KnowledgeRun>
   knowledgeByQuestion?: Record<string, QuestionKnowledge>
   stoppedQuestionRows?: Set<string>
   stoppedQuestions?: Set<string>
@@ -85,8 +83,7 @@ export function bindQuestionReceipt(state: ConversationState, blockId: string, q
     blocks: state.blocks.map(b => b.kind === 'user' && b.id === blockId
       ? { ...b, questionId, knowledge: knowledge ?? b.knowledge } : b),
   }
-  if (stopped && next.knowledgeRuns?.[questionId]) next.knowledgeRuns = { ...next.knowledgeRuns, [questionId]: { ...next.knowledgeRuns[questionId], phase: 'cancelled' } }
-  return renderKnowledgeRun(next, questionId)
+  return next
 }
 
 export function reconcileQuestionBlocks(state: ConversationState, blocks: Block[]): Block[] {
@@ -95,7 +92,6 @@ export function reconcileQuestionBlocks(state: ConversationState, blocks: Block[
 }
 
 export function cancelPreparingKnowledge(state: ConversationState): ConversationState {
-  state = cancelKnowledgeRuns(state)
   const stoppedQuestionRows = new Set(state.stoppedQuestionRows)
   const stoppedQuestions = new Set(state.stoppedQuestions)
   for (const b of state.blocks) {

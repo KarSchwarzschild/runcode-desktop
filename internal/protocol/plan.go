@@ -1,5 +1,7 @@
 package protocol
 
+import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
+
 // 阶段化计划模式的 wire 契约。计划模式不再是"模型自由写一段方案"，而是一条有阶段、
 // 有可编辑清单、有审批闸门的流水线：需求理解 → 方案设计 → 方案审查 → 用户审批。
 // 前三个阶段由模型经桌面专属工具 plan_write 逐个记录（工具本身把关顺序），第四个
@@ -86,6 +88,6 @@ type PlanApproveRequest struct {
 // 只有一个来源（也便于单测），发送仍走前端既有的 send 路径，这样 busy、用户气泡、回合
 // 生命周期全部复用原有链路。
 type PlanApproveResult struct {
-	Info            ConversationInfo `json:"info"`
-	ExecutionPrompt string           `json:"executionPrompt"`
+	Info            hostproto.SessionInfo `json:"info"`
+	ExecutionPrompt string                `json:"executionPrompt"`
 }

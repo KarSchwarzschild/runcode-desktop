@@ -193,7 +193,6 @@ func (a *App) PassportCancelLogin() {
 // PassportLogout 清除本地令牌（不调 Passport endsession——桌面登出不应
 // 顺带登出浏览器里的 SSO 会话）。
 func (a *App) PassportLogout() {
-	a.cancelQuestionAdmissions()
 	a.tokens.Clear()
 	a.mu.Lock()
 	a.passportUser = nil

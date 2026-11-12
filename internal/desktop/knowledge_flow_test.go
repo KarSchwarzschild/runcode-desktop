@@ -57,7 +57,7 @@ func TestKnowledgeCorruptBlocksAllInputEntrypoints(t *testing.T) {
 	}
 }
 
-// KB-UI-002：已选库后同会话普通发送应进入 agent；仅 KnowledgeOverride／陈旧 revision 仍拒绝。
+// KB-UI-002：已选库后同会话普通发送应进入 agent；清库后仍可发送。
 func TestKnowledgeSelectedAllowsOrdinaryTurnUntilCleared(t *testing.T) {
 	enableKnowledgeDemo(t)
 	for _, key := range []string{"APPDATA", "XDG_CONFIG_HOME", "HOME", "USERPROFILE"} {
@@ -95,8 +95,7 @@ func TestKnowledgeSelectedAllowsOrdinaryTurnUntilCleared(t *testing.T) {
 	app.entryLocked(id).tenantID = "synthetic-knowledge-tenant"
 	app.bindKnowledgeLocked(app.entryLocked(id))
 	app.mu.Unlock()
-	first, err := app.SubmitQuestion(SubmitQuestionRequest{SessionID: id, Text: "ordinary initial question"})
-	if err != nil {
+	if _, err := app.SubmitQuestion(SubmitQuestionRequest{SessionID: id, Text: "ordinary initial question"}); err != nil {
 		t.Fatal(err)
 	}
 	waitForTurns(t, sink, 1, time.Now().Add(10*time.Second))
@@ -144,12 +143,6 @@ func TestKnowledgeSelectedAllowsOrdinaryTurnUntilCleared(t *testing.T) {
 	image := filepath.Join(ws, "test.png")
 	if err := os.WriteFile(image, []byte{1, 2, 3}, 0o600); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := app.SubmitQuestion(SubmitQuestionRequest{
-		SessionID: id, Text: "override", Source: &QuestionReference{SessionID: id, QuestionID: first.QuestionID},
-		KnowledgeRevision: &selected.Revision, KnowledgeOverride: &KnowledgeOverride{},
-	}); err == nil || !strings.Contains(err.Error(), "尚未就绪") {
-		t.Fatalf("override must stay rejected: %v", err)
 	}
 	if err := app.SendMessage(id, "selected ordinary send"); err != nil {
 		t.Fatalf("selected libraries must allow ordinary send: %v", err)

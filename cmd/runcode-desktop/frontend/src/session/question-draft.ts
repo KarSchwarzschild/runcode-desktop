@@ -17,9 +17,6 @@ export function cancelQuestion(draft: ChatDraft): ChatDraft { return draft.retry
 export function retryLibraries(draft: ChatDraft): KnowledgeBaseSummary[] {
   return draft.retry?.libraries ?? draft.retry?.original.knowledge?.libraries ?? []
 }
-export function retryKnowledgeOverride(draft: ChatDraft) {
-  return draft.retry?.libraries === undefined ? undefined : { libraryIds: draft.retry.libraries.map(library => library.id) }
-}
 export function selectRetryKnowledge(draft: ChatDraft, libraries: KnowledgeBaseSummary[]): ChatDraft {
   const unique = [...new Map(libraries.map(library => [library.id, library])).values()]
   return !draft.retry || unique.length > 5 ? draft : { ...draft, retry: { ...draft.retry, libraries: unique } }

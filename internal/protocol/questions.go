@@ -24,14 +24,12 @@ type QuestionDraft struct {
 // SubmitQuestionRequest supports ordinary input and a prepared retry branch.
 // OriginalImages indexes only the Source question authorized by branch lineage.
 type SubmitQuestionRequest struct {
-	SubmissionID      string             `json:"submissionId,omitempty"`
-	KnowledgeOverride *KnowledgeOverride `json:"knowledgeOverride,omitempty"`
-	SessionID         string             `json:"sessionId"`
-	Text              string             `json:"text"`
-	ImagePaths        []string           `json:"imagePaths"`
-	Source            *QuestionReference `json:"source,omitempty"`
-	OriginalImages    []int              `json:"originalImages"`
-	AllowSteering     bool               `json:"allowSteering"`
+	SessionID      string             `json:"sessionId"`
+	Text           string             `json:"text"`
+	ImagePaths     []string           `json:"imagePaths"`
+	Source         *QuestionReference `json:"source,omitempty"`
+	OriginalImages []int              `json:"originalImages"`
+	AllowSteering  bool               `json:"allowSteering"`
 	// KnowledgeRevision is optional for older clients; selected libraries are
 	// always enforced by the desktop regardless of whether it is supplied.
 	KnowledgeRevision *int64 `json:"knowledgeRevision,omitempty"`

@@ -47,8 +47,9 @@ func TestKnowledgeAtomicRenameFailurePreservesConfirmedSelection(t *testing.T) {
 	if err != nil || view.Revision != 1 || len(view.Libraries) != 1 {
 		t.Fatalf("failed write published unconfirmed state: %+v %v", view, err)
 	}
-	if err := app.SendMessage(id, "failed clear must still block"); err == nil {
-		t.Fatal("failed clear bypassed knowledge gate")
+	// Path A keeps the confirmed selection and still allows an ordinary agent turn.
+	if err := app.SendMessage(id, "failed clear keeps selection"); err != nil {
+		t.Fatalf("preserved selection blocked ordinary send: %v", err)
 	}
 }
 

@@ -17,11 +17,15 @@ func TestKnowledgeGatewayOverrideKeepsPassportAndModelRouting(t *testing.T) {
 		_, _ = w.Write([]byte(`{"items":[],"page":1,"pageSize":10,"total":0,"hasMore":false}`))
 	}))
 	defer knowledge.Close()
-	t.Setenv("RUNCODE_KNOWLEDGE_BRIDGE_BASE_URL", knowledge.URL+"/")
+	// realKnowledgeApp pins both bridges to one fixture server; rebind knowledge after override.
 	app, id := realKnowledgeApp(t, func(w http.ResponseWriter, _ *http.Request) {
 		t.Error("knowledge request reached the platform model gateway")
 		w.WriteHeader(http.StatusNotFound)
 	})
+	t.Setenv("RUNCODE_KNOWLEDGE_BRIDGE_BASE_URL", knowledge.URL+"/")
+	app.mu.Lock()
+	app.bindKnowledgeLocked(app.entryLocked(id))
+	app.mu.Unlock()
 	page, err := app.ListKnowledgeBases(KnowledgeListRequest{SessionID: id})
 	if err != nil || page.Mode != "real" {
 		t.Fatalf("separate knowledge gateway unavailable: %+v %v", page, err)

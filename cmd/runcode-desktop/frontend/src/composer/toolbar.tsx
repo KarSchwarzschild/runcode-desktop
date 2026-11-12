@@ -81,9 +81,8 @@ export function ComposerToolbar({
   onSend: () => void
   onStop: () => void
 }) {
-  // 模式由后端 kind 决定，不能因为移除了最后一个库就重新开放工具或外部模型。
-  // 选库不锁模式／模型／思考；仅真实只读历史禁用。旧独立 knowledge kind 也不再灰掉整条工具栏。
-  const restricted = !!info?.readOnlyReason
+  // 选库不锁模式／模型／思考。
+  const restricted = false
   const [addMenu, setAddMenu] = useState(false)
   const [reasonMenu, setReasonMenu] = useState(false)
   const [thinkMenu, setThinkMenu] = useState(false)
@@ -174,9 +173,9 @@ export function ComposerToolbar({
         </div>
         {/* The mode label is the last to go: unlike the toggles below, the shield
             icon alone carries no hint of which mode is active. */}
-        <GhostBtn disabled={restricted} className="flex-none whitespace-nowrap" onClick={onToggleMode} title={info?.readOnlyReason || `点击切换权限模式\n当前：${modeLabel(info?.permissionMode)}`}>
+        <GhostBtn disabled={restricted} className="flex-none whitespace-nowrap" onClick={onToggleMode} title={`点击切换权限模式\n当前：${modeLabel(info?.permissionMode)}`}>
           <Icon name="shield" size={16} />
-          {info?.readOnlyReason ? '只读历史' : !tinyBar && modeLabel(info?.permissionMode)}
+          {!tinyBar && modeLabel(info?.permissionMode)}
         </GhostBtn>
         <button
           disabled={restricted}

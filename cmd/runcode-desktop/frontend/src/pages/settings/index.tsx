@@ -38,8 +38,8 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   // path the composer's in-chat picker uses — no new session, history preserved.
   onSwitchModel: (choice: ModelOption) => void
 }) {
-  // 选库不锁设置页；仅真实只读历史限制改写。
-  const sessionRestriction = info?.readOnlyReason || ''
+  // 选库不锁设置页。
+  const sessionRestriction = ''
   // The session's model is now switched live (see 模型 field below), so it is read
   // straight from the running session, not a form field. Permission mode still prefers
   // the live session. Saving this form never sends connection fields.

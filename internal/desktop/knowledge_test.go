@@ -352,7 +352,7 @@ func TestKnowledgeStoreRejectsMalformedSchema(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, data := range []string{
-		`{}`, `{"version":2,"sessionId":"` + id + `","selections":{}}`,
+		`{}`, `{"version":3,"sessionId":"` + id + `","selections":{}}`,
 		`{"version":1,"sessionId":"wrong","selections":{}}`,
 		`{"version":1,"sessionId":"` + id + `","selections":null}`,
 		`{"version":1,"sessionId":"` + id + `","selections":{"short":{"revision":1,"libraryIds":[]}}}`,

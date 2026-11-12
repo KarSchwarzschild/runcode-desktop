@@ -3,7 +3,7 @@ import { usePersistentNumber } from '@/hooks/use-persistent-state'
 import { isComposingKey } from '@/ui/keys'
 import { clampComposerHeight, composerHeightBounds, DEFAULT_COMPOSER_HEIGHT, draggedComposerHeight, parseComposerHeight } from './resize'
 
-export function useComposerResize(editor: RefObject<HTMLElement>, chat: RefObject<HTMLDivElement>, editorVersion = 0) {
+export function useComposerResize(textarea: RefObject<HTMLTextAreaElement>, chat: RefObject<HTMLDivElement>) {
   const footerRef = useRef<HTMLElement>(null)
   const [wanted, setWanted, commit] = usePersistentNumber('composer.height', parseComposerHeight)
   const [bounds, setBounds] = useState(() => composerHeightBounds(window.innerHeight, window.innerHeight))
@@ -15,7 +15,7 @@ export function useComposerResize(editor: RefObject<HTMLElement>, chat: RefObjec
   const height = clampComposerHeight(wanted, bounds)
 
   useLayoutEffect(() => {
-    const input = editor.current
+    const input = textarea.current
     const scroll = chat.current
     const footer = footerRef.current
     const parent = footer?.parentElement
@@ -45,7 +45,7 @@ export function useComposerResize(editor: RefObject<HTMLElement>, chat: RefObjec
       drag.current = null
       if (active?.target.hasPointerCapture(active.pointerId)) active.target.releasePointerCapture(active.pointerId)
     }
-  }, [editor, chat, editorVersion])
+  }, [textarea, chat])
 
   function flushFrame() {
     if (frame.current !== null) cancelAnimationFrame(frame.current)

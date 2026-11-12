@@ -36,17 +36,11 @@ func (a *App) InjectMessage(sessionID, text string) (bool, error) {
 // the message as a fresh turn instead. Shared by InjectMessage and
 // InjectMessageWithImages.
 func (a *App) injectOrSend(sessionID, text string, images []llm.ImageSource, withImages bool) (bool, error) {
-	a.startMu.Lock()
-	defer a.startMu.Unlock()
 	e, err := a.entryOf(sessionID)
 	if err != nil {
 		return false, wireError(err)
 	}
-	if !e.questionMu.TryLock() {
-		return false, wireError(host.ErrBusy)
-	}
-	defer e.questionMu.Unlock()
-	if err := a.checkKnowledgeSubmission(e, nil); err != nil {
+	if err := a.ensureKnowledgeSendable(e); err != nil {
 		return false, wireError(err)
 	}
 	err = a.mgr.Inject(e.id, text, images)
@@ -55,7 +49,7 @@ func (a *App) injectOrSend(sessionID, text string, images []llm.ImageSource, wit
 	}
 	if errors.Is(err, host.ErrNoActiveTurn) {
 		// The turn ended before the injection landed; send it as a new turn.
-		if serr := a.sendUserTurnEntryHeld(e, text, images, withImages); serr != nil {
+		if serr := a.sendUserTurn(sessionID, text, images, withImages); serr != nil {
 			return false, wireError(serr)
 		}
 		return true, nil
@@ -67,8 +61,6 @@ func (a *App) injectOrSend(sessionID, text string, images []llm.ImageSource, wit
 // maintaining the desktop-side turn bookkeeping: the in-flight mirror, the
 // auto-title text, and the per-turn edit baseline reset.
 func (a *App) sendUserTurn(sessionID, text string, images []llm.ImageSource, withImages bool) error {
-	a.startMu.Lock()
-	defer a.startMu.Unlock()
 	e, err := a.entryOf(sessionID)
 	if err != nil {
 		return err
@@ -77,12 +69,7 @@ func (a *App) sendUserTurn(sessionID, text string, images []llm.ImageSource, wit
 		return host.ErrBusy
 	}
 	defer e.questionMu.Unlock()
-	return a.sendUserTurnEntryHeld(e, text, images, withImages)
-}
-
-// Caller owns startMu and the entry's questionMu, including the injection fallback.
-func (a *App) sendUserTurnEntryHeld(e *sessionEntry, text string, images []llm.ImageSource, withImages bool) error {
-	if err := a.checkKnowledgeSubmission(e, nil); err != nil {
+	if err := a.ensureKnowledgeSendable(e); err != nil {
 		return err
 	}
 	a.mu.Lock()
@@ -99,7 +86,6 @@ func (a *App) sendUserTurnEntryHeld(e *sessionEntry, text string, images []llm.I
 	a.mu.Unlock()
 
 	debugLog("turn submit: provider=%s model=%s passport=%v withImages=%v textLen=%d", provider, model, livePassport, withImages, len(text))
-	var err error
 	if withImages {
 		err = a.mgr.SendMessageWithImages(id, text, images)
 	} else {
@@ -124,24 +110,7 @@ func (a *App) Interrupt(sessionID string) error {
 	if err != nil {
 		return nil // interrupting nothing is a no-op (pre-host behavior)
 	}
-	// Keep cancellation and the current host interrupt in one publication fence.
-	// A delayed Stop must not cancel a subsequent admission after this one exits.
-	a.mu.Lock()
-	if e := a.entryLocked(id); e != nil && e.pendingQuestion != nil {
-		e.pendingQuestion.cancel()
-	}
-	if e := a.entryLocked(id); e != nil && e.chat != nil {
-		// receipt 写盘中的知识库提交尚无 run，也要留下停止代际，防止随后启动。
-		e.chat.stopEpoch++
-		if e.chat.run != nil {
-			e.chat.run.cancel()
-		}
-		a.mu.Unlock()
-		return nil
-	}
-	interruptErr := a.mgr.Interrupt(id)
-	a.mu.Unlock()
-	if err := interruptErr; err != nil && !errors.Is(err, host.ErrSessionNotFound) {
+	if err := a.mgr.Interrupt(id); err != nil && !errors.Is(err, host.ErrSessionNotFound) {
 		return wireError(err)
 	}
 	return nil
@@ -183,21 +152,9 @@ func (a *App) Compact(sessionID string) (CompactResult, error) {
 }
 
 // The host admits the turn before this callback, but cannot execute tools until
-// it returns. Do not reset edit baselines after an asynchronous receipt arrives.
+// it returns. Freeze callable knowledge libraries for path A before the first
+// model/tool step.
 func (a *App) onTurnStart(sessionID string) {
-	// Host installs turnCancel before this synchronous hook and launches RunQuestion
-	// only afterward. Bridge a Stop that raced between validation and registration
-	// to that newly registered turn before it can persist input or invoke a model.
-	a.mu.Lock()
-	cancelled := false
-	if e := a.entryLocked(sessionID); e != nil && e.pendingQuestion != nil && e.pendingQuestion.ctx.Err() != nil {
-		_ = a.mgr.Interrupt(sessionID)
-		cancelled = true
-	}
-	a.mu.Unlock()
-	if cancelled {
-		return
-	}
 	e, err := a.entryOf(sessionID)
 	if err != nil {
 		return
@@ -206,6 +163,5 @@ func (a *App) onTurnStart(sessionID string) {
 	if e.plans != nil {
 		e.plans.NoteUserTurn()
 	}
-	// Freeze callable libraries before the first model/tool step (no retrieve).
 	a.freezeKnowledgeTurn(e, "")
 }

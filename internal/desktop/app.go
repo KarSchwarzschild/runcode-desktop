@@ -71,11 +71,9 @@ type Quitter interface{ Quit() }
 //     期间做慢操作。等到某个字段真需要长时间持有(比如以后每会话一条连接),再给
 //     条目加锁,并遵守 startMu → App.mu → entry.mu 的次序。
 type sessionEntry struct {
-	chat            *knowledgeChatSession // immutable pointer; run/seq protected by App.mu
-	pendingQuestion *questionAdmission    // protected by App.mu; exact pre-host submission attempt
-	modelRef        modelReference
-	questionMu      sync.Mutex       // serializes submission preparation without holding App.mu
-	knowledge       knowledgeBinding // immutable account and connection binding for selection state
+	modelRef   modelReference
+	questionMu sync.Mutex       // serializes submission preparation without holding App.mu
+	knowledge  knowledgeBinding // immutable account and connection binding for selection state
 	// Creation connection belongs to this entry, not whichever session has focus.
 	connectionConfig engine.Config
 	passport         bool
@@ -300,7 +298,6 @@ func newWithBuild(sink EventSink, build host.BuildFunc) *App {
 	})
 	pc := passportConfig()
 	a.tokens = newTokenManager(pc.tokenURL(), pc.ClientID, passportHTTP(), func() {
-		a.cancelQuestionAdmissions()
 		a.mu.Lock()
 		a.passportUser = nil
 		a.mu.Unlock()
@@ -1015,9 +1012,6 @@ func (a *App) buildSessionModeHeld(ctx context.Context, cfg engine.Config, passp
 
 func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, passport bool, tenantID string, focus, restoreModel bool, refs ...modelReference) (SessionInfo, error) {
 	requested := cfg.Model
-	if isKnowledgeChatID(cfg.Resume) || isKnowledgeChatID(cfg.SessionID) {
-		return SessionInfo{}, errors.New("知识库会话必须通过宿主路由恢复")
-	}
 	cfg, err := restoredContextModel(ctx, cfg, restoreModel)
 	if err != nil {
 		return SessionInfo{}, err
@@ -1157,17 +1151,6 @@ func (a *App) closeCurrentHeld() error {
 //   - true —— 用户主动关掉这条会话。它从界面上整个消失了,留着只是占内存,
 //     还会让"打开中的会话"列表多出一条已经死掉的。
 func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) error {
-	if e != nil && e.chat != nil {
-		// 先关闭准入，再等待运行取消；否则旧轮结束到关闭之间可能接收新问题。
-		e.questionMu.Lock()
-		a.mu.Lock()
-		e.closed = true
-		a.mu.Unlock()
-		e.questionMu.Unlock()
-		if err := a.stopKnowledgeChat(ctx, e); err != nil {
-			return err
-		}
-	}
 	if e == nil {
 		return nil
 	}
@@ -1177,7 +1160,7 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 		id = e.id
 	}
 	a.mu.Unlock()
-	if id != "" && e.chat == nil {
+	if id != "" {
 		if err := a.mgr.Close(ctx, id); err != nil {
 			return fmt.Errorf("关闭会话失败，可重试: %w", err)
 		}
@@ -1203,10 +1186,7 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	}
 	a.mu.Unlock()
 	a.dropArtifacts(e.id)
-	// 知识库从未持有预览引用，关闭时不能释放同工作区普通会话的服务器。
-	if e.chat == nil {
-		a.stopPreview(previewWorkspaceOf(e))
-	}
+	a.stopPreview(previewWorkspaceOf(e))
 	return nil
 }
 
@@ -1338,9 +1318,6 @@ func (a *App) Reset(sessionID string) error {
 
 // Status returns the current session's display state.
 func (a *App) Status(sessionID string) (SessionInfo, error) {
-	if e, err := a.entryOf(sessionID); err == nil && e.chat != nil {
-		return a.knowledgeChatInfo(e)
-	}
 	session, err := a.sessionHandleOf(sessionID)
 	if err != nil {
 		return SessionInfo{}, wireError(err)
@@ -1352,7 +1329,6 @@ func (a *App) Status(sessionID string) (SessionInfo, error) {
 // live preview base URL.
 func (a *App) sessionInfo(st engine.Status) SessionInfo {
 	return SessionInfo{
-		Kind:               "agent",
 		SessionID:          st.SessionID,
 		Model:              st.Model,
 		CWD:                st.CWD,

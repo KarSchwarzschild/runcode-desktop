@@ -8,7 +8,6 @@ import (
 	"net/http"
 
 	"github.com/wt68/runcode/internal/knowledgetool"
-	kc "github.com/wt68/runcode/internal/knowledgechat"
 	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 )
@@ -66,23 +65,9 @@ func (h knowledgeToolHost) Retrieve(ctx context.Context, query string, libraryID
 	if err := h.app.knowledgeRequest(ctx, e, http.MethodPost, "/retrieve", payload, &r); err != nil {
 		return nil, "", err
 	}
-	// Soft-validate Bridge envelope; knowledgetool still rejects foreign hits.
-	kcHits := make([]kc.Hit, 0, len(r.Hits))
-	for _, hit := range r.Hits {
-		kcHits = append(kcHits, kc.Hit{
-			LibraryID: hit.LibraryID, DocumentID: hit.DocumentID, ChunkID: hit.ChunkID,
-			Title: hit.Title, Text: hit.Text,
-		})
-	}
-	libs := make([]kc.Library, 0, len(r.Libraries))
-	for _, lib := range r.Libraries {
-		libs = append(libs, kc.Library{ID: lib.ID, Title: lib.Title})
-	}
-	if err := kc.ValidateRetrieved(libraryIDs, kc.Retrieved{Status: r.Status, Libraries: libs, Hits: kcHits}); err != nil {
-		// Bridge may return a subset of authorized libraries; fall back to hit-level checks only.
-		if r.Status != "matched" && r.Status != "empty" {
-			return nil, "", errors.New("知识库服务返回了无效的检索结果")
-		}
+	// Soft-validate Bridge status; knowledgetool still rejects foreign hits.
+	if r.Status != "" && r.Status != "matched" && r.Status != "empty" {
+		return nil, "", errors.New("知识库服务返回了无效的检索结果")
 	}
 	out := make([]knowledgetool.RawHit, 0, len(r.Hits))
 	for _, hit := range r.Hits {
@@ -166,13 +151,6 @@ func (a *App) emitKnowledgeToolContext(e *sessionEntry, status string, hits []kn
 			Sources:   sources,
 		},
 	})
-	if state != nil && applied {
-		a.mu.Lock()
-		if e.knowledgeTurn != nil {
-			e.knowledgeTurn.recordSources(questionID, sources)
-		}
-		a.mu.Unlock()
-	}
 }
 
 // knowledgeTools returns ExtraTools for knowledge_search when the session can use Bridge knowledge.

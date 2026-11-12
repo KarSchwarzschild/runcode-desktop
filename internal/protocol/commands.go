@@ -17,9 +17,6 @@ import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 
 // CommandKinds 按名字给每条命令分类。
 var CommandKinds = map[string]hostproto.CommandKind{
-	"CreateKnowledgeChat":        hostproto.CommandTrigger,
-	"RenameKnowledgeChat":        hostproto.CommandIdempotentSet,
-	"ExportKnowledgeChat":        hostproto.CommandQuery,
 	"GetModelContextSettings":    hostproto.CommandQuery,
 	"SaveModelContextSettings":   hostproto.CommandIdempotentSet,
 	"GetVisionSettings":          hostproto.CommandQuery,

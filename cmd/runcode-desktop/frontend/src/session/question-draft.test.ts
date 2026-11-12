@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cancelQuestion, editQuestion, emptyDraft, retryLibraries, selectRetryKnowledge, retryKnowledgeOverride } from './question-draft'
+import { cancelQuestion, editQuestion, emptyDraft, retryLibraries, selectRetryKnowledge } from './question-draft'
 import type { QuestionDraft } from '@/core/bridge'
 
 const original: QuestionDraft = {
@@ -13,9 +13,7 @@ describe('question edit drafts', () => {
     const saved = { text: 'new unsent draft', attachments: [] }
     const draft = editQuestion(saved, { ...original, knowledge: { libraries: [library], status: 'ready', applied: true, sources: [] } })
     expect(retryLibraries(draft)).toEqual([library])
-    expect(retryKnowledgeOverride(draft)).toBeUndefined()
     const cleared = selectRetryKnowledge(draft, [])
-    expect(retryKnowledgeOverride(cleared)).toEqual({ libraryIds: [] })
     expect(retryLibraries(cleared)).toEqual([])
     expect(draft.retry?.original.knowledge?.libraries).toEqual([library])
     expect(cancelQuestion(cleared)).toBe(saved)
@@ -23,7 +21,7 @@ describe('question edit drafts', () => {
   it('deduplicates edited selection and rejects a sixth library without replacing the draft', () => {
     const draft = editQuestion(emptyDraft(), original)
     const libraries = Array.from({ length: 6 }, (_, i) => ({ id: String(i), title: 'same title', description: '', path: '', source: '', documentCount: 0, documentCountKnown: false }))
-    expect(retryKnowledgeOverride(selectRetryKnowledge(draft, [libraries[0], libraries[0], libraries[1]]))).toEqual({ libraryIds: ['0', '1'] })
+    expect(retryLibraries(selectRetryKnowledge(draft, [libraries[0], libraries[0], libraries[1]])).map(l => l.id)).toEqual(['0', '1'])
     expect(selectRetryKnowledge(draft, libraries)).toBe(draft)
   })
   it('loads full original content and source-bound images, not display text', () => {

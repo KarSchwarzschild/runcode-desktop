@@ -11,13 +11,18 @@ describe('knowledge settings unlock', () => {
   it('selectedKnowledgeDoesNotBlockNormalSettings', () => {
     const info = {
       sessionId: 'A',
-      kind: 'agent',
       model: 'platform-model',
+      cwd: '',
       permissionMode: 'interactive',
       planMode: false,
       thinkingEffort: 'medium',
       reasoningScenario: 'auto',
-    } as SessionInfo
+      maxContextTokens: 0,
+      inputPricePerMTok: 0,
+      outputPricePerMTok: 0,
+      pricingSource: '',
+      previewBaseURL: '',
+    } satisfies SessionInfo
     const toolbar = renderToStaticMarkup(
       <ComposerToolbar
         busy={false}
@@ -60,11 +65,18 @@ describe('knowledge settings unlock', () => {
     const pickModel = vi.fn(async () => { throw new Error('模型切换失败') })
     const info = {
       sessionId: 'A',
-      kind: 'agent',
       model: 'keep-me',
+      cwd: '',
       permissionMode: 'interactive',
-      readOnlyReason: '',
-    } as SessionInfo
+      planMode: false,
+      thinkingEffort: 'off',
+      reasoningScenario: 'auto',
+      maxContextTokens: 0,
+      inputPricePerMTok: 0,
+      outputPricePerMTok: 0,
+      pricingSource: '',
+      previewBaseURL: '',
+    } satisfies SessionInfo
     // 工具栏仅在只读历史禁用；选库本身不禁用，失败由上层 toast／状态处理，不清选库。
     const markup = renderToStaticMarkup(
       <ComposerToolbar

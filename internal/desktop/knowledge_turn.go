@@ -22,14 +22,12 @@ type knowledgeTurnState struct {
 	snap      knowledgetool.Snapshot
 	// outcomeByQuestion: completed | failed | cancelled | unknown
 	outcomeByQuestion map[string]string
-	sourcesByQuestion map[string][]KnowledgeSource
 }
 
 func newKnowledgeTurnState(sessionID string) *knowledgeTurnState {
 	return &knowledgeTurnState{
 		sessionID:         sessionID,
 		outcomeByQuestion: map[string]string{},
-		sourcesByQuestion: map[string][]KnowledgeSource{},
 	}
 }
 
@@ -62,16 +60,6 @@ func (s *knowledgeTurnState) bindQuestion(questionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.snap.QuestionID = questionID
-}
-
-func (s *knowledgeTurnState) recordSources(questionID string, sources []KnowledgeSource) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if questionID == "" {
-		return
-	}
-	cp := append([]KnowledgeSource(nil), sources...)
-	s.sourcesByQuestion[questionID] = cp
 }
 
 func (s *knowledgeTurnState) markOutcome(questionID, outcome string) {
