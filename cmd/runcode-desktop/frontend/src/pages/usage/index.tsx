@@ -1,12 +1,12 @@
 // 用量统计页：我的平台用量 · 当前租户。身份来自应用登录状态，统计租户只读取得初始值、
 // 页内切换只影响本页；未登录、无权、不支持、超时、暂不可用各自说明，不写成「暂无数据」。
 import { useState, type ReactNode } from 'react'
-import type { PassportStatus } from '@/core/bridge'
+import type { PassportStatus, UsageDimensionRow } from '@/core/bridge'
 import { passportDisplayName } from '@/core/passport-account'
 import { USAGE_TIMEZONE, formatShanghai, type UsageFailure } from '@/core/usage'
 import { PageShell, Placeholder } from '@/ui/layout'
 import { Banner, InlineError } from '@/ui/feedback'
-import { SelectField } from '@/ui/fields'
+import { FIELD_CLS, SelectField } from '@/ui/fields'
 import { Icon } from '@/ui/icons'
 import { BTN, BTN_PRIMARY } from '@/ui/tokens'
 import { RangePicker } from './range-picker'
@@ -15,11 +15,67 @@ import { UsageTrend, type TrendMode } from './trend'
 import { UsageRequests } from './requests'
 import { UsageDimensions } from './dimensions'
 import { useUsageTenants } from './tenant'
-import { useUsage } from './use-usage'
+import { useUsage, type UsageGroupBy, type UsageOptionCandidate } from './use-usage'
 
 const PAGE_WIDTH = 1120
 const PANEL = 'bg-surface border border-line2 rounded-card p-5 flex flex-col gap-3 items-start shadow-xs'
-const OPTION_LIMIT = 100
+
+/** 筛选候选：SelectField + 显式搜索与「加载更多」；搜索只改候选，选定才改统计 filters。 */
+function OptionFilter({
+  kind, value, options, candidate, selectedLabel, disabled, onSelect, onSearch, onLoadMore,
+}: {
+  kind: UsageGroupBy
+  value: string
+  options: UsageDimensionRow[]
+  candidate: UsageOptionCandidate
+  selectedLabel: string
+  disabled: boolean
+  onSelect: (id: string) => void
+  onSearch: (text: string) => void
+  onLoadMore: () => void
+}) {
+  const [draft, setDraft] = useState('')
+  const allLabel = kind === 'model' ? '全部模型' : '全部供应商'
+  const searchLabel = kind === 'model' ? '搜索模型候选' : '搜索供应商候选'
+  const searchAction = kind === 'model' ? '执行模型候选搜索' : '执行供应商候选搜索'
+  const moreAction = kind === 'model' ? '加载更多模型候选' : '加载更多供应商候选'
+  const selectLabel = kind === 'model' ? '筛选模型' : '筛选供应商'
+  const unknownLabel = kind === 'provider' ? '未记录' : selectedLabel
+  return (
+    <div className="flex flex-col gap-1.5 min-w-[220px]">
+      <div className="flex items-center gap-1.5">
+        <input
+          aria-label={searchLabel}
+          value={draft}
+          disabled={disabled}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') onSearch(draft) }}
+          placeholder="搜索"
+          className={`${FIELD_CLS} flex-1 py-1.5 text-[12px]`}
+        />
+        <button type="button" aria-label={searchAction} className={`${BTN} py-1.5 text-[12px]`} disabled={disabled} onClick={() => onSearch(draft)}>
+          搜索
+        </button>
+      </div>
+      <SelectField value={value} onChange={onSelect} disabled={disabled} aria-label={selectLabel}>
+        <option value="">{allLabel}</option>
+        {value && !options.some((o) => o.id === value) && (
+          <option value={value}>{kind === 'provider' && (value === 'unknown' || !selectedLabel) ? unknownLabel : selectedLabel || value}</option>
+        )}
+        {options.map((o) => (
+          <option key={o.id} value={o.id}>
+            {kind === 'provider' && (o.id === 'unknown' || !o.name) ? '未记录' : (o.name || o.id)}
+          </option>
+        ))}
+      </SelectField>
+      {candidate.hasMore && (
+        <button type="button" aria-label={moreAction} className={`${BTN} self-start py-1 text-[12px]`} disabled={disabled} onClick={onLoadMore}>
+          加载更多{candidate.totalCount !== '0' ? `（已 ${options.length}/${candidate.totalCount}）` : ''}
+        </button>
+      )}
+    </div>
+  )
+}
 
 const FAILURE_TITLES: Partial<Record<UsageFailure['kind'], string>> = {
   notLoggedIn: '通行证登录已失效',
@@ -179,6 +235,7 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
   const providers = usage.providerOptions
   const selectedModel = usage.filters.model ?? ''
   const selectedProvider = usage.filters.providerId ?? ''
+  const selectedProviderName = providers.find((p) => p.id === selectedProvider)?.name ?? selectedProvider
   return (
     <PageShell title="用量统计" hint="我的平台用量 · 当前租户" width={PAGE_WIDTH} action={action}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-muted bg-surface2 border border-line2 rounded-field px-3 py-2">
@@ -201,24 +258,32 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
         <span>来源：平台已入账的消费记录（暂不含嵌套子调用，不含自定义直连模型）</span>
       </div>
       {tenants.selected && (
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-end gap-3">
           {providerBreakdown && (
-            <div className="w-[180px]">
-              <SelectField value={selectedProvider} onChange={usage.setProvider} disabled={usage.loading}>
-                <option value="">全部供应商</option>
-                {providers.map((p) => <option key={p.id} value={p.id}>{p.id === 'unknown' || !p.name ? '未记录' : p.name}</option>)}
-              </SelectField>
-            </div>
+            <OptionFilter
+              kind="provider"
+              value={selectedProvider}
+              options={providers}
+              candidate={usage.providerCandidate}
+              selectedLabel={selectedProviderName}
+              disabled={usage.loading}
+              onSelect={usage.setProvider}
+              onSearch={(text) => void usage.searchOptions('provider', text)}
+              onLoadMore={() => void usage.loadMoreOptions('provider')}
+            />
           )}
-          <div className="w-[220px]">
-            <SelectField value={selectedModel} onChange={usage.setModel} disabled={usage.loading}>
-              <option value="">全部模型</option>
-              {selectedModel && !models.some((m) => m.id === selectedModel) && <option value={selectedModel}>{selectedModel}</option>}
-              {models.map((m) => <option key={m.id} value={m.id}>{m.name || m.id}</option>)}
-            </SelectField>
-          </div>
+          <OptionFilter
+            kind="model"
+            value={selectedModel}
+            options={models}
+            candidate={usage.modelCandidate}
+            selectedLabel={selectedModel}
+            disabled={usage.loading}
+            onSelect={usage.setModel}
+            onSearch={(text) => void usage.searchOptions('model', text)}
+            onLoadMore={() => void usage.loadMoreOptions('model')}
+          />
           <RangePicker value={usage.selection} onApply={usage.setSelection} disabled={usage.loading && !overview} />
-          {models.length >= OPTION_LIMIT && <span className="text-[12px] text-faint">模型下拉仅列出请求最多的前 {OPTION_LIMIT} 个</span>}
         </div>
       )}
       {body}

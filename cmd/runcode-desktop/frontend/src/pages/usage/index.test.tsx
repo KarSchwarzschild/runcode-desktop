@@ -109,4 +109,60 @@ describe('UsagePage', () => {
     expect(t).not.toContain('暂无记录')
     expect([...host.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true)
   })
+
+  it('模型候选可搜索与加载更多；长名完整进选项；选中项保留；无前 N 截断文案', async () => {
+    const longName = '超级超级超级长的历史模型名称-needle-101'
+    const totals = fixtureOverview().summary
+    const setInput = (el: HTMLInputElement, value: string) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(el, value)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    const setSelect = (el: HTMLSelectElement, value: string) => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(el, value)
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    }
+    native.overview.mockResolvedValue(fixtureOverview({
+      capabilities: { providerBreakdown: true, cacheMetrics: true, requestStatus: false, ttft: false },
+    }))
+    native.dimensions.mockImplementation(async (q: { groupBy: string; page: number; search?: string }) => {
+      const base = { effectiveRange: fixtureOverview().effectiveRange, queryKey: 'qk', pageSize: 50 as const }
+      if (q.groupBy === 'provider') {
+        return { items: [{ id: 'prov-a', name: '供应商甲', totals }], groupBy: 'provider', page: 1, totalCount: '1', hasMore: false, ...base }
+      }
+      if (q.search === 'needle') {
+        return { items: [{ id: 'needle-101', name: longName, totals }], groupBy: 'model', page: 1, totalCount: '1', hasMore: false, ...base }
+      }
+      if (q.page === 2) {
+        return { items: [{ id: 'm-51', name: 'model-51', totals }], groupBy: 'model', page: 2, totalCount: '80', hasMore: false, ...base }
+      }
+      return {
+        items: Array.from({ length: 50 }, (_, i) => ({ id: `m-${i + 1}`, name: `model-${i + 1}`, totals })),
+        groupBy: 'model', page: 1, totalCount: '80', hasMore: true, ...base,
+      }
+    })
+    await render(user)
+
+    const modelSearch = host.querySelector('input[aria-label="搜索模型候选"]') as HTMLInputElement
+    const modelSearchBtn = [...host.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '执行模型候选搜索')!
+    const loadMore = [...host.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '加载更多模型候选')!
+    expect(modelSearch).toBeTruthy()
+    expect(loadMore).toBeTruthy()
+    expect(host.textContent).not.toMatch(/前\s*100\s*个|仅列出请求最多/)
+
+    const modelSelect = host.querySelector('select[aria-label="筛选模型"]') as HTMLSelectElement
+    await act(async () => setSelect(modelSelect, 'm-1'))
+    expect(modelSelect.value).toBe('m-1')
+
+    await act(async () => loadMore.click())
+    expect([...modelSelect.options].some((o) => o.value === 'm-51')).toBe(true)
+    expect(modelSelect.value).toBe('m-1')
+
+    await act(async () => setInput(modelSearch, 'needle'))
+    await act(async () => modelSearchBtn.click())
+    const selectAfter = host.querySelector('select[aria-label="筛选模型"]') as HTMLSelectElement
+    expect([...selectAfter.options].some((o) => o.textContent === longName)).toBe(true)
+    expect([...selectAfter.options].some((o) => o.value === 'm-1')).toBe(true)
+    expect(selectAfter.value).toBe('m-1')
+    expect(host.querySelector('input[aria-label="搜索供应商候选"]')).toBeTruthy()
+  })
 })

@@ -2,7 +2,7 @@
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { Envelope, PassportStatus, UsageDimensionsPage, UsageOverview, UsageRequestsPage } from '@/core/bridge'
+import type { Envelope, PassportStatus, UsageDimensionRow, UsageDimensionsPage, UsageOverview, UsageRequestsPage } from '@/core/bridge'
 import { Events } from '@/core/bridge'
 import { usePassportStatus } from '@/session/use-passport'
 import { useUsage } from './use-usage'
@@ -41,8 +41,12 @@ const overview = (scopeId: string, requestCount = '2'): UsageOverview => ({
 const requestsPage = (cursor: string, hasMore = true): UsageRequestsPage => ({
   items: [], totalCount: '45', pageSize: 20, nextCursor: hasMore ? `${cursor}>next` : '', hasMore, effectiveRange: range, queryKey: 'qk',
 })
-const dimensionsPage = (): UsageDimensionsPage => ({
+const dimRow = (id: string, name = id): UsageDimensionRow => ({
+  id, name, totals: overview('row').summary,
+})
+const dimensionsPage = (over: Partial<UsageDimensionsPage> = {}): UsageDimensionsPage => ({
   items: [], groupBy: 'model', page: 1, pageSize: 50, totalCount: '0', hasMore: false, effectiveRange: range, queryKey: 'qk',
+  ...over,
 })
 
 type Usage = ReturnType<typeof useUsage>
@@ -187,6 +191,139 @@ describe('useUsage', () => {
     const last = native.overview.mock.calls[native.overview.mock.calls.length - 1][0]
     expect(last.providerId).toBe('dashscope')
     expect(last.model).toBeUndefined()
+  })
+
+  it('候选默认 pageSize=50，hasMore 时可加载第 51 项；无更多时不再请求', async () => {
+    const page1 = Array.from({ length: 50 }, (_, i) => dimRow(`m-${i + 1}`))
+    native.overview.mockResolvedValue(overview('A'))
+    native.dimensions.mockImplementation(async (q: { groupBy: string; page: number; pageSize: number; search?: string }) => {
+      if (q.groupBy !== 'model') return dimensionsPage({ groupBy: q.groupBy })
+      if (q.page === 1) {
+        expect(q.pageSize).toBe(50)
+        return dimensionsPage({ items: page1, page: 1, pageSize: 50, totalCount: '101', hasMore: true })
+      }
+      return dimensionsPage({
+        items: [dimRow('m-51'), dimRow('m-52')],
+        page: 2, pageSize: 50, totalCount: '101', hasMore: false, groupBy: 'model',
+      })
+    })
+    await mount('user-1', 'tenant-a')
+    expect(usage.modelOptions).toHaveLength(50)
+    expect(usage.modelCandidate.hasMore).toBe(true)
+    expect(usage.modelCandidate.pageSize).toBe(50)
+    expect(usage.modelCandidate.totalCount).toBe('101')
+
+    await act(async () => usage.loadMoreOptions('model'))
+    expect(usage.modelOptions.map((m) => m.id)).toContain('m-51')
+    expect(usage.modelOptions).toHaveLength(52)
+    expect(usage.modelCandidate.page).toBe(2)
+    expect(usage.modelCandidate.hasMore).toBe(false)
+
+    const calls = native.dimensions.mock.calls.length
+    await act(async () => usage.loadMoreOptions('model'))
+    expect(native.dimensions.mock.calls.length).toBe(calls)
+  })
+
+  it('超过 100 项可服务端搜索；跨页按 ID 去重；选中项不在首屏仍保留', async () => {
+    native.overview.mockResolvedValue(overview('A'))
+    native.dimensions.mockImplementation(async (q: { groupBy: string; page: number; search?: string }) => {
+      if (q.groupBy !== 'model') return dimensionsPage({ groupBy: q.groupBy })
+      if (q.search === 'needle') {
+        return dimensionsPage({
+          items: [dimRow('needle-101', 'needle-101-long-name')],
+          page: 1, pageSize: 50, totalCount: '1', hasMore: false, groupBy: 'model',
+        })
+      }
+      if (q.page === 2) {
+        return dimensionsPage({
+          items: [dimRow('m-1'), dimRow('m-51')],
+          page: 2, pageSize: 50, totalCount: '120', hasMore: true, groupBy: 'model',
+        })
+      }
+      return dimensionsPage({
+        items: Array.from({ length: 50 }, (_, i) => dimRow(`m-${i + 1}`)),
+        page: 1, pageSize: 50, totalCount: '120', hasMore: true, groupBy: 'model',
+      })
+    })
+    await mount('user-1', 'tenant-a')
+    await act(async () => usage.setModel('kept-selected'))
+    expect(usage.filters.model).toBe('kept-selected')
+
+    await act(async () => usage.loadMoreOptions('model'))
+    expect(usage.modelOptions.filter((m) => m.id === 'm-1')).toHaveLength(1)
+    expect(usage.modelOptions.map((m) => m.id)).toContain('m-51')
+
+    await act(async () => usage.searchOptions('model', 'needle'))
+    expect(native.dimensions).toHaveBeenCalledWith(expect.objectContaining({
+      groupBy: 'model', search: 'needle', page: 1, pageSize: 50,
+    }))
+    expect(usage.modelOptions.map((m) => m.id)).toEqual(['needle-101'])
+    expect(usage.modelCandidate.search).toBe('needle')
+    expect(usage.filters.model).toBe('kept-selected')
+  })
+
+  it('候选读取失败保留已选项与既有候选，不把失败伪装成没有更多；忙时忽略重复操作', async () => {
+    native.overview.mockResolvedValue(overview('A'))
+    native.dimensions.mockResolvedValue(dimensionsPage({
+      items: [dimRow('m-1')], page: 1, pageSize: 50, totalCount: '80', hasMore: true, groupBy: 'model',
+    }))
+    await mount('user-1', 'tenant-a')
+    await act(async () => usage.setModel('m-1'))
+    expect(usage.modelCandidate.hasMore).toBe(true)
+
+    native.dimensions.mockRejectedValueOnce(new Error(JSON.stringify({ code: 'usage_timeout', message: '统计超时' })))
+    await act(async () => usage.loadMoreOptions('model'))
+    expect(usage.modelOptions.map((m) => m.id)).toEqual(['m-1'])
+    expect(usage.modelCandidate.hasMore).toBe(true)
+    expect(usage.filters.model).toBe('m-1')
+    expect(usage.stale).toBe(true)
+
+    let release!: (v: UsageDimensionsPage) => void
+    native.dimensions.mockImplementation(() => new Promise<UsageDimensionsPage>((yes) => { release = yes }))
+    await act(async () => { void usage.searchOptions('model', 'x') })
+    const during = native.dimensions.mock.calls.length
+    await act(async () => { void usage.loadMoreOptions('model') })
+    expect(native.dimensions.mock.calls.length).toBe(during)
+    await act(async () => release(dimensionsPage({ items: [dimRow('x-1')], page: 1, hasMore: false, groupBy: 'model' })))
+  })
+
+  it('换租户清空候选；providerBreakdown=false 不查供应商候选；旧搜索响应丢弃', async () => {
+    native.overview.mockImplementation(async (q: { tenantId: string }) => ({
+      ...overview(q.tenantId),
+      capabilities: {
+        providerBreakdown: q.tenantId === 'tenant-b',
+        cacheMetrics: false, requestStatus: false, ttft: false,
+      },
+    }))
+    native.dimensions.mockResolvedValue(dimensionsPage({
+      items: [dimRow('m-a')], page: 1, pageSize: 50, totalCount: '1', hasMore: false, groupBy: 'model',
+    }))
+    await mount('user-1', 'tenant-a')
+    expect(usage.modelOptions.map((m) => m.id)).toEqual(['m-a'])
+    expect(usage.providerOptions).toEqual([])
+    expect(native.dimensions.mock.calls.every(([q]) => q.groupBy !== 'provider')).toBe(true)
+
+    let releaseSearch!: (v: UsageDimensionsPage) => void
+    native.dimensions.mockImplementation((q: { tenantId?: string; groupBy: string; search?: string }) => {
+      if (q.search === 'stale') return new Promise<UsageDimensionsPage>((yes) => { releaseSearch = yes })
+      if (q.groupBy === 'provider') {
+        return Promise.resolve(dimensionsPage({
+          items: [dimRow('prov-1', '供应商一')], groupBy: 'provider', page: 1, pageSize: 50, totalCount: '1', hasMore: false,
+        }))
+      }
+      return Promise.resolve(dimensionsPage({
+        items: [dimRow('m-b')], groupBy: 'model', page: 1, pageSize: 50, totalCount: '1', hasMore: false,
+      }))
+    })
+    await act(async () => { void usage.searchOptions('model', 'stale') })
+    await mount('user-1', 'tenant-b')
+    expect(usage.modelOptions.map((m) => m.id)).toEqual(['m-b'])
+    expect(usage.providerOptions.map((p) => p.id)).toEqual(['prov-1'])
+    expect(usage.modelCandidate.search).toBe('')
+    await act(async () => releaseSearch(dimensionsPage({
+      items: [dimRow('should-not-appear')], page: 1, hasMore: false, groupBy: 'model',
+    })))
+    expect(usage.modelOptions.map((m) => m.id)).toEqual(['m-b'])
   })
 })
 
