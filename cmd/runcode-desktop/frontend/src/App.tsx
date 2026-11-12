@@ -34,6 +34,7 @@ import { AskpassModal } from '@/shell/askpass-modal'
 import { PreviewSide } from '@/shell/preview-side'
 import { Sidebar } from '@/shell/sidebar'
 import { Composer } from '@/composer'
+import type { ComposerEditorHandle } from '@/composer/inline-editor'
 import { type BuiltinAction } from '@/composer/scenario-bar'
 import { InstallOverlay } from '@/composer/install-overlay'
 import { LiveRecorderCard } from '@/chat/recorder-card'
@@ -46,13 +47,14 @@ import { PermissionsPage } from '@/pages/permissions'
 import { MemoryPage } from '@/pages/memory'
 import { SettingsPage } from '@/pages/settings'
 import { StartForm } from '@/pages/start'
+import { UsagePage } from '@/pages/usage'
 
-export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory'
+export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
 
 export default function App() {
   const [view, setView] = useState<View>('chat')
   // 输入草稿按会话存：在 A 里写了一半切到 B，那半句不该跟着过去。
-  const taRef = useRef<HTMLTextAreaElement>(null)
+  const taRef = useRef<ComposerEditorHandle>(null)
   // 侧栏折叠态：上提到这里，让折叠开关能放到主栏顶部状态条（「空闲」前），
   // 而侧栏本身按此 prop 变宽窄。
   const [sidebarCollapsed, toggleSidebar] = usePersistentBool('sidebar.collapsed', false)
@@ -140,13 +142,13 @@ export default function App() {
     onKnowledgeInvalidated: ids => { ids.forEach(id => drafts.update(id, emptyDraft)); preview.closeAll() },
   })
   const knowledge = useKnowledge(session.info?.sessionId ?? '')
+  // 独立知识库只读会话已移除；普通会话始终可用工具与文件能力。
+  const restrictedConversation = false
   const questionRetry = useQuestionRetry({
     sessionId: focusedId,
     blocked: conversation.busy || conversation.compacting || session.switching,
     drafts, conversation, session, textarea: taRef, notify: toast.show, knowledge,
   })
-  // 独立知识库只读会话已移除；普通会话始终可用工具与文件能力。
-  const restrictedConversation = false
   useEffect(() => {
     infoRef.current = session.info
     setFocusedId(session.info?.sessionId ?? '')
@@ -336,6 +338,9 @@ export default function App() {
             restrictedConversation ? <p className="p-6 text-muted">此会话不使用工具或文件授权。请新建普通会话管理权限。</p> : <PermissionsPage sessionID={focusedId} directoryAccess={directoryAccess} mode={session.info?.permissionMode} onPickMode={session.pickMode} />
           ) : view === 'memory' ? (
             <MemoryPage />
+          ) : view === 'usage' ? (
+            // 统计页只读平台记录，不影响后台会话；未登录时页内引导去设置页登录。
+            <UsagePage passport={passport} onOpenSettings={() => setView('settings')} />
           ) : (
             <>
               <ArtifactActionsContext.Provider value={preview.actions}><ChatPane
@@ -407,6 +412,7 @@ export default function App() {
                 onPickModel={session.pickModel}
                 builtinScenarios={builtinScenarios}
                 onPickScenario={(sc) => void pickScenario(sc)}
+                onOpenImageGenerationSettings={() => setView('settings')}
               />
             </>
           )}

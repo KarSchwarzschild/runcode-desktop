@@ -333,3 +333,23 @@ it('keeps image-model usage separate across progress and completion', () => {
   const progress = mergeTool(start, { ...start, type: 'progress', inputTokens: 42, outputTokens: 9 })
   expect(mergeTool(progress, { ...start, type: 'completed' })).toMatchObject({ inputTokens: 42, outputTokens: 9 })
 })
+
+describe('image generation blocks', () => {
+  const result = { version: 1, generationId: 'g', status: 'succeeded', model: 'm', size: '1024x1024', accountingStatus: 'unverified', images: [{ path: '生成图片/g/image.png', mimeType: 'image/png', bytes: 1, width: 1, height: 1 }] }
+  it('生图工具独立成卡片，带来源会话，不并进可折叠的执行列表', () => {
+    const blocks: Block[] = [
+      { kind: 'tool', id: 'a', tool: { type: 'completed', toolName: 'Read', toolUseID: 'r' } as ToolEvent },
+      { kind: 'tool', id: 'b', sessionId: 'S', tool: { type: 'completed', toolName: 'image_generate', toolUseID: 'i', data: result } as ToolEvent },
+      { kind: 'tool', id: 'c', tool: { type: 'completed', toolName: 'Grep', toolUseID: 'g' } as ToolEvent },
+    ]
+    const groups = groupBlocks(blocks)
+    expect(groups.map((g) => g.kind)).toEqual(['exec', 'image', 'exec'])
+    expect(groups[1]).toMatchObject({ kind: 'image', sessionId: 'S', tool: { toolUseID: 'i' } })
+  })
+  it('completed 事件不带 data 时保留之前的生图结果', () => {
+    const prev = { type: 'progress', toolName: 'image_generate', toolUseID: 'i', data: result } as ToolEvent
+    const merged = mergeTool(prev, { type: 'completed', toolName: 'image_generate', toolUseID: 'i' } as ToolEvent)
+    expect(merged.data).toEqual(result)
+    expect(merged.type).toBe('completed')
+  })
+})

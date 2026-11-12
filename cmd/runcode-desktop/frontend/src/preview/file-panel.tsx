@@ -70,7 +70,8 @@ export function PreviewPanel({ artifact, relPath, onClose }: { artifact?: Artifa
   // with a fresh arrow never re-triggers the read below.
   const onCloseRef = useRef(onClose)
   onCloseRef.current = onClose
-  const textual = kind === 'markdown' || kind === 'code' || kind === 'text'
+  // mermaid 源文件侧栏先按源码显示（方案 5.2）；对话内联预览另走静态渲染。
+  const textual = kind === 'markdown' || kind === 'code' || kind === 'text' || kind === 'mermaid'
 
   useEffect(() => {
     if (!textual) return
@@ -118,7 +119,7 @@ export function PreviewPanel({ artifact, relPath, onClose }: { artifact?: Artifa
           <div className="p-4 flex items-center justify-center min-h-full bg-inset/30"><img src={src(sourceURL)} alt={name} className="max-w-full" /></div>
         )}
         {kind === 'markdown' && text != null && <div className="p-4"><Markdown>{text}</Markdown></div>}
-        {kind === 'code' && text != null && <div className="p-4"><Markdown>{fencedCode(text, lang)}</Markdown></div>}
+        {(kind === 'code' || kind === 'mermaid') && text != null && <div className="p-4"><Markdown>{fencedCode(text, kind === 'mermaid' ? 'mermaid' : lang)}</Markdown></div>}
         {kind === 'text' && text != null && (
           <pre className="m-0 p-4 font-mono text-[13px] leading-[1.6] whitespace-pre-wrap break-words">{text}</pre>
         )}

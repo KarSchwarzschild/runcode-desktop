@@ -22,6 +22,7 @@ export const Events = {
   PassportChanged: 'passport:changed',
   PermissionRequest: 'permission:request',
   PlanUpdated: 'plan:updated',
+  PreviewLifecycle: 'preview:lifecycle',
   RecorderLevel: 'recorder:level',
   RecorderState: 'recorder:state',
   RecorderTranscript: 'recorder:transcript',
@@ -75,6 +76,14 @@ export const ErrCodes = {
   NotFound: 'not_found',
   NotLoggedIn: 'not_logged_in',
   Unavailable: 'unavailable',
+  UsageForbidden: 'usage_forbidden',
+  UsageIdentityChanged: 'usage_identity_changed',
+  UsageInvalidCursor: 'usage_invalid_cursor',
+  UsageInvalidRange: 'usage_invalid_range',
+  UsageInvalidResponse: 'usage_invalid_response',
+  UsageTimeout: 'usage_timeout',
+  UsageUnavailable: 'usage_unavailable',
+  UsageUnsupported: 'usage_unsupported',
 } as const;
 
 // ErrCode keeps unknown codes assignable so a newer host degrades gracefully.
@@ -293,6 +302,24 @@ export interface ContextUsage {
   iteration: number;
 }
 
+// Mirrors protocol.ConversationInfo. ConversationInfo 是桌面会话显示契约，Kind 区分普通引擎和宿主知识库问答。 保留既有引擎 SessionInfo 的显示字段，新增桌面模式无需修改引擎协议。
+export interface ConversationInfo {
+  kind?: string;
+  readOnlyReason?: string;
+  sessionId: string;
+  model: string;
+  cwd: string;
+  permissionMode: string;
+  planMode: boolean;
+  reasoningScenario: string;
+  thinkingEffort: string;
+  maxContextTokens: number;
+  inputPricePerMTok: number;
+  outputPricePerMTok: number;
+  pricingSource: string;
+  previewBaseURL: string;
+}
+
 // Mirrors protocol.CustomModel. CustomModel 是用户自定义的直连模型接入点，与通行证平台模型并列显示在模型 选择器里。Provider 通常是引擎 provider registry 的名称（openai/ openai-responses/anthropic），由 llm.IsRegistered 校验而非本仓库的名单；旧配置 没有该字段时由桌面端按 openai 兼容处理。 唯一的例外是 "codex"：它是**外壳层**的服务商，引擎注册表里没有这个名字。 桌面端在解析时把它翻译成 openai-responses（Codex 说的就是 Responses 协议）， 并把 Base URL 指向本地那个负责补凭据与指纹头的小代理，见 internal/codexproxy。密钥字段仅用于桌面端持久化， ListCustomModels 对外返回时必须清空，只通过 HasAPIKey 暴露是否已配置。
 export interface CustomModel {
   supportsImages?: boolean;
@@ -385,6 +412,59 @@ export interface HarmAutoAllow {
   reason: string;
   outcome: string;
   count: number;
+}
+
+// Mirrors protocol.ImageGenerationArtifact. ImageGenerationArtifact is one saved image, addressed relative to the workspace.
+export interface ImageGenerationArtifact {
+  path: string;
+  mimeType: string;
+  bytes: number;
+  width: number;
+  height: number;
+}
+
+// Mirrors protocol.ImageGenerationCatalog. ImageGenerationCatalog lists the image models of one account/Bridge/tenant scope.
+export interface ImageGenerationCatalog {
+  scopeId: string;
+  models: ImageGenerationModel[] | null;
+}
+
+// Mirrors protocol.ImageGenerationModel. ImageGenerationModel is one candidate in the settings catalog.
+export interface ImageGenerationModel {
+  model: ModelReference;
+  provider: string;
+  profile: ImageGenerationProfile;
+}
+
+// Mirrors protocol.ImageGenerationProfile. ImageGenerationProfile is the gateway-declared parameter profile of one image model.
+export interface ImageGenerationProfile {
+  available: boolean;
+  supportedSizes: string[] | null;
+  defaultSize: string;
+  responseFormats: string[] | null;
+  unavailableReason?: string;
+}
+
+// Mirrors protocol.ImageGenerationResult. ImageGenerationResult is the bounded result shared by the model's tool content, the live tool event and history replay.
+export interface ImageGenerationResult {
+  version: number;
+  generationId: string;
+  status: string;
+  code?: string;
+  model: string;
+  size: string;
+  images: ImageGenerationArtifact[] | null;
+  message?: string;
+  requestId?: string;
+  accountingStatus: string;
+}
+
+// Mirrors protocol.ImageGenerationSettings. ImageGenerationSettings is the saved default of one scope.
+export interface ImageGenerationSettings {
+  scopeId: string;
+  revision: number;
+  defaultModel?: ModelReference;
+  defaultSize: string;
 }
 
 // Mirrors protocol.Info. Info is the handshake payload describing the host's protocol support.
@@ -558,6 +638,7 @@ export interface OABlocked {
 
 // Mirrors protocol.OpenSessionInfo. OpenSessionInfo 描述**此刻开着**的一条会话，供界面画会话列表。 与 SessionSummary 的分工：那个是工作区里**存下来**的历史会话（标题、时间、 回合数），这个是当前进程里活着的会话。界面上是两栏：「打开中」与「历史」。 只带后端独有的事实。标题走 session:renamed 事件与 SessionSummary，待审批数在 前端的授权队列里——都不必在这里重复一遍，重复就会出现两个版本互相矛盾。
 export interface OpenSessionInfo {
+  kind?: string;
   sessionId: string;
   workspace: string;
   running: boolean;
@@ -572,6 +653,8 @@ export interface OutputLine {
 
 // Mirrors protocol.PassportModel. PassportModel 是 Bridge /v1/models 列表项。 Local 及其后两个字段是本产品对 OpenAI 模型清单的扩展，由基座的 bridge.catalog 下发（改 ConfigMap 即生效，客户端不必发版）: - Local 标记该模型的推理在内网完成。**客户端只认这个标记、不做二次判断**—— "这个 id 的渠道到底指向哪里"只有基座知道，把它写死在客户端等于让两处事实 互相漂移。标记错了的后果是保密数据出内网，所以基座那边要在配置旁写明依据。 - LocalDefault 指定 Local 模型里默认用哪一个。只标 Local 不够:清单顺序一变 就换了模型，而"换哪个模型"必须是显式声明。 - ContextTokens / MaxOutputTokens / MaxHistoryMessages 是逐模型默认预算。 新 Bridge 同时声明三项；缺失输出/历史字段表示旧目录，不能沿用其他模型的值。 VisionDefault is the unique tenant-authorized platform image fallback, not OA.
 export interface PassportModel {
+  imageGeneration?: ImageGenerationProfile;
+  capabilities?: string[] | null;
   maxOutputTokens?: number;
   maxHistoryMessages?: number;
   visionDefault?: boolean;
@@ -624,7 +707,7 @@ export interface PlanApproveRequest {
 
 // Mirrors protocol.PlanApproveResult. PlanApproveResult 把审批的两件后果一起带回前端：会话状态已变（计划模式关、权限模式 切好），以及应当作为下一条消息发出去的执行指令。指令由后端拼是为了让措辞与清单编号 只有一个来源（也便于单测），发送仍走前端既有的 send 路径，这样 busy、用户气泡、回合 生命周期全部复用原有链路。
 export interface PlanApproveResult {
-  info: SessionInfo;
+  info: ConversationInfo;
   executionPrompt: string;
 }
 
@@ -660,6 +743,13 @@ export interface PlanStep {
 export interface PlatformImageCapability {
   model: ModelReference;
   supportsImages: boolean;
+}
+
+// Mirrors protocol.PreviewLifecycle. PreviewLifecycle synchronizes desktop file-preview caches with session-instance rebuilds.
+export interface PreviewLifecycle {
+  sessionId: string;
+  phase: string;
+  generation?: string;
 }
 
 // Mirrors protocol.ProjectContextInfo. ProjectContextInfo is the workspace's project-instructions file (RUNCODE.md or AGENT.md), for viewing and editing.
@@ -804,6 +894,14 @@ export interface RecordingInfo {
   dir?: string;
 }
 
+// Mirrors protocol.ResolvedUsageQuery. ResolvedUsageQuery 是总览返回范围之后，日志与分组共用的查询条件；翻页沿用它， 不再各自解析相对时间。
+export interface ResolvedUsageQuery {
+  tenantId: string;
+  effectiveRange: UsageEffectiveRange;
+  providerId?: string;
+  model?: string;
+}
+
 // Mirrors protocol.ResultImage. ResultImage is an inline image a tool returned (Data is base64 in JSON).
 export interface ResultImage {
   media_type?: string;
@@ -825,7 +923,7 @@ export interface ResumedBlock {
 // Mirrors protocol.ResumedSession. ResumedSession carries a reopened session's status plus its prior conversation as rendered blocks so the frontend can repaint it.
 export interface ResumedSession {
   source?: QuestionReference;
-  info: SessionInfo;
+  info: ConversationInfo;
   blocks: ResumedBlock[] | null;
   contextTokens: number;
 }
@@ -840,6 +938,7 @@ export interface ResumedTool {
   input?: string;
   isError: boolean;
   output?: string;
+  imageGeneration?: ImageGenerationResult;
 }
 
 // Mirrors protocol.RetryNotice. RetryNotice reports that an LLM request failed transiently and is being retried.
@@ -906,6 +1005,15 @@ export interface SaveCustomModelRequest {
   clearAPIKey?: boolean;
 }
 
+// Mirrors protocol.SaveImageGenerationSettingsRequest. SaveImageGenerationSettingsRequest replaces one scope's default.
+export interface SaveImageGenerationSettingsRequest {
+  tenantId: string;
+  scopeId: string;
+  expectedRevision: number;
+  defaultModel?: ModelReference;
+  defaultSize: string;
+}
+
 // Mirrors protocol.SaveModelContextSettingsRequest. SaveModelContextSettingsRequest replaces or clears one model preference.
 export interface SaveModelContextSettingsRequest {
   model: ModelReference;
@@ -931,6 +1039,17 @@ export interface SecretStorage {
   ok: boolean;
   reason?: string;
   fix?: string;
+}
+
+// Mirrors protocol.SessionImageGenerationView. SessionImageGenerationView is one session's switch.
+export interface SessionImageGenerationView {
+  sessionId: string;
+  enabled: boolean;
+  revision: number;
+  available: boolean;
+  reason?: string;
+  model?: ModelReference;
+  size?: string;
 }
 
 // Mirrors protocol.SessionInfo. SessionInfo is the display state returned when a session starts and by Status.
@@ -966,6 +1085,7 @@ export interface SessionRenamed {
 
 // Mirrors protocol.SessionSummary. SessionSummary describes a saved session for the sidebar's recent list.
 export interface SessionSummary {
+  kind?: string;
   id: string;
   title: string;
   when: string;
@@ -976,6 +1096,13 @@ export interface SessionSummary {
 export interface SetPlatformImageCapabilityRequest {
   model: ModelReference;
   supportsImages?: boolean;
+}
+
+// Mirrors protocol.SetSessionImageGenerationRequest. SetSessionImageGenerationRequest changes one session's switch with a revision check.
+export interface SetSessionImageGenerationRequest {
+  sessionId: string;
+  enabled: boolean;
+  expectedRevision: number;
 }
 
 // Mirrors protocol.SetSessionKnowledgeRequest. SetSessionKnowledgeRequest replaces the entire selection using a revision check.
@@ -1177,6 +1304,173 @@ export interface UpdateInfo {
   file: string;
   autoRestart: boolean;
   installHint: string;
+}
+
+// Mirrors protocol.UsageBucket. UsageBucket 是趋势里的一个时间桶（首尾可能是被裁剪的部分桶）。coverage 取 known（已覆盖，没有记录就是真 0）/ gap（有证据的采集缺口）/ unknown（覆盖未知）。
+export interface UsageBucket {
+  startAt: string;
+  endAt: string;
+  requestCount: string;
+  inputTokens: string | null;
+  outputTokens: string | null;
+  totalTokens: string | null;
+  cacheHitTokens: string | null;
+  cacheEligibleInputTokens: string | null;
+  coverage: string;
+}
+
+// Mirrors protocol.UsageCapabilities. UsageCapabilities 声明本次数据能可靠支持哪些维度；requestStatus 与 ttft 首期恒为 false（日志里没有这些字段）。
+export interface UsageCapabilities {
+  providerBreakdown: boolean;
+  cacheMetrics: boolean;
+  requestStatus: boolean;
+  ttft: boolean;
+}
+
+// Mirrors protocol.UsageCoverageGap. UsageCoverageGap 是一段有证据的采集缺口。
+export interface UsageCoverageGap {
+  startAt: string;
+  endAt: string;
+}
+
+// Mirrors protocol.UsageDimensionRow. UsageDimensionRow 是一个模型或供应商的汇总；供应商无法确定时归入 unknown 分组。
+export interface UsageDimensionRow {
+  id: string;
+  name: string;
+  totals: UsageTotals;
+}
+
+// Mirrors protocol.UsageDimensionsPage. UsageDimensionsPage 是一页分组汇总，按请求数降序、ID 稳定排序。
+export interface UsageDimensionsPage {
+  items: UsageDimensionRow[] | null;
+  groupBy: string;
+  page: number;
+  pageSize: number;
+  totalCount: string;
+  hasMore: boolean;
+  effectiveRange: UsageEffectiveRange;
+  queryKey: string;
+}
+
+// Mirrors protocol.UsageDimensionsQuery. UsageDimensionsQuery 读取按模型或供应商分组的汇总（groupBy = model / provider）。 pageSize 只能是 50/100，page 从 1 开始。
+export interface UsageDimensionsQuery {
+  query: ResolvedUsageQuery;
+  groupBy: string;
+  search?: string;
+  page: number;
+  pageSize: number;
+}
+
+// Mirrors protocol.UsageEffectiveRange. UsageEffectiveRange 是 Bridge 为一次查询固定下来的半开区间 [startAt, endAt)。
+export interface UsageEffectiveRange {
+  startAt: string;
+  endAt: string;
+  timezone: string;
+}
+
+// Mirrors protocol.UsageOverview. UsageOverview 是同一次一致性读取得到的汇总、趋势与质量。dataAsOf 是服务端读取 时刻，不是入账水位；replicaLagSeconds 为 null 表示副本延迟未知。
+export interface UsageOverview {
+  scopeId: string;
+  queryKey: string;
+  effectiveRange: UsageEffectiveRange;
+  dataAsOf: string;
+  summary: UsageTotals;
+  trend: UsageBucket[] | null;
+  capabilities: UsageCapabilities;
+  empty: boolean;
+  coverageStart: string | null;
+  coverageGaps: UsageCoverageGap[] | null;
+  coverageStatus: string;
+  sourceKind?: string;
+  replicaLagSeconds: number | null;
+  consistency?: string;
+  mappingVersion?: string;
+}
+
+// Mirrors protocol.UsageQuality. UsageQuality 描述一组统计的口径覆盖：tokenCoverage / cacheCoverage 取 complete / partial / none；legacy 标记说明合计里含无法确认来源的历史口径。
+export interface UsageQuality {
+  tokenCoverage: string;
+  cacheCoverage: string;
+  containsEstimates: boolean;
+  containsLegacyUnknown: boolean;
+  containsLegacyInferredCache: boolean;
+  invalidRecordCount: string;
+}
+
+// Mirrors protocol.UsageQuery. UsageQuery 是总览查询。range 取 today / last24h / last7d / last14d / last30d / all / custom；custom 时 startAt 必填，endAt 与 followNow 二选一（followNow 只是 页面偏好：每次刷新由 Bridge 固定成读取时刻）。timezone 固定 Asia/Shanghai。
+export interface UsageQuery {
+  tenantId: string;
+  range: string;
+  startAt?: string;
+  endAt?: string;
+  followNow: boolean;
+  timezone: string;
+  providerId?: string;
+  model?: string;
+}
+
+// Mirrors protocol.UsageRequestRow. UsageRequestRow 是一条已入账的消费记录，只有计量与口径，没有正文或成本。 meterKind 不是 tokens 时 Token 各列为 null，用量见 usageQuantity + usageUnit。
+export interface UsageRequestRow {
+  id: string;
+  recordedAt: string;
+  startedAt: string | null;
+  model: string;
+  providerId: string | null;
+  providerName: string | null;
+  meterKind: string;
+  usageQuantity: string | null;
+  usageUnit: string | null;
+  inputTokens: string | null;
+  outputTokens: string | null;
+  cacheHitTokens: string | null;
+  cacheMissTokens: string | null;
+  reasoningTokens: string | null;
+  durationMs: number | null;
+  quality: UsageRowQuality;
+}
+
+// Mirrors protocol.UsageRequestsPage. UsageRequestsPage 是一页请求日志。totalCount 是读取时刻的可见总数，不是快照； nextCursor 由 Bridge 签名并绑定身份、范围与筛选，客户端原样回传。
+export interface UsageRequestsPage {
+  items: UsageRequestRow[] | null;
+  totalCount: string;
+  pageSize: number;
+  nextCursor?: string;
+  hasMore: boolean;
+  effectiveRange: UsageEffectiveRange;
+  queryKey: string;
+}
+
+// Mirrors protocol.UsageRequestsQuery. UsageRequestsQuery 读取一页请求日志。第一页不带 cursor；pageSize 只能是 20/50/100。
+export interface UsageRequestsQuery {
+  query: ResolvedUsageQuery;
+  cursor?: string;
+  pageSize: number;
+}
+
+// Mirrors protocol.UsageRowQuality. UsageRowQuality 是单条记录各项用量的来源口径（reported / estimated / derived / legacyUnknown / legacyInferred / unavailable）。
+export interface UsageRowQuality {
+  tokenSource: string;
+  cacheSource: string;
+  reasoningSource: string;
+}
+
+// Mirrors protocol.UsageTotals. UsageTotals 是一组记录的聚合。totalTokens = inputTokens + outputTokens（缓存是输入 子集、思考是输出子集，都不再相加）；缓存三项只统计可信缓存子集，命中率是 SUM(命中)/SUM(可信输入)。
+export interface UsageTotals {
+  requestCount: string;
+  tokenRequestCount: string;
+  inputTokens: string | null;
+  outputTokens: string | null;
+  totalTokens: string | null;
+  cacheHitTokens: string | null;
+  cacheMissTokens: string | null;
+  cacheEligibleInputTokens: string | null;
+  cacheHitRate: number | null;
+  cacheKnownRequestCount: string;
+  cacheEligibleRequestCount: string;
+  reasoningTokens: string | null;
+  durationSampleCount: string;
+  averageDurationMs: number | null;
+  quality: UsageQuality;
 }
 
 // Mirrors protocol.VisionSettings. VisionSettings configures the fixed destination for automatic image analysis.

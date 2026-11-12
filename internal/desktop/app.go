@@ -17,6 +17,7 @@ import (
 	"github.com/wt68/runcode/internal/browsertool"
 	"github.com/wt68/runcode/internal/codexauth"
 	"github.com/wt68/runcode/internal/codexproxy"
+	"github.com/wt68/runcode/internal/imagegentool"
 	"github.com/wt68/runcode/internal/knowledgetool"
 	"github.com/wt68/runcode/internal/officetool"
 	"github.com/wt68/runcode/internal/plantool"
@@ -90,6 +91,9 @@ type sessionEntry struct {
 	plans     *planStore
 	// knowledgeTurn holds the on-demand knowledge_search freeze and D01 notes.
 	knowledgeTurn *knowledgeTurnState
+	// imageGeneration holds this session instance's image_generate turn
+	// snapshot (nil for sessions that do not register the tool).
+	imageGeneration *imageGenerationTurnState
 
 	// turnActive mirrors whether this session has a turn in flight (set on
 	// submit, cleared when the sink adapter observes turn:end / turn:error).
@@ -237,6 +241,8 @@ type App struct {
 	pendingPlans *planStore
 	// pendingKnowledge parks knowledge_search turn state while Create is in flight.
 	pendingKnowledge *knowledgeTurnState
+	// pendingImageGeneration parks image_generate state while Create is in flight.
+	pendingImageGeneration *imageGenerationTurnState
 	// tokens holds the Passport OAuth tokens (memory + DPAPI persistence); it is
 	// also the engine's TokenSource. passportUser caches /api/me for PassportStatus.
 	// loginCancel cancels an in-flight browser login wait.
@@ -664,6 +670,8 @@ var hostToolClasses = func() map[string]permissions.ToolClass {
 		officetool.Name:     permissions.ClassReadOnly,
 		runtimetool.Name:    permissions.ClassMutating,
 		browsertool.Name:    permissions.ClassMutating,
+		// 生图会计费并写本地文件：每次都要用户批准，不按知识库那样的只读分类。
+		imagegentool.Name:   permissions.ClassMutating,
 		imageinput.ToolName: permissions.ClassReadOnly,
 		knowledgetool.Name:  permissions.ClassReadOnly,
 	}
@@ -747,7 +755,10 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		// runtimeResolver 只做展示：给 install_runtime 的审批弹窗配一句"装的是什么、
 		// 多大、装到哪"（见 runtimetool.go）。
 		Resolver: privilegeResolver{inner: runtimeResolver{
-			inner: browserResolver{inner: fileReadResolver{inner: permissions.WithToolClasses(nil, hostToolClasses)}},
+			inner: imageGenerationResolver{
+				inner: browserResolver{inner: fileReadResolver{inner: permissions.WithToolClasses(nil, hostToolClasses)}},
+				state: a.imageGenerationStateOf,
+			},
 			rt:    a.rt,
 			trust: a.ensureRuntimeTrust,
 		}},
@@ -840,6 +851,15 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 	} else {
 		a.mu.Lock()
 		a.pendingKnowledge = nil
+		a.mu.Unlock()
+	}
+	// image_generate：通行证主会话常驻注册；是否可用由每回合冻结的快照描述，关闭时
+	// Run 本地拒绝、零请求。
+	if ig := a.imageGenerationTools(cfg, sctx.ID, sctx.Generation); len(ig) > 0 {
+		opts.ExtraTools = append(opts.ExtraTools, ig...)
+	} else {
+		a.mu.Lock()
+		a.pendingImageGeneration = nil
 		a.mu.Unlock()
 	}
 
@@ -1078,6 +1098,8 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 	a.mu.Lock()
 	pendingEdits, pendingPlans, pendingEmit, pendingKnowledge := a.pendingEdits, a.pendingPlans, a.pendingEmit, a.pendingKnowledge
 	a.pendingEdits, a.pendingPlans, a.pendingEmit, a.pendingKnowledge = nil, nil, nil, nil
+	pendingImageGeneration := a.pendingImageGeneration
+	a.pendingImageGeneration = nil
 	if err != nil {
 		a.mu.Unlock()
 		return SessionInfo{}, err
@@ -1089,6 +1111,9 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 	a.registerSessionModeLocked(id, cfg.CWD, pendingEdits, pendingPlans, pendingEmit, focus)
 	entry := a.entryLocked(id)
 	entry.knowledgeTurn = pendingKnowledge
+	if pendingImageGeneration != nil && pendingImageGeneration.sessionID == id {
+		entry.imageGeneration = pendingImageGeneration
+	}
 	entry.connectionConfig, entry.passport, entry.tenantID = cfg, passport, strings.TrimSpace(tenantID)
 	a.bindKnowledgeLocked(entry)
 	entry.modelRef = modelRef
@@ -1151,11 +1176,14 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	if e == nil {
 		return nil
 	}
+	// 关闭前先发 invalidating，让前端丢掉该会话的内联文件缓存与在途读取。
+	a.emitPreviewLifecycle(e, "invalidating", "")
 	a.mu.Lock()
 	id := ""
 	if !e.closed {
 		id = e.id
 	}
+	emit := e.emit
 	a.mu.Unlock()
 	if id != "" {
 		if err := a.mgr.Close(ctx, id); err != nil {
@@ -1184,6 +1212,7 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	a.mu.Unlock()
 	a.dropArtifacts(e.id)
 	a.stopPreview(previewWorkspaceOf(e))
+	emitPreviewLifecycleTo(emit, e.id, "closed", "")
 	return nil
 }
 
@@ -1326,6 +1355,7 @@ func (a *App) Status(sessionID string) (SessionInfo, error) {
 // live preview base URL.
 func (a *App) sessionInfo(st engine.Status) SessionInfo {
 	return SessionInfo{
+		Kind:               "agent",
 		SessionID:          st.SessionID,
 		Model:              st.Model,
 		CWD:                st.CWD,

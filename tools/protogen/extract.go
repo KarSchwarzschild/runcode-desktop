@@ -48,6 +48,7 @@ import (
 var eventPayloads = map[string]string{
 	"EventKnowledgeContext":       "KnowledgeContextStatus",
 	"EventDirectoryAccessChanged": "DirectoryAccessChanged",
+	"EventPreviewLifecycle":       "PreviewLifecycle",
 	"EventAssistantDelta":         "AssistantDelta",
 	"EventAssistantThinking":      "AssistantDelta",
 	"EventContextUsage":           "ContextUsage",
@@ -61,7 +62,7 @@ var eventPayloads = map[string]string{
 	"EventPermissionRequest":      "PermissionRequest",
 	"EventPlanUpdated":            "PlanRun",
 	"EventSessionRenamed":         "SessionRenamed",
-	"EventSessionStatus":          "SessionInfo",
+	"EventSessionStatus":          "ConversationInfo",
 	"EventOABlocked":              "OABlocked",
 	"EventSkillInstall":           "SkillInstallProgress",
 	"EventUpdate":                 "UpdateInfo",

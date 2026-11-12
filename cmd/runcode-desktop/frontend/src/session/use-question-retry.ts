@@ -1,6 +1,7 @@
-import { useRef, useState, type RefObject } from 'react'
+﻿import { useRef, useState, type RefObject } from 'react'
 import { errText, forkQuestion, getQuestion, getSessionKnowledge, type QuestionDraft, type KnowledgeBaseSummary } from '@/core/bridge'
 import { basename } from '@/core/paths'
+import type { ComposerEditorHandle } from '@/composer/inline-editor'
 import type { Conversation } from './use-conversation'
 import type { Session } from './use-session'
 import type { useChatDrafts } from './use-chat-drafts'
@@ -14,7 +15,7 @@ export function useQuestionRetry({ sessionId, blocked, drafts, conversation, ses
   drafts: ReturnType<typeof useChatDrafts>
   conversation: Conversation
   session: Session
-  textarea: RefObject<HTMLTextAreaElement>
+  textarea: RefObject<ComposerEditorHandle>
   notify: (text: string) => void
   knowledge: SessionKnowledge
 }) {

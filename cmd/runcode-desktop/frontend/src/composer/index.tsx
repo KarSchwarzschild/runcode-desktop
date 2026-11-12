@@ -1,6 +1,8 @@
 import type { QuestionDraft } from '@/core/bridge'
 import type { SessionKnowledge } from '@/session/use-knowledge'
+import { useImageGeneration } from '@/session/use-image-generation'
 import { KnowledgeStatus, KnowledgePicker } from './knowledge-picker'
+import { InlineEditor, type ComposerEditorHandle } from './inline-editor'
 import { GhostBtn } from '@/ui/ghost-btn'
 // composer 是对话输入区：多行输入框、@技能 / /子代理 / #文件 三种触发的选择器、
 // 附件（选图、粘贴），以及底部工具条(拆到 ./toolbar)。选择器与附件等 UI 状态全部
@@ -51,6 +53,7 @@ export function Composer({
   onPickModel,
   builtinScenarios = {},
   onPickScenario,
+  onOpenImageGenerationSettings,
 }: {
   knowledge: SessionKnowledge
   attachments: Attachment[]
@@ -62,7 +65,7 @@ export function Composer({
   onRemoveOriginal: (index: number) => void
   input: string
   onInputChange: (v: string) => void
-  taRef: RefObject<HTMLTextAreaElement>
+  taRef: RefObject<ComposerEditorHandle>
   chatScrollRef: RefObject<HTMLDivElement>
   busy: boolean
   toast: string
@@ -87,15 +90,19 @@ export function Composer({
   // onPickScenario 把选中的场景交回 App：填提示词、选中占位符都要动 taRef 与
   // input，那两样都归 App 持有。
   onPickScenario: (s: Scenario) => void
+  // 前往「设置 → 图片生成」。可选：宿主还没接时，生图状态标记里改为文字提示。
+  onOpenImageGenerationSettings?: () => void
 }) {
+  const readOnlyReason = info?.readOnlyReason ?? ''
   const inputId = useId()
-  const resize = useComposerResize(taRef, chatScrollRef)
+  const editorElement = useRef<HTMLDivElement>(null)
+  const resize = useComposerResize(editorElement, chatScrollRef, knowledge.state.contextVersion)
   const [mention, setMention] = useState<{ query: string; start: number; sel: number; trigger: MentionTrigger } | null>(null)
   const closeMention = useCallback(() => setMention(null), [])
   const [sending, setSending] = useState(false)
   const sendingRef = useRef(false)
   const originalImages = (retry?.original.images ?? []).filter((i) => retry?.images.includes(i.index))
-  const locked = submitting || sending || (!!retry && retryDisabled)
+  const locked = submitting || sending || (!!retry && retryDisabled) || !!readOnlyReason
   // 当前题已在后端冻结选择，生成时改库仅影响下一题；禁止的是第二次提交。
   const knowledgeLocked = locked || busy
   const [knowledgeOpen, setKnowledgeOpen] = useState(false)
@@ -123,6 +130,21 @@ export function Composer({
   // 展开着的场景分类 id；'' = 没展开。与 mention 一样是纯界面状态，留在本组件。
   const [scenarioCat, setScenarioCat] = useState('')
   const closeScenario = useCallback(() => setScenarioCat(''), [])
+  // 「生成图片」开关跟着会话走；它与知识库互不影响，关一个不会动另一个。
+  const imageGen = useImageGeneration(sessionId)
+  async function toggleImageGeneration(on: boolean) {
+    const error = await imageGen.setEnabled(on, { busy })
+    if (error) onNotify?.(error)
+  }
+  const imageView = imageGen.state.view
+  const imageChip = readOnlyReason ? undefined : {
+    enabled: imageGen.enabled,
+    available: !!imageView?.available,
+    reason: imageView?.reason || (imageGen.state.loading ? '正在读取图片生成状态…' : imageGen.state.error || '会话创建后生效'),
+    model: imageView?.model?.name ?? '',
+    size: imageView?.size ?? '',
+    saving: imageGen.state.saving,
+  }
   const [chatSkills, setChatSkills] = useState<SkillInfo[]>([])
   const [chatAgents, setChatAgents] = useState<AgentInfo[]>([])
   const selItemRef = useRef<HTMLDivElement>(null)
@@ -134,13 +156,14 @@ export function Composer({
 
   // Composer pickers: skills (@) and sub-agents (/) — refreshed per session.
   useEffect(() => {
+    if (readOnlyReason) return
     listSkills()
       .then((l) => setChatSkills(l?.skills ?? []))
       .catch(() => setChatSkills([]))
     listAgents()
       .then((l) => setChatAgents(l?.agents ?? []))
       .catch(() => setChatAgents([]))
-  }, [sessionId])
+  }, [sessionId, readOnlyReason])
 
   const fileMatches = mention?.trigger === '#' ? rankFileMatches(files, mention.query) : []
   const skillMatches = mention?.trigger === '@' ? matchByNameOrDesc(chatSkills, mention.query) : []
@@ -154,6 +177,7 @@ export function Composer({
   const mentionRegion = usePickerDismiss(mentionVisible && mention ? `${mention.trigger}:${mention.start}` : '', closeMention)
 
   function syncMention(value: string, cursor: number) {
+    if (readOnlyReason) return
     mentionRegion.keepOpen()
     const m = computeMention(value, cursor)
     if (m) closeScenario()
@@ -191,6 +215,7 @@ export function Composer({
   }
 
   function openFilePicker() {
+    if (readOnlyReason) return
     mentionRegion.keepOpen()
     closeScenario()
     const sep = input && !/\s$/.test(input) ? ' ' : ''
@@ -206,6 +231,7 @@ export function Composer({
   // typing the trigger at the composer start. Both are start-of-input commands that
   // replace the whole input on pick, so each opens a fresh one.
   function openTriggerPicker(trigger: '@' | '/') {
+    if (readOnlyReason) return
     mentionRegion.keepOpen()
     closeScenario()
     onInputChange(trigger)
@@ -215,6 +241,7 @@ export function Composer({
   // Pick an image from disk and attach it to the next message. The path is kept in
   // `attachments` and the bytes are read backend-side at send time.
   async function pickAttachment() {
+    if (readOnlyReason) return
     try {
       const p = await pickImageAttachment()
       if (p) addAttachment({ path: p, image: true })
@@ -236,6 +263,7 @@ export function Composer({
   // 串行处理：并发几个几 MB 的 base64 只会一起挤 WebView 那一条 IPC。
   async function intake(files: File[]) {
     // 必须在 savePastedFile 之前拒绝附件，避免纯文字模式仍把私有文件写进工作区。
+    if (readOnlyReason) { onNotify?.(readOnlyReason); return }
     for (const f of files) {
       const tooLarge = tooLargeMessage(f)
       if (tooLarge) {
@@ -252,7 +280,7 @@ export function Composer({
   }
 
   // 粘贴。收不收由 shouldIntakePaste 定（有文本就让路，理由在那儿）。
-  async function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+  async function handlePaste(e: React.ClipboardEvent<HTMLDivElement>) {
     const data = e.clipboardData
     const files = Array.from(data?.files ?? [])
     if (!shouldIntakePaste(files.length, data?.getData('text/plain') ?? '')) return
@@ -304,7 +332,14 @@ export function Composer({
     const body = sendText(input, attachments)
     sendingRef.current = true
     setSending(true)
-    try { await onSend(body, images, text || undefined) }
+    try {
+      // 新会话的开关草稿先落盘成功才发首条消息；失败就不发，避免按未确认的状态跑回合。
+      if (!(await imageGen.ensureCommitted())) {
+        onNotify?.(imageGen.currentError() || '图片生成开关未能保存，消息未发送')
+        return
+      }
+      await onSend(body, images, text || undefined)
+    }
     catch (e) { onNotify?.(errText(e)) }
     finally { sendingRef.current = false; setSending(false) }
   }
@@ -312,7 +347,7 @@ export function Composer({
   const hoverMention = (i: number) => setMention((m) => (m ? { ...m, sel: i } : m))
   // 本次构建实际画得出来的分类：内置功能分类要有 App 交来的动作才算有（见
   // visibleScenarios），否则整类不画。
-  const categories = visibleScenarios(scenariosForProfile(BRAND.scenarioProfile), builtinScenarios)
+  const categories = readOnlyReason ? [] : visibleScenarios(scenariosForProfile(BRAND.scenarioProfile), builtinScenarios)
   const scenarioOpen = categories.find((c) => c.id === scenarioCat) ?? null
   const scenarioRegion = usePickerDismiss(!mention && scenarioOpen ? scenarioOpen.id : '', closeScenario)
 
@@ -358,6 +393,7 @@ export function Composer({
         )}
       </div>
       <div className="flow-root" ref={scenarioRegion.regionRef} {...scenarioRegion.pointerProps}>
+        {readOnlyReason && <p role="status" className="mb-2 text-[12px] text-amberink">{readOnlyReason}</p>}
         {info?.planMode && (
           <div className="flex items-center gap-2.5 mb-2 bg-primarysoft border border-primary rounded-xl px-3.5 py-2.5">
             <span className="text-primaryink flex-none"><Icon name="compass" size={16} /></span>
@@ -419,24 +455,29 @@ export function Composer({
           ))}
         </div>
       )}
-      <textarea
+      <InlineEditor
+        key={knowledge.state.contextVersion}
         ref={taRef}
+        elementRef={editorElement}
         id={inputId}
         style={{ height: resize.height }}
-        readOnly={submitting || sending}
+        readOnly={submitting || sending || !!readOnlyReason}
         className={`block w-full resize-none overflow-y-auto bg-surface text-ink border-x border-line2 px-4 py-3.5 outline-none placeholder:text-faint ${attachments.length > 0 ? '' : 'border-t rounded-t-card'}`}
         value={input}
-        placeholder={busy ? '回合进行中——输入后 Enter 立即补充，模型会在当前步骤结束后看到' : '继续对话，@ 技能，/ 子代理，# 文件；Enter 发送，Shift+Enter 换行'}
-        onChange={(e) => {
-          onInputChange(e.target.value)
-          syncMention(e.target.value, e.target.selectionStart ?? e.target.value.length)
+        libraries={[]}
+        knowledgeReadOnly
+        onKnowledgeChange={() => {}}
+        placeholder={readOnlyReason ? '此历史只读' : busy ? '回合进行中——输入后 Enter 立即补充，模型会在当前步骤结束后看到' : '继续对话，@ 技能，/ 子代理，# 文件；Enter 发送，Shift+Enter 换行'}
+        onChange={(text, caret) => {
+          onInputChange(text)
+          syncMention(text, caret)
         }}
         // 点回输入框只关闭候选；继续键入/移动光标才重新匹配，避免同一次点击又弹出。
         onClick={closeMention}
         onPaste={(e) => void handlePaste(e)}
         onKeyUp={(e) => {
           if (['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) {
-            syncMention(input, e.currentTarget.selectionStart ?? input.length)
+            syncMention(input, taRef.current?.getSelection().start ?? input.length)
           }
         }}
         onKeyDown={(e) => {
@@ -483,6 +524,9 @@ export function Composer({
         onPickModel={onPickModel}
         onSend={() => void handleSend()}
         onStop={onStop}
+        imageGeneration={imageChip}
+        onToggleImageGeneration={(on) => void toggleImageGeneration(on)}
+        onOpenImageGenerationSettings={onOpenImageGenerationSettings}
       />
     </footer>
   )

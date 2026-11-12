@@ -149,14 +149,15 @@ func (a *App) OpenSessions() []OpenSessionInfo {
 // CloseAllSessions 关掉所有开着的会话。退出时用：多会话之后「关掉当前那条」不再
 // 等于「收干净」，漏掉的会话会带着未收尾的回合和未落盘的记录一起被进程带走。
 func (a *App) CloseAllSessions() error {
-	a.startMu.Lock()
-	defer a.startMu.Unlock()
 	a.mu.Lock()
 	all := make([]*sessionEntry, 0, len(a.sessions))
 	for _, e := range a.sessions {
 		all = append(all, e)
+		_ = a.mgr.Interrupt(e.id)
 	}
 	a.mu.Unlock()
+	a.startMu.Lock()
+	defer a.startMu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), sessionCloseTimeout)
 	defer cancel()
 	for _, e := range all {

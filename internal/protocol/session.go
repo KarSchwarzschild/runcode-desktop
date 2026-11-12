@@ -1,7 +1,5 @@
 package protocol
 
-import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
-
 // StartSessionRequest opens a session for a workspace. Empty fields fall back to
 // the environment (ANTHROPIC_MODEL/API key/etc.), mirroring the CLI's resolution
 // for the values the host does not yet surface in a settings form.
@@ -67,6 +65,7 @@ type CompactResult struct {
 // 只带后端独有的事实。标题走 session:renamed 事件与 SessionSummary，待审批数在
 // 前端的授权队列里——都不必在这里重复一遍，重复就会出现两个版本互相矛盾。
 type OpenSessionInfo struct {
+	Kind      string `json:"kind,omitempty"`
 	SessionID string `json:"sessionId"`
 	// Workspace 是这条会话的工作目录。多个会话可以各在各的目录。
 	Workspace string `json:"workspace"`
@@ -78,6 +77,7 @@ type OpenSessionInfo struct {
 
 // SessionSummary describes a saved session for the sidebar's recent list.
 type SessionSummary struct {
+	Kind  string `json:"kind,omitempty"`
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	When  string `json:"when"`
@@ -110,14 +110,18 @@ type ResumedTool struct {
 	Input        string `json:"input,omitempty"` // the tool call's raw arguments JSON
 	IsError      bool   `json:"isError"`
 	Output       string `json:"output,omitempty"`
+	// ImageGeneration is an image_generate call's result, merged from the
+	// session's submission ledger (or its persisted tool content), so a reopened
+	// conversation repaints the image card without re-running anything.
+	ImageGeneration *ImageGenerationResult `json:"imageGeneration,omitempty"`
 }
 
 // ResumedSession carries a reopened session's status plus its prior conversation
 // as rendered blocks so the frontend can repaint it.
 type ResumedSession struct {
-	Source *QuestionReference    `json:"source,omitempty"`
-	Info   hostproto.SessionInfo `json:"info"`
-	Blocks []ResumedBlock        `json:"blocks"`
+	Source *QuestionReference `json:"source,omitempty"`
+	Info   ConversationInfo   `json:"info"`
+	Blocks []ResumedBlock     `json:"blocks"`
 	// ContextTokens is an estimate of the reopened history's context occupancy, so
 	// the usage bar shows a sensible value immediately instead of 0 (no turn has run
 	// yet to report an exact count). The first turn replaces it with the real value.

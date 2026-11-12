@@ -80,7 +80,7 @@ type (
 	SubmitQuestionRequest           = protocol.SubmitQuestionRequest
 	QuestionReceipt                 = hostproto.QuestionReceipt
 	// Turn stream, session state and approval — the engine host's contract.
-	SessionInfo       = hostproto.SessionInfo
+	SessionInfo       = protocol.ConversationInfo
 	AssistantDelta    = hostproto.AssistantDelta
 	Warning           = hostproto.Warning
 	TurnError         = hostproto.TurnError

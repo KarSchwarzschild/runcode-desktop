@@ -160,4 +160,19 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"RemoveRuntime":    hostproto.CommandTrigger,
 	"InstallUpdate":    hostproto.CommandTrigger,
 	"RevealUpdate":     hostproto.CommandTrigger,
+
+	// 文生图（IMG-GEN-001）：设置与会话开关。保存/切换是带 revision 的幂等设置——
+	// 同一目标重复提交返回当前视图，不重复增加 revision。没有直接生图的命令：真实
+	// 生成只经 image_generate 工具与现有审批。
+	"ListImageGenerationModels":   hostproto.CommandQuery,
+	"GetImageGenerationSettings":  hostproto.CommandQuery,
+	"SaveImageGenerationSettings": hostproto.CommandIdempotentSet,
+	"GetSessionImageGeneration":   hostproto.CommandQuery,
+	"SetSessionImageGeneration":   hostproto.CommandIdempotentSet,
+
+	// 用量统计（USAGE-001）：只读 GET Bridge /api/usage/*，可安全重试；不提供重算、
+	// 导出或读取日志正文的命令。
+	"GetUsageOverview":   hostproto.CommandQuery,
+	"GetUsageRequests":   hostproto.CommandQuery,
+	"GetUsageDimensions": hostproto.CommandQuery,
 }
