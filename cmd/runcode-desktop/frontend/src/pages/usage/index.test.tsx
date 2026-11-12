@@ -110,6 +110,59 @@ describe('UsagePage', () => {
     expect([...host.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true)
   })
 
+  it.each([
+    ['usage_unavailable', '用量服务暂不可用，请稍后重试'],
+    ['usage_forbidden', '当前账号无权查看所选租户的用量'],
+  ])('初次失败 %s：标题与消息同文时只出现一次，仍显示请求编号', async (code, same) => {
+    native.overview.mockRejectedValue(new Error(JSON.stringify({ code, message: same, details: { requestId: 'req-same' } })))
+    await render(user)
+    const t = host.textContent ?? ''
+    expect(t.split(same).length - 1).toBe(1)
+    expect(t).toContain('req-same')
+    expect([...host.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true)
+  })
+
+  it('刷新失败 warning：同原因不重复；差异详情与编号、重试保留', async () => {
+    await render(user)
+    expect(host.textContent).toContain('1.1万')
+
+    const same = '用量服务暂不可用，请稍后重试'
+    native.overview.mockRejectedValueOnce(new Error(JSON.stringify({
+      code: 'usage_unavailable', message: same, details: { requestId: 'req-warn-1' },
+    })))
+    const refresh = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('刷新'))!
+    await act(async () => refresh.click())
+    let t = host.textContent ?? ''
+    expect(t).toContain('刷新失败，显示上次数据')
+    expect(t).toContain('1.1万')
+    expect(t.split(same).length - 1).toBe(1)
+    expect(t).toContain('req-warn-1')
+    expect([...host.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true)
+
+    native.overview.mockRejectedValueOnce(new Error(JSON.stringify({
+      code: 'usage_unavailable', message: '上游返回了额外说明，请缩小范围', details: { requestId: 'req-warn-2' },
+    })))
+    await act(async () => refresh.click())
+    t = host.textContent ?? ''
+    expect(t).toContain('刷新失败，显示上次数据')
+    expect(t).toContain(same)
+    expect(t).toContain('上游返回了额外说明，请缩小范围')
+    expect(t).toContain('req-warn-2')
+    expect(t).toContain('1.1万')
+  })
+
+  it('未知错误标题兜底时仍显示差异正文', async () => {
+    native.overview.mockRejectedValue(new Error(JSON.stringify({
+      code: 'usage_weird', message: '未分类的宿主说明', details: { requestId: 'req-unk' },
+    })))
+    await render(user)
+    const t = host.textContent ?? ''
+    expect(t).toContain('读取用量失败')
+    expect(t).toContain('未分类的宿主说明')
+    expect(t).toContain('req-unk')
+    expect(t.split('读取用量失败').length - 1).toBe(1)
+  })
+
   it('模型候选可搜索与加载更多；长名完整进选项；选中项保留；无前 N 截断文案', async () => {
     const longName = '超级超级超级长的历史模型名称-needle-101'
     const totals = fixtureOverview().summary

@@ -88,10 +88,17 @@ const FAILURE_TITLES: Partial<Record<UsageFailure['kind'], string>> = {
   invalidCursor: '分页已失效，需要回到第一页',
 }
 
-function FailureBody({ failure }: { failure: UsageFailure }) {
+/**
+ * FailureBody：Banner 已展示语义标题时的正文。
+ * 去重规则——trim 后消息非空且与语义标题不同才再显示；warning 外层
+ * 「刷新失败，显示上次数据」前缀不参与比较（调用方只传入语义标题）。
+ */
+function FailureBody({ failure, title }: { failure: UsageFailure; title: string }) {
+  const message = (failure.message ?? '').trim()
+  const showMessage = message !== '' && message !== title.trim()
   return (
     <>
-      {failure.message}
+      {showMessage ? message : null}
       {failure.requestId && <span className="block mt-1 text-[12px] text-muted select-all">请求编号：{failure.requestId}</span>}
     </>
   )
@@ -159,9 +166,10 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
   else if (!tenants.selected) body = <Placeholder>请选择要统计的租户。</Placeholder>
   else if (usage.error?.kind === 'notLoggedIn' && !overview) body = <LoginPrompt onOpenSettings={onOpenSettings} title="通行证登录已失效，请重新登录后查看用量" />
   else if (usage.error && !overview) {
+    const title = FAILURE_TITLES[usage.error.kind] ?? '读取用量失败'
     body = (
       <div className={PANEL}>
-        <Banner tone="danger" title={FAILURE_TITLES[usage.error.kind] ?? '读取用量失败'} className="w-full"><FailureBody failure={usage.error} /></Banner>
+        <Banner tone="danger" title={title} className="w-full"><FailureBody failure={usage.error} title={title} /></Banner>
         <button type="button" className={BTN} onClick={usage.refresh}>重试</button>
       </div>
     )
@@ -170,11 +178,12 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
     const range = overview.effectiveRange
     const dimensions = usage.dimensions
     const showTab: Tab = tab === 'provider' && !providerBreakdown ? 'requests' : tab
+    const refreshReasonTitle = usage.error ? (FAILURE_TITLES[usage.error.kind] ?? '读取用量失败') : ''
     body = (
       <>
         {usage.error && (
-          <Banner tone="warning" title={`刷新失败，显示上次数据：${FAILURE_TITLES[usage.error.kind] ?? '读取用量失败'}`}>
-            <FailureBody failure={usage.error} />
+          <Banner tone="warning" title={`刷新失败，显示上次数据：${refreshReasonTitle}`}>
+            <FailureBody failure={usage.error} title={refreshReasonTitle} />
             <button type="button" className="mt-1.5 text-[12px] text-primaryink hover:underline" onClick={usage.refresh}>
               {usage.error.kind === 'invalidCursor' ? '回到第一页' : '重试'}
             </button>
