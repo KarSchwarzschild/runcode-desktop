@@ -17,7 +17,6 @@ export const Events = {
   ContextUsage: 'context:usage',
   DirectoryAccessChanged: 'directory:changed',
   HarmAutoAllow: 'harm:autoallow',
-  KnowledgeChat: 'knowledge:chat',
   KnowledgeContext: 'knowledge:context',
   OABlocked: 'oa:blocked',
   PassportChanged: 'passport:changed',
@@ -321,12 +320,6 @@ export interface ConversationInfo {
   previewBaseURL: string;
 }
 
-// Mirrors protocol.CreateKnowledgeChatRequest. CreateKnowledgeChatRequest references a verified platform session.
-export interface CreateKnowledgeChatRequest {
-  sourceSessionId: string;
-  libraryIds: string[] | null;
-}
-
 // Mirrors protocol.CustomModel. CustomModel 是用户自定义的直连模型接入点，与通行证平台模型并列显示在模型 选择器里。Provider 通常是引擎 provider registry 的名称（openai/ openai-responses/anthropic），由 llm.IsRegistered 校验而非本仓库的名单；旧配置 没有该字段时由桌面端按 openai 兼容处理。 唯一的例外是 "codex"：它是**外壳层**的服务商，引擎注册表里没有这个名字。 桌面端在解析时把它翻译成 openai-responses（Codex 说的就是 Responses 协议）， 并把 Base URL 指向本地那个负责补凭据与指纹头的小代理，见 internal/codexproxy。密钥字段仅用于桌面端持久化， ListCustomModels 对外返回时必须清空，只通过 HasAPIKey 暴露是否已配置。
 export interface CustomModel {
   supportsImages?: boolean;
@@ -494,22 +487,6 @@ export interface KnowledgeBaseSummary {
   failureKind?: string;
 }
 
-// Mirrors protocol.KnowledgeChatEvent. KnowledgeChatEvent belongs to the host session's ordered event stream.
-export interface KnowledgeChatEvent {
-  sessionId: string;
-  questionId: string;
-  runId: string;
-  seq: number;
-  phase: string;
-  error?: string;
-  text?: string;
-  thinking?: string;
-  sources?: KnowledgeSource[] | null;
-  inputTokens?: number;
-  outputTokens?: number;
-  truncated?: boolean;
-}
-
 // Mirrors protocol.KnowledgeContextStatus. KnowledgeContextStatus updates one accepted question within its session envelope.
 export interface KnowledgeContextStatus {
   questionId: string;
@@ -522,11 +499,6 @@ export interface KnowledgeListRequest {
   query: string;
   page: number;
   pageSize: number;
-}
-
-// Mirrors protocol.KnowledgeOverride. KnowledgeOverride explicitly replaces the selection of a verified retry branch.
-export interface KnowledgeOverride {
-  libraryIds: string[] | null;
 }
 
 // Mirrors protocol.KnowledgePage. KnowledgePage distinguishes real, explicitly enabled demo, and unavailable catalogs.
@@ -1251,8 +1223,6 @@ export interface StartSessionRequest {
 
 // Mirrors protocol.SubmitQuestionRequest. SubmitQuestionRequest supports ordinary input and a prepared retry branch.
 export interface SubmitQuestionRequest {
-  submissionId?: string;
-  knowledgeOverride?: KnowledgeOverride;
   sessionId: string;
   text: string;
   imagePaths: string[] | null;

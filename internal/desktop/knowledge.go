@@ -254,9 +254,6 @@ func (a *App) GetSessionKnowledge(sessionID string) (SessionKnowledgeView, error
 	if err != nil {
 		return SessionKnowledgeView{}, wireError(err)
 	}
-	if e.chat != nil {
-		return a.getKnowledgeChatSelection(e)
-	}
 	e.questionMu.Lock()
 	disk, err := readKnowledge(e.workspace, e.id)
 	e.questionMu.Unlock()
@@ -289,9 +286,6 @@ func (a *App) SetSessionKnowledge(req SetSessionKnowledgeRequest) (SessionKnowle
 	e, err := a.explicitKnowledgeEntry(req.SessionID)
 	if err != nil {
 		return SessionKnowledgeView{}, wireError(err)
-	}
-	if e.chat != nil {
-		return a.setKnowledgeChatSelection(e, req)
 	}
 	if err := a.checkKnowledgeAccount(e); err != nil {
 		return SessionKnowledgeView{}, wireError(err)
@@ -409,10 +403,6 @@ func (a *App) GetSessionKnowledgeSnapshot(sessionID string) (SessionKnowledgeVie
 	if err != nil {
 		return SessionKnowledgeView{}, wireError(err)
 	}
-	if e.chat != nil {
-		// 旧独立知识库会话没有本文件快照；退回实时 Get。
-		return a.getKnowledgeChatSelection(e)
-	}
 	if err := a.checkKnowledgeEntry(e); err != nil {
 		return SessionKnowledgeView{}, wireError(err)
 	}
@@ -426,30 +416,40 @@ func (a *App) GetSessionKnowledgeSnapshot(sessionID string) (SessionKnowledgeVie
 	return knowledgeViewFromSnapshot(e.id, selection), nil
 }
 
-// Legacy commands reject selected libraries instead of bypassing SubmitQuestion.
-func (a *App) checkKnowledgeSubmission(e *sessionEntry, expected *int64) error {
-	return a.checkKnowledgeSubmissionContext(context.Background(), e, expected)
-}
-
-func (a *App) checkKnowledgeSubmissionContext(ctx context.Context, e *sessionEntry, expected *int64) error {
-	if e.chat != nil {
-		return errKnowledgeMode
-	}
-	if err := a.checkEntryKnowledgeHistory(ctx, e, e.id); err != nil {
-		return err
-	}
-	if err := a.checkKnowledgeEntry(e); err != nil {
-		return err
-	}
+// ensureKnowledgeSendable rejects turns when the selection store is unreadable
+// or a non-empty selection's account binding no longer matches. Empty selection
+// still allows ordinary chat across Passport churn (same rule as GetSessionKnowledge).
+// It does not require a revision CAS and does not take startMu. History-format
+// checks stay on Resume/build.
+func (a *App) ensureKnowledgeSendable(e *sessionEntry) error {
 	disk, err := readKnowledge(e.workspace, e.id)
 	if err != nil {
 		return err
 	}
 	selection := disk.Selections[knowledgeScope(e)]
-	if expected != nil && *expected != selection.Revision {
+	if err := a.checkKnowledgeAccount(e); err != nil {
+		if len(selection.LibraryIDs) > 0 {
+			return err
+		}
+		return a.checkKnowledgeEntry(e)
+	}
+	return nil
+}
+
+// checkKnowledgeRevision is ensureKnowledgeSendable plus optional selection CAS.
+func (a *App) checkKnowledgeRevision(e *sessionEntry, expected *int64) error {
+	if err := a.ensureKnowledgeSendable(e); err != nil {
+		return err
+	}
+	if expected == nil {
+		return nil
+	}
+	disk, err := readKnowledge(e.workspace, e.id)
+	if err != nil {
+		return err
+	}
+	if *expected != disk.Selections[knowledgeScope(e)].Revision {
 		return errors.New("知识库选择版本已变化，请确认选择后重新发送")
 	}
-	// 已选库只约束可查询范围；普通发送不再因选库被拒（检索由后续按需工具触发）。
-	_ = selection
-	return a.checkKnowledgeEntry(e)
+	return nil
 }

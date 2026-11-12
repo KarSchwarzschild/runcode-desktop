@@ -3,7 +3,6 @@ import { ArtifactActionsContext } from '@/chat/artifact-actions'
 import { useChatDrafts } from '@/session/use-chat-drafts'
 import { useQuestionRetry } from '@/session/use-question-retry'
 import { useKnowledge } from '@/session/use-knowledge'
-import { useKnowledgeMode } from '@/session/use-knowledge-mode'
 import { emptyDraft } from '@/session/question-draft'
 // App 只做两件事：把各个 hook 接起来（会话 / 对话 / 权限队列 / 预览栏 / 文件），
 // 以及按当前视图摆放 shell 组件。任何具体逻辑都不在这里——需要改行为时去
@@ -76,7 +75,7 @@ export default function App() {
   const permissions = usePermissionQueue(focusedId)
   // sudo 密码框：请求可能来自任何一条会话（不只是当前聚焦的），所以挂在最外层。
   const askpass = useAskpass()
-  const toolSessionId = infoRef.current?.kind === 'knowledge' || infoRef.current?.readOnlyReason ? '' : focusedId
+  const toolSessionId = focusedId
   const workspace = useWorkspaceFiles(toolSessionId, () => infoRef.current?.cwd ?? '')
   const preview = usePreviewPanel(focusedId, toast.show)
   const directoryAccess = useDirectoryAccess(toolSessionId)
@@ -130,7 +129,6 @@ export default function App() {
 
   const { sendRecordingRequest } = useRecordingMinutes({
     sessionId: focusedId, recording: recorder.info, send: async (text, paths, display) => {
-      if (infoRef.current?.kind === 'knowledge' || infoRef.current?.readOnlyReason) throw new Error('此会话仅支持文字问答，请新建普通会话生成文件')
       if (knowledge.sendBlock) throw new Error(knowledge.sendBlock)
       await conversation.send(text, paths, display, knowledge.state.revision)
     },
@@ -144,16 +142,12 @@ export default function App() {
     onKnowledgeInvalidated: ids => { ids.forEach(id => drafts.update(id, emptyDraft)); preview.closeAll() },
   })
   const knowledge = useKnowledge(session.info?.sessionId ?? '')
-  const knowledgeMode = useKnowledgeMode({
-    info: session.info, knowledge, drafts, hasHistory: conversation.blocks.length > 0,
-    create: session.openKnowledge, notify: toast.show,
-  })
-  // 选库不进入「文字问答」专属态；仅真实只读历史收窄预览／上下文。
-  const restrictedConversation = !!session.info?.readOnlyReason
+  // 独立知识库只读会话已移除；普通会话始终可用工具与文件能力。
+  const restrictedConversation = false
   const questionRetry = useQuestionRetry({
     sessionId: focusedId,
-    blocked: conversation.busy || conversation.compacting || session.switching || !!session.info?.readOnlyReason,
-    drafts, conversation, session, textarea: taRef, notify: toast.show, knowledge: knowledgeMode.knowledge,
+    blocked: conversation.busy || conversation.compacting || session.switching,
+    drafts, conversation, session, textarea: taRef, notify: toast.show, knowledge,
   })
   useEffect(() => {
     infoRef.current = session.info
@@ -226,7 +220,6 @@ export default function App() {
   // 没有它整栏都长一个样。
   const openRows = session.openList.map((s) => ({
     id: s.sessionId,
-    kind: s.kind,
     title: session.titles[s.sessionId] || conversation.lastUserBySession[s.sessionId] || '新对话',
     running: !!conversation.busyBySession[s.sessionId],
     waiting: permissions.waiting[s.sessionId] ?? 0,
@@ -263,8 +256,6 @@ export default function App() {
           onPickWorkspace={(dir) => { if (!session.switching) void session.openWorkspace(dir) }}
           onSwitchWorkspace={() => { if (!session.switching) void session.pickWorkspaceAndOpen() }}
           onDelete={session.deleteRecent}
-          onRenameKnowledge={session.renameKnowledge}
-          onExportKnowledge={session.exportKnowledge}
           view={view}
           onNav={setView}
           onNew={() => {
@@ -290,7 +281,7 @@ export default function App() {
         <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-surface">
           <StatusBar
             textOnly={restrictedConversation}
-            knowledgeSelection={<KnowledgeSelection knowledge={knowledgeMode.knowledge} onFocusComposer={() => taRef.current?.focus()} onNotify={toast.show} />}
+            knowledgeSelection={<KnowledgeSelection knowledge={knowledge} onFocusComposer={() => taRef.current?.focus()} onNotify={toast.show} />}
             busy={conversation.busy}
             sidebarCollapsed={sidebarCollapsed}
             onToggleSidebar={toggleSidebar}
@@ -398,7 +389,7 @@ export default function App() {
                 setAttachments={drafts.setAttachments}
                 retry={questionRetry.editing}
                 retryDisabled={questionRetry.disabled}
-                submitting={questionRetry.pending || knowledgeMode.pending || session.switching || conversation.compacting || planning.approving}
+                submitting={questionRetry.pending || knowledge.state.saving || session.switching || conversation.compacting || planning.approving}
                 onCancelRetry={questionRetry.cancel}
                 onRemoveOriginal={questionRetry.removeImage}
                 input={input}
@@ -421,6 +412,7 @@ export default function App() {
                 onPickModel={session.pickModel}
                 builtinScenarios={builtinScenarios}
                 onPickScenario={(sc) => void pickScenario(sc)}
+                onOpenImageGenerationSettings={() => setView('settings')}
               />
             </>
           )}

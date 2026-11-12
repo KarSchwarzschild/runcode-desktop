@@ -46,7 +46,6 @@ import (
 // 手工表的代价是会忘记改,所以 extractEvents 做**双向**核对:常量多了(漏加表行)报
 // missing,表行多了(常量已删)报 stale。表本身不是真理,与源码对上的表才是。
 var eventPayloads = map[string]string{
-	"EventKnowledgeChat":          "KnowledgeChatEvent",
 	"EventKnowledgeContext":       "KnowledgeContextStatus",
 	"EventDirectoryAccessChanged": "DirectoryAccessChanged",
 	"EventPreviewLifecycle":       "PreviewLifecycle",

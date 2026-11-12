@@ -82,30 +82,3 @@ type KnowledgeContextStatus struct {
 	Knowledge  QuestionKnowledge `json:"knowledge"`
 }
 
-// KnowledgeOverride explicitly replaces the selection of a verified retry branch.
-type KnowledgeOverride struct {
-	LibraryIDs []string `json:"libraryIds"`
-}
-
-// CreateKnowledgeChatRequest references a verified platform session. It carries
-// no arbitrary endpoint, credentials, tenant or user identity.
-type CreateKnowledgeChatRequest struct {
-	SourceSessionID string   `json:"sourceSessionId"`
-	LibraryIDs      []string `json:"libraryIds"`
-}
-
-// KnowledgeChatEvent belongs to the host session's ordered event stream.
-type KnowledgeChatEvent struct {
-	SessionID    string            `json:"sessionId"`
-	QuestionID   string            `json:"questionId"`
-	RunID        string            `json:"runId"`
-	Seq          uint64            `json:"seq"`
-	Phase        string            `json:"phase"`
-	Error        string            `json:"error,omitempty"`
-	Text         string            `json:"text,omitempty"`
-	Thinking     string            `json:"thinking,omitempty"`
-	Sources      []KnowledgeSource `json:"sources,omitempty"`
-	InputTokens  int               `json:"inputTokens,omitempty"`
-	OutputTokens int               `json:"outputTokens,omitempty"`
-	Truncated    bool              `json:"truncated,omitempty"`
-}

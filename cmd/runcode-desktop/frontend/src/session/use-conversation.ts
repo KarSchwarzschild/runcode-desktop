@@ -34,8 +34,6 @@ import {
   type Block,
 } from '@/chat/blocks'
 import { basename } from '@/core/paths'
-import { withKnowledgeChat } from './knowledge-chat-state'
-import { clearInlineFiles } from './inline-preview-status'
 import { digestDisplayText, docDisplayText, minutesDisplayText, parseRecordingMarker, type RecordingMark } from '@/recorder/minutes'
 import {
   bindQuestionReceipt, withQuestionKnowledge, reconcileQuestionBlocks, cancelPreparingKnowledge, convOf, dropConv, lastUserText, patchConv, sessionOf, withReverted, withContextCompaction,
@@ -68,7 +66,6 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   const [convs, setConvs] = useState<ConvMap>({})
   const convsRef = useRef(convs)
   convsRef.current = convs
-  const pendingKnowledge = useRef(new Set<string>())
   const sessionGenerations = useRef(new Map<string, number>())
   const [planOpen, setPlanOpen] = useState(false)
   const cur = convOf(convs, focusedId)
@@ -119,25 +116,8 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
 
   useEffect(() => {
     const offs = [
-      onEnvelope(Events.KnowledgeChat, env => {
-        if (!env.sessionId || env.sessionId !== env.payload.sessionId) return
-        patch(env.sessionId, state => withKnowledgeChat(state, env.payload))
-      }),
       onEnvelope(Events.KnowledgeContext, env => {
         patch(sessionOf(env), s => withQuestionKnowledge(s, env.payload))
-      }),
-      // 同 ID 会话重建 / 关闭：丢掉该会话的内联文件状态，避免旧 generation 结果复活。
-      onEnvelope(Events.PreviewLifecycle, (env) => {
-        const sid = env.payload.sessionId || sessionOf(env)
-        if (!sid) return
-        if (env.payload.phase === 'invalidating' || env.payload.phase === 'closed') {
-          clearInlineFiles(sid)
-          sessionGenerations.current.set(sid, (sessionGenerations.current.get(sid) ?? 0) + 1)
-        }
-      }),
-      onEnvelope(Events.DirectoryAccessChanged, () => {
-        // 目录授权变化：所有会话的内联文件缓存都可能失效（路径权限变了）。
-        for (const sid of sessionGenerations.current.keys()) clearInlineFiles(sid)
       }),
       onEnvelope(Events.AssistantDelta, (env) => {
         const { text } = env.payload
@@ -229,7 +209,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
             next[idx] = { ...existing, tool: mergeTool(existing.tool, ev) }
             return next
           }
-          return [...next, { kind: 'tool', id: nextID(), tool: ev, sessionId: sessionOf(env) }]
+          return [...next, { kind: 'tool', id: nextID(), tool: ev }]
         })
       }),
       // Live context occupancy: emitted before every model round-trip inside a turn,
@@ -379,21 +359,9 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   // 代价：会话恢复时历史由引擎回放，那边只有真正的 text，所以恢复后会看到全文。
   // 这是可接受的——恢复本来就是"看当时到底发生了什么"的场景。
   // IDs bind a receipt to its exact optimistic row, even after switching away.
-  async function submitFor(req: SubmitQuestionRequest, display?: string, names: string[] = [], kind?: string) {
+  async function submitFor(req: SubmitQuestionRequest, display?: string, names: string[] = []) {
     const sid = req.sessionId
     const generation = sessionGenerations.current.get(sid) ?? 0
-    if (infoRef.current?.sessionId === sid && infoRef.current.readOnlyReason) { showToast(infoRef.current.readOnlyReason); return false }
-    const knowledgeMode = (kind ?? (infoRef.current?.sessionId === sid ? infoRef.current.kind : undefined)) === 'knowledge'
-    // 知识库没有工具或运行中补充路径。UI 禁用之外，在统一发送入口再次拦住
-    // 附件、缺失版本和并发发送，避免快捷键、重试等旁路触发普通智能体行为。
-    if (knowledgeMode) {
-      if ((req.imagePaths?.length ?? 0) || (req.originalImages?.length ?? 0) || names.length) { showToast('知识库问答仅支持纯文字，不支持附件'); return false }
-      if (pendingKnowledge.current.has(sid) || convsRef.current[sid]?.busy) { showToast('知识库问答进行中，请等待完成或停止后发送'); return false }
-      if (req.knowledgeRevision === undefined) { showToast('请重新读取知识库选择后发送'); return false }
-      pendingKnowledge.current.add(sid)
-      // 同一次 IPC 请求使用固定 UUID；用户显式重新生成才创建新的 submissionId。
-      req = { ...req, submissionId: req.submissionId ?? crypto.randomUUID(), allowSteering: false }
-    }
     const blockId = nextID()
     userStopped.current.delete(sid)
     chatStick.current = true
@@ -417,7 +385,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
       })
       if (!req.allowSteering) patch(sid, (s) => ({ ...s, busy: false }))
       return false
-    } finally { pendingKnowledge.current.delete(sid) }
+    }
   }
 
   async function send(text: string, attach: string[] = [], display?: string, knowledgeRevision?: number) {
@@ -443,7 +411,6 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   // 重新发给模型的内容。
   async function compact() {
     if (busy || compacting || !infoRef.current) return
-    if (infoRef.current.kind === 'knowledge' || infoRef.current.readOnlyReason) { showToast('此会话不支持智能体上下文压缩'); return }
     const sid = focusedRef.current
     const beforeTokens = ctxTokens
     patch(sid, (s) => ({ ...s, compacting: true }))
@@ -523,7 +490,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
           //  - doc（正式文档）：**不补卡片**。同一场录音只该有一张卡，而用户每点一次
           //    「生成纪要文档」就多一条 doc 消息，补的话卡片会越堆越多；
           //  - 无 stage：两段式之前那条一步到位的老消息，卡片和纪要都在它身上。
-          const found = r.info.kind === 'knowledge' || r.info.readOnlyReason ? null : parseRecordingMarker(b.text ?? '')
+          const found = parseRecordingMarker(b.text ?? '')
           if (found) {
             const { mark, stage } = found
             const text = stage === 'digest' ? digestDisplayText(mark.title)
@@ -537,7 +504,6 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         }
         if (b.kind === 'assistant') return [{ kind: 'assistant', id: nextID(), text: b.text ?? '', thinking: b.thinking, streaming: false, ts: '' }]
         if (b.kind === 'notice' || b.kind === 'error' || b.kind === 'warning') return [{ kind: b.kind, id: nextID(), text: b.text ?? '' }]
-        if (r.info.kind === 'knowledge' || r.info.readOnlyReason) return []
         // Rebuild a tool execution card from the persisted result. Live-only
         // details (colored diffs, file chips) aren't stored, so the card shows the
         // tool, its target, and the result text. (Partial: a malformed block may
@@ -551,7 +517,6 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         return [{
           kind: 'tool',
           id: nextID(),
-          sessionId: sid,
           tool: {
             type: t.isError ? 'failed' : 'completed',
             toolName: t.toolName,
@@ -562,14 +527,11 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
             message: t.isError ? 'completed with error' : 'completed',
             files: matched ?? (t.path ? [{ path: t.path }] : undefined),
             output: matched ? [] : lines,
-            // 生图结果由宿主从账本/工具结果合并而来，卡片据此重画，不重放任何请求。
-            ...(t.imageGeneration ? { data: t.imageGeneration } : {}),
           },
         }]
       }),
     )
-    // 宿主知识库历史不属于 engine journal；恢复时不发工具编辑查询，也不重放执行。
-    const edits = r.info.kind === 'knowledge' || r.info.readOnlyReason ? [] : (await listEdits(sid)) ?? []
+    const edits = (await listEdits(sid)) ?? []
     if (isStale()) return
     if (edits.length > 0) {
       const byTUID = new Map(edits.map((e) => [e.toolUseId, e]))
@@ -625,8 +587,6 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   // 内存，而且会让 busyBySession 里挂着一条已经不存在的会话。
   const dropSession = (id: string) => {
     sessionGenerations.current.set(id, (sessionGenerations.current.get(id) ?? 0) + 1)
-    pendingKnowledge.current.delete(id)
-    clearInlineFiles(id)
     setConvs((m) => dropConv(m, id))
   }
 

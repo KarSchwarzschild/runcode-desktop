@@ -95,14 +95,9 @@ func (a *App) FocusSession(sessionID string) (SessionInfo, error) {
 // 得能继续复审）；用户主动关掉一条会话时它从界面上整个消失，条目一并移除，
 // 聚焦顺势落到还开着的另一条上。
 func (a *App) CloseSession(sessionID string) error {
-	// Pending validation owns startMu, so cancel it before waiting for lifecycle ownership.
 	if id, err := a.sessionIDOf(sessionID); err == nil {
 		sessionID = id
-		// 知识库由 closeEntryHeld 先封闭准入再取消，避免停止与正式关闭之间
-		// 重新接受问题；普通引擎仍须先取消持有 startMu 的准备阶段。
-		if e, err := a.entryOf(id); err == nil && e.chat == nil {
-			_ = a.Interrupt(id)
-		}
+		_ = a.Interrupt(id)
 	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
@@ -130,14 +125,11 @@ func (a *App) CloseSession(sessionID string) error {
 // 就点到了别人身上——而这一栏里每行右侧都有一颗关闭按钮，代价是关掉一条正在跑
 // 的会话，没有任何报错。
 func (a *App) OpenSessions() []OpenSessionInfo {
-	// 先读身份再持 App.mu，避免和令牌刷新交叉持锁。未知/切换账号不能
-	// 从“打开中”列表重新获得旧知识库标题、正文或导出入口。
-	account, _ := a.knowledgeIdentity()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	live := make([]*sessionEntry, 0, len(a.sessions))
 	for _, e := range a.sessions {
-		if !e.closed && (e.chat == nil || account != "" && account != "anonymous" && e.chat.scope.Account == account) {
+		if !e.closed {
 			live = append(live, e)
 		}
 	}
@@ -145,7 +137,6 @@ func (a *App) OpenSessions() []OpenSessionInfo {
 	out := make([]OpenSessionInfo, 0, len(live))
 	for _, e := range live {
 		out = append(out, OpenSessionInfo{
-			Kind:      sessionKind(e),
 			SessionID: e.id,
 			Workspace: e.workspace,
 			Running:   e.turnActive,
@@ -158,37 +149,18 @@ func (a *App) OpenSessions() []OpenSessionInfo {
 // CloseAllSessions 关掉所有开着的会话。退出时用：多会话之后「关掉当前那条」不再
 // 等于「收干净」，漏掉的会话会带着未收尾的回合和未落盘的记录一起被进程带走。
 func (a *App) CloseAllSessions() error {
-	// Exit must stop validation before waiting for startMu, which that validation
-	// owns. Cancel current attempts and registered turns in one publication fence;
-	// do not carry a detached ID list across the wait into newer submissions.
 	a.mu.Lock()
+	all := make([]*sessionEntry, 0, len(a.sessions))
 	for _, e := range a.sessions {
-		if e.pendingQuestion != nil {
-			e.pendingQuestion.cancel()
-		}
-		if e.chat != nil {
-			if e.chat.run != nil {
-				e.chat.run.cancel()
-			}
-			continue
-		}
+		all = append(all, e)
 		_ = a.mgr.Interrupt(e.id)
 	}
 	a.mu.Unlock()
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
-	a.mu.Lock()
-	all := make([]*sessionEntry, 0, len(a.sessions))
-	for _, e := range a.sessions {
-		all = append(all, e)
-	}
-	a.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), sessionCloseTimeout)
 	defer cancel()
 	for _, e := range all {
-		if e.chat != nil {
-			continue
-		}
 		_ = a.mgr.Interrupt(e.id)
 	}
 	var err error

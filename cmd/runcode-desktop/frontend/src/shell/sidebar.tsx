@@ -11,7 +11,6 @@ import { type SessionSummary } from '@/core/bridge'
 // OpenSessionRow 是「打开中」那一栏的一行。数据来自三处：后端的 OpenSessions
 // （是谁、在哪）、对话状态（有没有回合在跑）、授权队列（有几个在等）。
 export interface OpenSessionRow {
-  kind?: string
   id: string
   title: string
   running: boolean
@@ -22,7 +21,6 @@ export interface OpenSessionRow {
   workspace: string
 }
 
-// NavView 是侧栏能切到的视图，与 App 的 View 一致。
 type NavView = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
 
 // PROFILE_NAV 是收在底部用户区菜单里的几个入口：配置类的，配好之后很少再动。
@@ -49,7 +47,6 @@ export function Sidebar({
   onPickWorkspace,
   onSwitchWorkspace,
   onDelete,
-  onRenameKnowledge, onExportKnowledge,
   view,
   onNav,
   onNew,
@@ -69,8 +66,6 @@ export function Sidebar({
   onPickWorkspace: (path: string) => void
   onSwitchWorkspace: () => void
   onDelete: (id: string) => void
-  onRenameKnowledge?: (id: string, title: string) => Promise<void>
-  onExportKnowledge?: (id: string) => Promise<void>
   view: NavView
   onNav: (v: NavView) => void
   onNew: () => void
@@ -166,7 +161,6 @@ export function Sidebar({
                     aria-hidden
                   />
                   <span className="flex-1 min-w-0 truncate">{s.title}</span>
-                  {s.kind === 'knowledge' && onRenameKnowledge && onExportKnowledge && <KnowledgeSessionActions id={s.id} title={s.title} onRename={onRenameKnowledge} onExport={onExportKnowledge} />}
                   {/* 目录名。只有几条会话**落在不同目录**时才出现——同一个目录里全都
                       一样，那就是纯噪声。多工作区并行时它是唯一能区分"两条同名会话
                       分别属于哪个项目"的东西。 */}
@@ -230,7 +224,6 @@ export function Sidebar({
                 >
                   <Icon name="file" size={15} />
                   <span className="flex-1 min-w-0 truncate">{s.title}</span>
-                  {s.kind === 'knowledge' && onRenameKnowledge && onExportKnowledge && <KnowledgeSessionActions id={s.id} title={s.title} onRename={onRenameKnowledge} onExport={onExportKnowledge} />}
                   <span className="text-faint text-[11px] flex-none group-hover:hidden">{s.when}</span>
                   {/* 打开中的会话不提供删除:后端会拒绝(删掉后下一个回合会把文件重建成
                       只含新内容的僵尸会话),这里直接不给入口,免得引到一条错误提示上。 */}
@@ -406,26 +399,6 @@ export function Sidebar({
       )}
     </aside>
   )
-}
-
-// 知识库操作显式调用宿主 API，普通条目不显示入口；复制导出只在用户点击后发生。
-function KnowledgeSessionActions({ id, title, onRename, onExport }: { id: string; title: string; onRename: (id: string, title: string) => Promise<void>; onExport: (id: string) => Promise<void> }) {
-  const [open, setOpen] = useState(false)
-  const [name, setName] = useState(title)
-  const [pending, setPending] = useState(false)
-  async function run(action: () => Promise<void>) {
-    if (pending) return
-    setPending(true)
-    try { await action(); setOpen(false) } finally { setPending(false) }
-  }
-  return <div className="relative flex-none" onClick={event => event.stopPropagation()}>
-    <button type="button" aria-label="知识库会话操作" title="知识库会话操作" className="text-faint hover:text-ink px-1" onClick={() => { setName(title); setOpen(value => !value) }}>⋯</button>
-    <Popover open={open} onClose={() => setOpen(false)} placement="down-left" className="w-[220px] p-2">
-      <label className="block text-[12px] text-muted">会话名称<input aria-label="知识库会话名称" maxLength={200} value={name} onChange={event => setName(event.target.value)} className="w-full my-1 px-2 py-1 bg-surface2 border border-line2 rounded-field text-ink" /></label>
-      <button type="button" disabled={pending || !name.trim()} className="w-full text-left px-2 py-1 text-[12px] hover:bg-surface2 disabled:opacity-40" onClick={() => void run(() => onRename(id, name))}>保存名称</button>
-      <button type="button" disabled={pending} className="w-full text-left px-2 py-1 text-[12px] hover:bg-surface2 disabled:opacity-40" onClick={() => void run(() => onExport(id))}>复制导出问答</button>
-    </Popover>
-  </div>
 }
 
 // Avatar 优先渲染通行证头像;缺失或加载失败(外链取不到)回落到用户名首字的色块,

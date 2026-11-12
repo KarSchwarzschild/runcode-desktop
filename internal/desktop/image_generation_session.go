@@ -78,9 +78,9 @@ func (s *imageGenerationTurnState) setSnapshot(snap imageGenerationSnapshot) {
 // reason this session cannot use image generation at all.
 func (a *App) imageGenerationBindingOf(e *sessionEntry) (imageGenerationBinding, string) {
 	a.mu.Lock()
-	passport, chat, account, epoch, tenant := e.passport, e.chat != nil, e.knowledge.Account, e.knowledge.Epoch, e.tenantID
+	passport, account, epoch, tenant := e.passport, e.knowledge.Account, e.knowledge.Epoch, e.tenantID
 	a.mu.Unlock()
-	if !passport || chat {
+	if !passport {
 		return imageGenerationBinding{}, imageGenerationIneligibleReason
 	}
 	switch account {

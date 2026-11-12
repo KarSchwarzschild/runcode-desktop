@@ -1,11 +1,11 @@
-import { useRef, useState, type RefObject } from 'react'
-import { errText, forkQuestion, getQuestion, getSessionKnowledge, type QuestionDraft, type KnowledgeOverride, type KnowledgeBaseSummary } from '@/core/bridge'
+﻿import { useRef, useState, type RefObject } from 'react'
+import { errText, forkQuestion, getQuestion, getSessionKnowledge, type QuestionDraft, type KnowledgeBaseSummary } from '@/core/bridge'
 import { basename } from '@/core/paths'
 import type { ComposerEditorHandle } from '@/composer/inline-editor'
 import type { Conversation } from './use-conversation'
 import type { Session } from './use-session'
 import type { useChatDrafts } from './use-chat-drafts'
-import { cancelQuestion, editQuestion, emptyDraft, retryLibraries, selectRetryKnowledge, retryKnowledgeOverride } from './question-draft'
+import { cancelQuestion, editQuestion, emptyDraft, retryLibraries, selectRetryKnowledge } from './question-draft'
 import type { SessionKnowledge } from './use-knowledge'
 import { useActionScope } from './use-action-scope'
 
@@ -39,7 +39,7 @@ export function useQuestionRetry({ sessionId, blocked, drafts, conversation, ses
     finally { pendingRef.current = false; setPending(false); void session.refreshOpen() }
   }
 
-  async function generate(original: QuestionDraft, text: string, paths: string[], images: number[], current: () => boolean, knowledgeOverride?: KnowledgeOverride, libraries?: KnowledgeBaseSummary[]) {
+  async function generate(original: QuestionDraft, text: string, paths: string[], images: number[], current: () => boolean, libraries?: KnowledgeBaseSummary[]) {
     if (!current() || latestBlocked.current) return false
     const unchanged = session.captureSwitch()
     const r = await forkQuestion(original.source)
@@ -52,21 +52,17 @@ export function useQuestionRetry({ sessionId, blocked, drafts, conversation, ses
     branchDraft.text = text
     branchDraft.attachments = paths.map((path) => ({ path, image: true }))
     branchDraft.retry!.images = images
-    if (knowledgeOverride) branchDraft.retry!.libraries = libraries ?? []
+    if (libraries) branchDraft.retry!.libraries = libraries
     const accepted = await session.runQuestionBranch(r, current, async (id) => {
       drafts.update(id, () => branchDraft)
-      // fork 的选择来自原题快照，版本属于新会话，不能复用源会话当前 revision。
-      // 显式空 override 保持原样提交，由宿主原子保存；成功后再刷新子会话继续使用的选择。
-      const selection = r.info.kind === 'knowledge' ? await getSessionKnowledge(id) : undefined
+      const selection = await getSessionKnowledge(id)
       return conversation.submitFor({
         sessionId: id, text, imagePaths: paths, source: original.source,
-        originalImages: images, allowSteering: false, knowledgeOverride, knowledgeRevision: selection?.revision,
-      }, undefined, [...images.map((i) => (original.images ?? []).find((im) => im.index === i)?.name ?? '图片'), ...paths.map(basename)], r.info.kind)
+        originalImages: images, allowSteering: false, knowledgeRevision: selection.revision,
+      }, undefined, [...images.map((i) => (original.images ?? []).find((im) => im.index === i)?.name ?? '图片'), ...paths.map(basename)])
     })
     if (accepted) {
       drafts.update(r.info.sessionId, (d) => d === branchDraft ? emptyDraft() : d)
-      // A retry override updates the child session's continuing selection. Its
-      // initial fork read may have completed before that native submit did.
       if (latestKnowledge.current.state.sessionId === r.info.sessionId) latestKnowledge.current.reload()
     }
     return accepted
@@ -101,7 +97,7 @@ export function useQuestionRetry({ sessionId, blocked, drafts, conversation, ses
     }
     const { original, images } = draft.retry
     return exclusive(async (current) => {
-      const accepted = await generate(original, text, paths, images, current, retryKnowledgeOverride(draft), retryLibraries(draft))
+      const accepted = await generate(original, text, paths, images, current, retryLibraries(draft))
       if (accepted) drafts.update(sessionId, d => d === draft ? cancelQuestion(d) : d)
       return accepted
     })
@@ -112,8 +108,8 @@ export function useQuestionRetry({ sessionId, blocked, drafts, conversation, ses
     ? { ...d, retry: { ...d.retry, images: d.retry.images.filter((i) => i !== index) } } : d)
   const editing = drafts.draft.retry
   const libraries = retryLibraries(drafts.draft)
-  // Keep display metadata for Lexical undo after a catalog search. It carries no
-  // authorization: the native submit revalidates every ID in the override.
+  // Keep display metadata across catalog search while editing a retry. It carries
+  // no authorization: submit revalidates every ID against the live selection.
   const cacheKey = `${sessionId}:${editing?.original.source.sessionId}:${editing?.original.source.questionId}:${knowledge.state.contextVersion}`
   if (libraryCache.current.key !== cacheKey) libraryCache.current = { key: cacheKey, libraries: new Map() }
   for (const library of [...knowledge.state.items, ...knowledge.visibleLibraries, ...(editing?.original.knowledge?.libraries ?? []), ...libraries]) libraryCache.current.libraries.set(library.id, library)

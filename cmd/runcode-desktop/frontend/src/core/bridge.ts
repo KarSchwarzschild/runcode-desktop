@@ -1,4 +1,4 @@
-// bridge is the frontend's single facade over the generated protocol layer
+﻿// bridge is the frontend's single facade over the generated protocol layer
 // (src/protocol/*, protogen output — regenerate with `go generate ./pkg/protocol`).
 // It re-exports the wire types, the typed event helpers, and the typed command
 // functions, and keeps only the frontend-specific pieces: UI-side data shapes
@@ -11,8 +11,8 @@
 
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
-  ConversationInfo as SessionInfo, CreateKnowledgeChatRequest, KnowledgeChatEvent,
-  KnowledgeSource, QuestionKnowledge, KnowledgeContextStatus, KnowledgeOverride,
+  ConversationInfo as SessionInfo,
+  KnowledgeSource, QuestionKnowledge, KnowledgeContextStatus,
   KnowledgeBaseSummary, KnowledgeListRequest, KnowledgePage, SessionKnowledgeView, SetSessionKnowledgeRequest,
  ArtifactReference, DirectoryAccessRequest, DirectoryAccessGrant, DirectoryAccessView,
   ModelContextValues, ModelContextOverride, ModelContextView, SaveModelContextSettingsRequest,
@@ -112,7 +112,6 @@ export type { EventMap } from './protocol/events'
 
 // ---- commands (generated; same lowerCamel names the old helpers used) ---------
 export {
-  createKnowledgeChat, renameKnowledgeChat, exportKnowledgeChat,
   listKnowledgeBases, getSessionKnowledge, getSessionKnowledgeSnapshot, setSessionKnowledge, openKnowledgeDirectory,
   getQuestion, forkQuestion, submitQuestion,
   getModelContextSettings, saveModelContextSettings,

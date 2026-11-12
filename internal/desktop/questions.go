@@ -17,23 +17,13 @@ import (
 
 // GetQuestion returns the original input, including image handles, for editing.
 func (a *App) GetQuestion(ref QuestionReference) (QuestionDraft, error) {
-	if isKnowledgeChatID(ref.SessionID) {
-		return a.getKnowledgeChatQuestion(ref)
-	}
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return QuestionDraft{}, wireError(errNoSession)
 	}
-	e, err := a.entryOf(ref.SessionID)
-	if err != nil {
-		return QuestionDraft{}, wireError(err)
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := a.checkEntryKnowledgeHistory(ctx, e, ref.SessionID); err != nil {
-		return QuestionDraft{}, wireError(err)
-	}
 	var draft QuestionDraft
-	err = a.mgr.WithIdleSession(ctx, ref.SessionID, func(ctx context.Context, _ host.Session, backend sessions.Backend) error {
+	err := a.mgr.WithIdleSession(ctx, ref.SessionID, func(ctx context.Context, _ host.Session, backend sessions.Backend) error {
 		q, err := sessions.ReadQuestion(ctx, backend, ref.SessionID, ref.QuestionID)
 		if err != nil {
 			return err
@@ -55,9 +45,6 @@ func questionImages(images []llm.ImageSource) []QuestionImage {
 // ForkQuestion saves a separate prefix and opens it without focusing or executing
 // it. The caller finishes replaying that prefix before submitting the question.
 func (a *App) ForkQuestion(ref QuestionReference) (ResumedSession, error) {
-	if isKnowledgeChatID(ref.SessionID) {
-		return a.forkKnowledgeChat(ref)
-	}
 	if strings.TrimSpace(ref.SessionID) == "" {
 		return ResumedSession{}, wireError(errNoSession)
 	}
@@ -65,14 +52,6 @@ func (a *App) ForkQuestion(ref QuestionReference) (ResumedSession, error) {
 	defer a.startMu.Unlock()
 	e, err := a.entryOf(ref.SessionID)
 	if err != nil {
-		return ResumedSession{}, wireError(err)
-	}
-	if !e.questionMu.TryLock() {
-		return ResumedSession{}, wireError(host.ErrBusy)
-	}
-	defer e.questionMu.Unlock()
-	// Until host QA is available, retries cannot bypass a selected library.
-	if err := a.checkKnowledgeSubmission(e, nil); err != nil {
 		return ResumedSession{}, wireError(err)
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
@@ -118,7 +97,7 @@ func (a *App) ForkQuestion(ref QuestionReference) (ResumedSession, error) {
 		if err != nil {
 			return err
 		}
-		result = ResumedSession{Info: a.sessionInfo(child.Status()), Blocks: imageGenerationBlocks(e.workspace, fork.SessionID, imageAnalysisBlocks(ctx, e.workspace, fork.SessionID, toResumedBlocks(fork.Prefix))), ContextTokens: child.EstimateContextTokens(), Source: &ref}
+		result = ResumedSession{Info: a.sessionInfo(child.Status()), Blocks: imageAnalysisBlocks(ctx, e.workspace, fork.SessionID, toResumedBlocks(fork.Prefix)), ContextTokens: child.EstimateContextTokens(), Source: &ref}
 		return nil
 	})
 	return result, wireError(err)
@@ -127,14 +106,9 @@ func (a *App) ForkQuestion(ref QuestionReference) (ResumedSession, error) {
 // SubmitQuestion binds accepted input to a durable identity. A retry can reuse
 // original image bytes only from its recorded parent question.
 func (a *App) SubmitQuestion(req SubmitQuestionRequest) (QuestionReceipt, error) {
-	if isKnowledgeChatID(req.SessionID) {
-		return a.submitKnowledgeChat(req)
-	}
 	if strings.TrimSpace(req.SessionID) == "" {
 		return QuestionReceipt{}, wireError(errNoSession)
 	}
-	a.startMu.Lock()
-	defer a.startMu.Unlock()
 	e, err := a.entryOf(req.SessionID)
 	if err != nil {
 		return QuestionReceipt{}, wireError(err)
@@ -143,18 +117,8 @@ func (a *App) SubmitQuestion(req SubmitQuestionRequest) (QuestionReceipt, error)
 		return QuestionReceipt{}, wireError(host.ErrBusy)
 	}
 	defer e.questionMu.Unlock()
-	timeout := knowledgeRequestTimeout
-	if req.Source != nil {
-		timeout = 30 * time.Second
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
-	finishAdmission := a.beginQuestionAdmission(ctx, e, cancel)
-	defer finishAdmission()
-	if err := a.checkKnowledgeSubmissionContext(ctx, e, req.KnowledgeRevision); err != nil {
+	if err := a.checkKnowledgeRevision(e, req.KnowledgeRevision); err != nil {
 		return QuestionReceipt{}, wireError(err)
-	}
-	if req.KnowledgeOverride != nil {
-		return QuestionReceipt{}, wireError(errors.New("知识库问答尚未就绪，暂不支持知识库重试覆盖"))
 	}
 	images, err := loadImages(req.ImagePaths)
 	if err != nil {
@@ -165,6 +129,8 @@ func (a *App) SubmitQuestion(req SubmitQuestionRequest) (QuestionReceipt, error)
 			return QuestionReceipt{}, wireError(errors.New("重新生成不能插入正在执行的回合"))
 		}
 		var originals []llm.ImageSource
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 		err = a.mgr.WithIdleSession(ctx, e.id, func(ctx context.Context, _ host.Session, backend sessions.Backend) error {
 			meta, err := backend.LoadMeta(ctx, e.id)
 			if err != nil {
@@ -173,9 +139,6 @@ func (a *App) SubmitQuestion(req SubmitQuestionRequest) (QuestionReceipt, error)
 			ref := req.Source
 			if meta.ParentSessionID != ref.SessionID || meta.ParentQuestionID != ref.QuestionID || ref.SessionID == "" {
 				return errors.New("原图片与这条重生成分支不匹配")
-			}
-			if err := a.checkEntryKnowledgeHistory(ctx, e, ref.SessionID); err != nil {
-				return err
 			}
 			q, err := sessions.ReadQuestion(ctx, backend, ref.SessionID, ref.QuestionID)
 			if err != nil {
@@ -209,11 +172,7 @@ func (a *App) SubmitQuestion(req SubmitQuestionRequest) (QuestionReceipt, error)
 	previous, active := e.lastUserText, e.turnActive
 	e.lastUserText, e.turnActive = req.Text, true
 	a.mu.Unlock()
-	input := turn.UserInput{Text: req.Text, Images: images}
-	var receipt QuestionReceipt
-	if err = ctx.Err(); err == nil {
-		receipt, err = a.mgr.SubmitQuestion(e.id, input, req.AllowSteering)
-	}
+	receipt, err := a.mgr.SubmitQuestion(e.id, turn.UserInput{Text: req.Text, Images: images}, req.AllowSteering)
 	if err != nil {
 		a.mu.Lock()
 		e.lastUserText = previous

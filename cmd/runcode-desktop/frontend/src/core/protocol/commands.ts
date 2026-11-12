@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateKnowledgeChatRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationCatalog, ImageGenerationSettings, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionImageGenerationView, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionImageGenerationRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationCatalog, ImageGenerationSettings, Info, KnowledgeListRequest, KnowledgePage, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionImageGenerationView, SessionKnowledgeView, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionImageGenerationRequest, SetSessionKnowledgeRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -127,12 +127,6 @@ export function contextAuditStatus(): Promise<ContextAuditInfo> {
   return call<ContextAuditInfo>('ContextAuditStatus');
 }
 
-// CreateKnowledgeChat 从已验证的平台连接创建独立宿主会话，不复制源聊天历史。 请求只能携带源会话 ID 和库 ID，不能注入账号、租户或任意模型服务地址。
-// kind: trigger
-export function createKnowledgeChat(req: CreateKnowledgeChatRequest): Promise<ConversationInfo> {
-  return call<ConversationInfo>('CreateKnowledgeChat', req);
-}
-
 // DeleteAgent removes a sub-agent file in the given scope and returns the list.
 // kind: idempotent-set
 export function deleteAgent(name: string, scope: string): Promise<AgentList> {
@@ -179,12 +173,6 @@ export function discardRecording(): Promise<void> {
 // kind: trigger
 export function downloadUpdate(): Promise<UpdateInfo> {
   return call<UpdateInfo>('DownloadUpdate');
-}
-
-// ExportKnowledgeChat 返回纯文本问答和来源元数据；不导出凭据或检索片段。
-// kind: query
-export function exportKnowledgeChat(sessionID: string): Promise<string> {
-  return call<string>('ExportKnowledgeChat', sessionID);
 }
 
 // FocusSession 把聚焦切到指定会话，并返回它的状态。 聚焦不只是界面高亮：没带会话 id 的命令都打给它（见 entryOf），而工作区寻址的 那批命令（文件列表、技能、子代理、MCP、记忆、会话列表）读的是 a.workspace， 所以这里必须一并把工作区搬过去——否则切到另一个目录的会话后，文件浏览器还 停在上一条会话的目录上，而且不会有任何报错。
@@ -593,12 +581,6 @@ export function reloadMCPServers(): Promise<boolean> {
 // kind: trigger
 export function removeRuntime(id: string): Promise<void> {
   return call<void>('RemoveRuntime', id);
-}
-
-// RenameKnowledgeChat 只修改宿主记录，不调用标题模型或普通引擎。
-// kind: idempotent-set
-export function renameKnowledgeChat(sessionID: string, title: string): Promise<void> {
-  return call<void>('RenameKnowledgeChat', sessionID, title);
 }
 
 // RenderOfficePDF 将来源引用的授权快照转成 PDF，返回绑定同一引用的受控 URL。 私有转换文件不对外服务；缓存命中与 HTTP 读取仍须检查源权限。 同一份文件重复打开命中缓存直接返回;源文件改了(大小或修改时间变了)键就变了, 于是自然重转,不需要额外的失效逻辑。

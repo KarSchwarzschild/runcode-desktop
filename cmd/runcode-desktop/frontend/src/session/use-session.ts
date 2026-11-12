@@ -3,8 +3,6 @@
 // 这里只在会话被替换时调它的 reset / applyResumed。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
-  createKnowledgeChat,
-  renameKnowledgeChat, exportKnowledgeChat, copyText,
   deleteSession,
   errText,
   listSessions,
@@ -112,32 +110,16 @@ export function useSession({ busy, conversation, showToast, onEnterChat, onKnowl
   // titles 是会话标题，来自 session:renamed（自动标题每个回合结束后刷新一次）。
   // 后端的 OpenSessionInfo 刻意不带标题——那会变成第二个事实源。
   const [titles, setTitles] = useState<Record<string, string>>({})
-  const knownKnowledge = useRef(new Set<string>())
-  for (const row of openList) if (row.kind === 'knowledge') knownKnowledge.current.add(row.sessionId)
-  for (const row of recents) if (row.kind === 'knowledge') knownKnowledge.current.add(row.id)
-  if (info?.kind === 'knowledge' || info?.readOnlyReason) knownKnowledge.current.add(info.sessionId)
   const latest = useRef({ conversation, onKnowledgeInvalidated })
   latest.current = { conversation, onKnowledgeInvalidated }
 
   // 登录/登出和租户变化会撤销本机展示上下文；正常 token 刷新不会发此事件。
-  // 连同后台会话和草稿一起清除，不能只隐藏当前消息而让旧预览/标题从缓存再次出现。
-  // 即便同账号重新登录也要求重开，由宿主再次确认稳定身份与会话绑定。
+  // 选库状态由 useKnowledge 的 PassportChanged 订阅自行复位。
   useEffect(() => onEnvelope(Events.PassportChanged, () => {
     accountGeneration.current++
     switchGen.current++
     setSwitching(false)
-    const ids = [...knownKnowledge.current]
-    ids.forEach(id => latest.current.conversation.dropSession(id))
-    latest.current.onKnowledgeInvalidated?.(ids)
-    const removed = new Set(ids)
-    setOpenList(rows => rows.filter(row => !removed.has(row.sessionId)))
-    setRecents(rows => rows.filter(row => !removed.has(row.id)))
-    setTitles(current => Object.fromEntries(Object.entries(current).filter(([id]) => !removed.has(id))))
-    setInfo(current => {
-      if (current && removed.has(current.sessionId)) { setStarted(false); return null }
-      return current
-    })
-    knownKnowledge.current.clear()
+    latest.current.onKnowledgeInvalidated?.([])
   }), [])
 
   const refreshOpen = useCallback(async () => {
@@ -225,21 +207,6 @@ export function useSession({ busy, conversation, showToast, onEnterChat, onKnowl
       void refreshRecents()
       void refreshOpen()
     })
-
-  // 知识库入口只新建会话，不执行 newSession/reset，不删除源会话的可见历史。
-  // 创建返回前若用户切换了会话，不再迁移草稿或抢回焦点；后端已创建的会话仍在列表中。
-  async function openKnowledge(sourceSessionId: string, libraryIds: string[], onCreated: (id: string) => void): Promise<boolean> {
-    if (info?.sessionId !== sourceSessionId) return false
-    const isStale = beginSwitch()
-    try {
-      const created = await createKnowledgeChat({ sourceSessionId, libraryIds })
-      if (isStale()) return false
-      onCreated(created.sessionId)
-      setInfo(created)
-      onEnterChat()
-      return true
-    } finally { endSwitch(isStale); void refreshOpen(); void refreshRecents() }
-  }
 
   // openWorkspace 在**另一个目录**开一条会话，已经开着的那些一条都不动。
   //
@@ -389,32 +356,11 @@ export function useSession({ busy, conversation, showToast, onEnterChat, onKnowl
     }
   }
 
-  async function renameKnowledge(id: string, title: string) {
-    const generation = accountGeneration.current
-    try {
-      await renameKnowledgeChat(id, title)
-      if (generation !== accountGeneration.current) return
-      setTitles(current => ({ ...current, [id]: title.trim() }))
-      void refreshRecents()
-    } catch (error) { if (generation === accountGeneration.current) showToast(`重命名失败：${errText(error)}`) }
-  }
-  async function exportKnowledge(id: string) {
-    const generation = accountGeneration.current
-    try {
-      // 导出由宿主重新验证账号并仅返回已保存问答。换账号后的迟到正文不进剪贴板。
-      const transcript = await exportKnowledgeChat(id)
-      if (generation !== accountGeneration.current) return
-      await copyText(transcript)
-      showToast('已复制保存的问答与来源')
-    } catch (error) { if (generation === accountGeneration.current) showToast(`导出失败：${errText(error)}`) }
-  }
-
   // applyUpdate 是所有"改一个会话开关"的统一骨架：调后端 → 拿到完整状态就整体
   // 采纳 → 失败落一条错误块。计划模式/思考场景/思考强度原先各写了一遍同样的
   // try/catch，现在只有这一处。
   async function applyUpdate(call: () => Promise<SessionInfo | null>) {
     if (!info) return
-    if (info.readOnlyReason) { showToast(info.readOnlyReason); return }
     try {
       const i = await call()
       if (i?.model) setInfo(i)
@@ -433,7 +379,6 @@ export function useSession({ busy, conversation, showToast, onEnterChat, onKnowl
   // mode cards), keeping the local session info in sync with the backend.
   async function pickMode(mode: string) {
     if (!info || info.permissionMode === mode) return
-    if (info.readOnlyReason) { showToast(info.readOnlyReason); return }
     try {
       await setPermissionMode(sid(), mode)
       setInfo({ ...info, permissionMode: mode })
@@ -448,7 +393,6 @@ export function useSession({ busy, conversation, showToast, onEnterChat, onKnowl
   }
 
   async function pickModel(choice: ModelOption) {
-    if (info?.readOnlyReason) { showToast(info.readOnlyReason); return }
     try {
       // Adopt the full returned status: switching to/from a custom model rebuilds the
       // session, which rebinds the preview server to a new port — so previewBaseURL
@@ -474,8 +418,8 @@ export function useSession({ busy, conversation, showToast, onEnterChat, onKnowl
 
   return {
     info, setInfo, started, starting, startError, recents, initialReq, setInitialReq, switching,
-    captureSwitch, runQuestionBranch, refreshOpen, openList, titles, openAnother, openKnowledge, focusOn, closeOne,
-    start, newChat, openRecent, openWorkspace, pickWorkspaceAndOpen, deleteRecent, returnToStart, renameKnowledge, exportKnowledge,
+    captureSwitch, runQuestionBranch, refreshOpen, openList, titles, openAnother, focusOn, closeOne,
+    start, newChat, openRecent, openWorkspace, pickWorkspaceAndOpen, deleteRecent, returnToStart,
     togglePlan, chooseReasoning, chooseThinking, pickMode, toggleMode, pickModel,
   }
 }

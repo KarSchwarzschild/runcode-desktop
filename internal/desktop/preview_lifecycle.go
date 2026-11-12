@@ -10,9 +10,9 @@ import (
 
 // emitPreviewLifecycle notifies the UI that file-preview caches for a session
 // instance must change. Call while the entry's emit is still live (before it is
-// cleared on close). Knowledge-chat entries never hold preview refs; skip them.
+// cleared on close).
 func (a *App) emitPreviewLifecycle(e *sessionEntry, phase, generation string) {
-	if a == nil || e == nil || e.chat != nil {
+	if a == nil || e == nil {
 		return
 	}
 	a.mu.Lock()
