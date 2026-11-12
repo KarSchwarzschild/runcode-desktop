@@ -22,6 +22,7 @@ import { ReplyArtifacts } from '@/chat/reply-artifacts'
 import { type PreviewTab } from '@/preview/tabs'
 import { PlanStates, type PlanSnapshot } from '@/core/bridge'
 import { type Plan } from '@/session/use-plan'
+import { InlinePreviewBudgetProvider } from '@/chat/inline-preview-budget'
 
 export function ChatPane({
   blocks, busy, sendBlock = '', cwd, userName, plan, planOpen, onPlanToggle, planning, textOnly = false,
@@ -119,6 +120,8 @@ export function ChatPane({
         </div>
       )}
       <div className="flex-1 overflow-y-auto bg-surface px-6 pt-3 pb-8" ref={scrollRef} onScroll={handleScroll}>
+        {/* HTML 内联预览名额挂在本消息区：跨消息共享 liveFrames，切会话随子树卸载释放。 */}
+        <InlinePreviewBudgetProvider>
         <div className="mx-auto max-w-[1200px] flex flex-col gap-6">
           {blocks.length === 0 && (
             <div className="mt-[16vh] text-center text-faint">
@@ -178,6 +181,7 @@ export function ChatPane({
             </BotRow>
           )}
         </div>
+        </InlinePreviewBudgetProvider>
       </div>
       {/* 审批板钉在输入区上方，不随对话滚走：这是一道必须有人应答的闸门。 */}
       {showBoard && (
