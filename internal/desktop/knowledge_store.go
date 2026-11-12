@@ -35,10 +35,10 @@ type knowledgeDisk struct {
 }
 
 const (
-	knowledgeStoreVersionV1   = 1
-	knowledgeStoreVersionV2   = 2
-	knowledgeSummaryTitleMax  = 512
-	knowledgeSummaryDescMax   = 600
+	knowledgeStoreVersionV1  = 1
+	knowledgeStoreVersionV2  = 2
+	knowledgeSummaryTitleMax = 512
+	knowledgeSummaryDescMax  = 600
 )
 
 var errKnowledgeStorage = errors.New("知识库选择记录无法读取或保存，请修复存储后重试；本次消息未发送")
@@ -195,12 +195,12 @@ func deleteKnowledge(workspace, id string) error {
 	return nil
 }
 
-func truncateRunes(value string, max int) string {
-	if max <= 0 || utf8.RuneCountInString(value) <= max {
+func truncateRunes(value string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(value) <= limit {
 		return value
 	}
 	runes := []rune(value)
-	return string(runes[:max])
+	return string(runes[:limit])
 }
 
 func knowledgeSummariesFromView(libraries []KnowledgeBaseSummary) []knowledgeSummary {

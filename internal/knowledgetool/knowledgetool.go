@@ -400,12 +400,12 @@ func utf16Len(s string) int {
 	return n
 }
 
-func clipRunes(s string, max int) string {
-	if max <= 0 || utf8.RuneCountInString(s) <= max {
+func clipRunes(s string, limit int) string {
+	if limit <= 0 || utf8.RuneCountInString(s) <= limit {
 		return s
 	}
 	runes := []rune(s)
-	return string(runes[:max])
+	return string(runes[:limit])
 }
 
 func errResult(msg string) tool.Result {

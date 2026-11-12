@@ -27,7 +27,7 @@ type titleGenerator interface {
 // onTurnEnd is the host's post-turn hook (Options.OnTurnEnd): it fires on the
 // turn goroutine right after the turn:end envelope. Per the hook's contract it
 // must not block, so it only launches the title refresh goroutine.
-func (a *App) onTurnEnd(sctx host.SessionContext, result turn.Result) {
+func (a *App) onTurnEnd(sctx host.SessionContext, _ turn.Result) {
 	// 按信封里的会话 id 取,而不是"是不是当前那个":后台会话的回合也该有标题。
 	// 会话若已被替换,条目在新会话开出来时就被清了,这里取到 nil,自然跳过。
 	a.mu.Lock()

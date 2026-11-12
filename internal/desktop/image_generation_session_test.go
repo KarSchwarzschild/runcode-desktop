@@ -12,6 +12,8 @@ import (
 )
 
 // imageGenSessionApp：在假引擎上打开绑定通行证的普通会话（fixture 目录，sub／tenant）。
+//
+//nolint:unparam // 夹具保留 sub，便于以后换账号而不改调用点签名。
 func imageGenSessionApp(t *testing.T, sub, tenant string) (*App, string, string) {
 	t.Helper()
 	isolateConfigDir(t)

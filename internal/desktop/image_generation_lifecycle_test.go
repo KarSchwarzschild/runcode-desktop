@@ -51,8 +51,8 @@ func TestImageGenerationLifecycleInjectedMessagesKeepTheBudget(t *testing.T) {
 
 func TestImageGenerationLifecycleAuthoritativeChecksBeforeSubmit(t *testing.T) {
 	cases := []struct {
-		name   string
-		break_ func(*imageGenFlow)
+		name string
+		prep func(*imageGenFlow)
 	}{
 		{"model withdrawn after approval", func(f *imageGenFlow) { f.bridge.dropModel(t, "image-only-b64") }},
 		{"account switched", func(f *imageGenFlow) {
@@ -73,7 +73,7 @@ func TestImageGenerationLifecycleAuthoritativeChecksBeforeSubmit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newImageGenFlow(t)
-			tc.break_(f)
+			tc.prep(f)
 			got := f.run(t, "tu_1", `{"prompt":"海报"}`)
 			if got.Status != "failed" || f.bridge.posts.Load() != 0 {
 				t.Fatalf("result = %+v posts=%d (Core POST must be 0)", got, f.bridge.posts.Load())

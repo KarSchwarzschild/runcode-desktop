@@ -32,7 +32,7 @@ const knowledgeHistoryRecordLimit = 32 << 20
 // Successful checks are cached by journal/checkpoint fingerprint so resume,
 // model switch, and later submits do not re-decode an unchanged history.
 type knowledgeHistoryFingerprint struct {
-	journalSize, journalMod int64
+	journalSize, journalMod       int64
 	checkpointSize, checkpointMod int64
 }
 

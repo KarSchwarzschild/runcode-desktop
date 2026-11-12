@@ -14,6 +14,7 @@ import (
 // 生图模型目录：哪些平台模型能生成图片、用什么参数，只认网关的 image_generation
 // 扩展（设计 6.1）。不按模型名猜，也不把 supports_images（图片输入）当成图片输出。
 
+// ImageGenerationProfile 是协议档案的本包别名，供目录／设置共用。
 type ImageGenerationProfile = appwire.ImageGenerationProfile
 
 // 目录条目可声明的能力。仅有 image_generation、没有 chat 的模型绝不可进入任何文本用途。

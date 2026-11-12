@@ -19,6 +19,7 @@ type knowledgeToolHost struct {
 }
 
 func (h knowledgeToolHost) Retrieve(ctx context.Context, query string, libraryIDs []string, meta knowledgetool.CallMeta) ([]knowledgetool.RawHit, string, error) {
+	ctx = withKnowledgeRefreshBudget(ctx)
 	e, err := h.app.entryOf(h.sessionID)
 	if err != nil {
 		return nil, "", errors.New("会话不可用，无法检索知识库")
@@ -123,13 +124,13 @@ func (a *App) emitKnowledgeToolContext(e *sessionEntry, status string, hits []kn
 	sources := make([]KnowledgeSource, 0, len(hits))
 	for _, hit := range hits {
 		sources = append(sources, KnowledgeSource{
-			ID: knowledgetool.SourceID(hit.LibraryID, hit.DocumentID, hit.ChunkID),
+			ID:        knowledgetool.SourceID(hit.LibraryID, hit.DocumentID, hit.ChunkID),
 			LibraryID: hit.LibraryID, DocumentID: hit.DocumentID, ChunkID: hit.ChunkID,
 			Title: hit.Title, SourceURL: hit.SourceURL,
 		})
 	}
 	applied := status == "matched" && len(sources) > 0
-	uiStatus := status
+	var uiStatus string
 	switch status {
 	case "matched":
 		uiStatus = "matched"

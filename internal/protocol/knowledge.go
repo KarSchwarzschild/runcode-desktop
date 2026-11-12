@@ -81,4 +81,3 @@ type KnowledgeContextStatus struct {
 	QuestionID string            `json:"questionId"`
 	Knowledge  QuestionKnowledge `json:"knowledge"`
 }
-

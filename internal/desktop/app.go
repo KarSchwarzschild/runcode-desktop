@@ -665,11 +665,11 @@ func (a *App) SetQuitter(q Quitter) { a.quit = q }
 // 让"某些会话里 OA 工具一调就被拒"这种问题多一个可能来源。
 var hostToolClasses = func() map[string]permissions.ToolClass {
 	m := map[string]permissions.ToolClass{
-		plantool.Name:       permissions.ClassReadOnly,
-		previewtool.Name:    permissions.ClassReadOnly,
-		officetool.Name:     permissions.ClassReadOnly,
-		runtimetool.Name:    permissions.ClassMutating,
-		browsertool.Name:    permissions.ClassMutating,
+		plantool.Name:    permissions.ClassReadOnly,
+		previewtool.Name: permissions.ClassReadOnly,
+		officetool.Name:  permissions.ClassReadOnly,
+		runtimetool.Name: permissions.ClassMutating,
+		browsertool.Name: permissions.ClassMutating,
 		// 生图会计费并写本地文件：每次都要用户批准，不按知识库那样的只读分类。
 		imagegentool.Name:   permissions.ClassMutating,
 		imageinput.ToolName: permissions.ClassReadOnly,

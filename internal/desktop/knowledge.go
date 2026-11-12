@@ -140,14 +140,14 @@ func (a *App) knowledgeViewWithDetails(ctx context.Context, e *sessionEntry, sel
 	for _, id := range selection.LibraryIDs {
 		var library KnowledgeBaseSummary
 		var err error
-		switch {
-		case mode == "demo":
+		switch mode {
+		case "demo":
 			var ok bool
 			library, ok = demoKnowledgeByID(id)
 			if !ok {
 				err = errKnowledgeUnavailable
 			}
-		case mode == "real":
+		case "real":
 			if cached, ok := details[id]; ok {
 				library = cached
 			} else if revalidate {

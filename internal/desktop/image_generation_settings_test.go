@@ -10,6 +10,8 @@ import (
 )
 
 // imageGenSettingsApp：提供 fixture 目录并以 sub 登录。
+//
+//nolint:unparam // 夹具保留 sub，便于以后换账号而不改调用点签名。
 func imageGenSettingsApp(t *testing.T, sub string) *App {
 	t.Helper()
 	isolateConfigDir(t)
@@ -20,6 +22,7 @@ func imageGenSettingsApp(t *testing.T, sub string) *App {
 	return app
 }
 
+//nolint:unparam // 夹具保留 tenant，跨租户用例可直接改实参。
 func saveImageModel(t *testing.T, app *App, tenant, model, size string) appwire.ImageGenerationSettings {
 	t.Helper()
 	cur, err := app.GetImageGenerationSettings(tenant)

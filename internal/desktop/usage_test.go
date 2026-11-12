@@ -409,7 +409,7 @@ func TestUsageErrorMapping(t *testing.T) {
 
 func TestUsageRedirectRejected(t *testing.T) {
 	var leaked atomic.Int32
-	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		leaked.Add(1)
 		writeUsageJSON(w, http.StatusOK, usageOverviewFixture())
 	}))
@@ -430,7 +430,7 @@ func TestUsageDeadline(t *testing.T) {
 	if usageCommandTimeout != 20*time.Second {
 		t.Fatalf("command budget = %s", usageCommandTimeout)
 	}
-	app, _ := newUsageApp(t, func(w http.ResponseWriter, r *http.Request) {
+	app, _ := newUsageApp(t, func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
@@ -461,7 +461,7 @@ func TestUsageDeadline(t *testing.T) {
 	}
 
 	// Caller cancellation (page left) ends the read promptly too.
-	app3, _ := newUsageApp(t, func(w http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
+	app3, _ := newUsageApp(t, func(_ http.ResponseWriter, r *http.Request) { <-r.Context().Done() })
 	ctx3, cancel3 := context.WithCancel(context.Background())
 	go func() { time.Sleep(50 * time.Millisecond); cancel3() }()
 	if _, err := app3.usageOverview(ctx3, todayQuery()); err == nil {

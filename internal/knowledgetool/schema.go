@@ -6,14 +6,22 @@ import "gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 const Name = "knowledge_search"
 
 const (
-	MaxQueryUTF16   = 4000
-	MaxLibraries    = 5
+	// MaxQueryUTF16 限制检索 query 的 UTF-16 码元长度。
+	MaxQueryUTF16 = 4000
+	// MaxLibraries 是单次检索可指定的知识库上限。
+	MaxLibraries = 5
+	// MaxCallsPerTurn 是每回合 knowledge_search 调用上限。
 	MaxCallsPerTurn = 3
-	MaxHits         = 5
-	MaxHitRunes     = 2000
-	MaxTotalRunes   = 8000
-	MaxTitleRunes   = 128
-	MaxDescRunes    = 600
+	// MaxHits 是单次结果条数上限。
+	MaxHits = 5
+	// MaxHitRunes 是单条命中正文 rune 上限。
+	MaxHitRunes = 2000
+	// MaxTotalRunes 是全部命中正文合计 rune 上限。
+	MaxTotalRunes = 8000
+	// MaxTitleRunes 是标题 rune 上限。
+	MaxTitleRunes = 128
+	// MaxDescRunes 是描述 rune 上限。
+	MaxDescRunes = 600
 )
 
 // InputSchema is the frozen JSON schema advertised to the model.
