@@ -128,8 +128,12 @@ func (a *App) knowledgeView(ctx context.Context, e *sessionEntry, selection know
 	return a.knowledgeViewWithDetails(ctx, e, selection, revalidate, nil)
 }
 
+const knowledgeUnavailableTitle = "不可用的知识库"
+
 // knowledgeViewWithDetails 可复用同一次保存里已授权的详情，避免新增库被读两次。
 // details 只活在本请求；跨请求仍走实时 knowledgeDetail。
+// 删除/子集保存会传 revalidate=false，但仍应消费 details 里保留库的既有摘要，
+// 不能把剩余库一律写成「不可用的知识库」再落盘。
 func (a *App) knowledgeViewWithDetails(ctx context.Context, e *sessionEntry, selection knowledgeSelection, revalidate bool, details map[string]KnowledgeBaseSummary) SessionKnowledgeView {
 	mode, reason := knowledgeMode(e)
 	view := SessionKnowledgeView{SessionID: e.id, Revision: selection.Revision, Libraries: []KnowledgeBaseSummary{}, Mode: mode, UnavailableReason: reason}
@@ -143,17 +147,19 @@ func (a *App) knowledgeViewWithDetails(ctx context.Context, e *sessionEntry, sel
 			if !ok {
 				err = errKnowledgeUnavailable
 			}
-		case mode == "real" && revalidate:
+		case mode == "real":
 			if cached, ok := details[id]; ok {
 				library = cached
-			} else {
+			} else if revalidate {
 				library, err = a.knowledgeDetail(ctx, e, id)
+			} else {
+				err = errKnowledgeUnavailable
 			}
 		default:
 			err = errKnowledgeUnavailable
 		}
 		if err != nil {
-			library = KnowledgeBaseSummary{ID: id, Title: "不可用的知识库", UnavailableReason: "无法确认访问权限，请重试或移除此知识库"}
+			library = KnowledgeBaseSummary{ID: id, Title: knowledgeUnavailableTitle, UnavailableReason: "无法确认访问权限，请重试或移除此知识库"}
 		}
 		view.Libraries = append(view.Libraries, library)
 	}
@@ -352,10 +358,14 @@ func (a *App) SetSessionKnowledge(req SetSessionKnowledgeRequest) (SessionKnowle
 		selection = knowledgeSelection{Revision: previous.Revision + 1, LibraryIDs: ids}
 	}
 	// Removing retained real IDs must not ask Token() to refresh or clear an
-	// expired login before the local CAS can persist the removal. Explicit Get
-	// revalidates their metadata; until then keep conservative placeholders.
-	// 新增库复用上面刚授权的详情，避免同一次保存再读一遍。
-	view := a.knowledgeViewWithDetails(ctx, e, selection, hasAdditions, addedDetails)
+	// expired login before the local CAS can persist the removal. Seed details
+	// from prior summaries so the remaining libraries keep real titles; Get
+	// revalidates later. Additions still reuse just-authorized detail only.
+	details := addedDetails
+	if !hasAdditions {
+		details = knowledgeDetailsFromSummaries(previous.Summaries, ids)
+	}
+	view := a.knowledgeViewWithDetails(ctx, e, selection, hasAdditions, details)
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
 	e.questionMu.Lock()
@@ -387,7 +397,7 @@ func (a *App) SetSessionKnowledge(req SetSessionKnowledgeRequest) (SessionKnowle
 		}
 	}
 	if selection.Revision != previous.Revision {
-		selection.Summaries = knowledgeSummariesFromView(view.Libraries)
+		selection.Summaries = knowledgeSummariesForPersist(previous.Summaries, view.Libraries)
 		disk.Version = knowledgeStoreVersionV2
 		disk.Selections[scope] = selection
 		if err := writeKnowledge(e.workspace, e.id, disk); err != nil {

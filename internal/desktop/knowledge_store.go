@@ -219,6 +219,53 @@ func knowledgeSummariesFromView(libraries []KnowledgeBaseSummary) []knowledgeSum
 	return out
 }
 
+func knowledgeDetailsFromSummaries(summaries []knowledgeSummary, keep []string) map[string]KnowledgeBaseSummary {
+	want := map[string]bool{}
+	for _, id := range keep {
+		want[id] = true
+	}
+	out := map[string]KnowledgeBaseSummary{}
+	for _, summary := range summaries {
+		if !want[summary.ID] {
+			continue
+		}
+		title := strings.TrimSpace(summary.Title)
+		if title == "" || title == knowledgeUnavailableTitle {
+			continue
+		}
+		out[summary.ID] = KnowledgeBaseSummary{
+			ID:          summary.ID,
+			Title:       title,
+			Description: summary.Description,
+		}
+	}
+	return out
+}
+
+// knowledgeSummariesForPersist keeps prior titles when the view only has
+// offline placeholders (remove-only saves without gateway revalidation).
+func knowledgeSummariesForPersist(previous []knowledgeSummary, libraries []KnowledgeBaseSummary) []knowledgeSummary {
+	prev := map[string]knowledgeSummary{}
+	for _, summary := range previous {
+		title := strings.TrimSpace(summary.Title)
+		if title == "" || title == knowledgeUnavailableTitle {
+			continue
+		}
+		prev[summary.ID] = summary
+	}
+	out := knowledgeSummariesFromView(libraries)
+	for i := range out {
+		title := strings.TrimSpace(out[i].Title)
+		if title != "" && title != knowledgeUnavailableTitle && title != "名称待恢复" {
+			continue
+		}
+		if prior, ok := prev[out[i].ID]; ok {
+			out[i] = prior
+		}
+	}
+	return out
+}
+
 func knowledgeViewFromSnapshot(sessionID string, selection knowledgeSelection) SessionKnowledgeView {
 	byID := make(map[string]knowledgeSummary, len(selection.Summaries))
 	for _, summary := range selection.Summaries {
