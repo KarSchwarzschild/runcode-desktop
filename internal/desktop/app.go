@@ -776,7 +776,7 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		// 多大、装到哪"（见 runtimetool.go）。
 		Resolver: privilegeResolver{inner: runtimeResolver{
 			inner: imageGenerationResolver{
-				inner: browserResolver{inner: fileReadResolver{inner: permissions.WithToolClasses(nil, hostToolClasses)}},
+				inner: browserResolver{inner: fileReadResolver{inner: permissions.WithToolClasses(nil, hostToolClasses)}, preview: a.sessionArtifactPreviewURL},
 				state: a.imageGenerationStateOf,
 			},
 			rt:    a.rt,
@@ -798,11 +798,11 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		// sudo 那一层（privilegePolicy，把 sudo 从硬拒改成每次询问）必须包在 OA 锁**里面**：
 		// OA 锁要有最终决定权。反过来的话，一条 `sudo curl …` 会被这一层从"拒绝"改回
 		// "询问"，OA 锁想挡的出网就漏了。
-		// svgWritePolicy 包在 appDir 外、提权内：.svg 的 Write/Edit 询问升级为放行
-		// （任意路径）；sudo 与 OA 锁仍在更外层，出网与提权规则不受影响。
+		// artifactPolicy 包在 appDir 外、提权内：工作区内产品产物的 Write/Edit
+		// 免弹窗，且只接受普通文件；执行面、凭据、越界和命令路径仍由内层规则保护。
 		Policy: newOALockPolicy(
 			privilegePolicy{
-				inner: newSVGWritePolicy(
+				inner: newArtifactPolicy(
 					newAppDirPolicy(permissions.DefaultPolicy{TrustedMCPBindings: trustedMCPBindings(cfg.MCPServers)}),
 				),
 				enabled: a.privilegeReady,

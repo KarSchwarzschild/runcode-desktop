@@ -72,7 +72,7 @@ func submitImageGenerationQuestion(t *testing.T, f *imageGenHostQuestionSession)
 	return done
 }
 
-func TestImageGenerationDeniedHostQuestion(t *testing.T) {
+func TestImageGenerationNoPermissionRequest(t *testing.T) {
 	// 产品侧：会话已开启「生成图片」即知情同意，不再弹引擎审批窗，因此也不再有
 	// 「拒绝」按钮可点。这里钉住「全程无 PermissionRequest」，并确认仍能成功生成。
 	f := startImageGenHostQuestionSession(t, false)
