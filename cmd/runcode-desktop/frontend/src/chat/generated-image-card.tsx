@@ -5,7 +5,7 @@
 import { useContext, useEffect, useRef, useState, type RefObject } from 'react'
 import { errCode, errText, openArtifact, releaseArtifact, type ToolEvent } from '@/core/bridge'
 import {
-  accountingLabel, IMAGE_GENERATION_STATUS_LABEL, imageGenerationResultSummary, isImageGenerationResult,
+  IMAGE_GENERATION_STATUS_LABEL, imageGenerationResultSummary, isImageGenerationResult,
 } from '@/core/image-generation'
 import { basename } from '@/core/paths'
 import { fmtBytes } from '@/core/format'
@@ -88,42 +88,45 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
       {!running && !result && <p className="text-[12px] text-muted">没有可显示的生成结果；不会自动重新生成。</p>}
 
       {image && (
-        <>
-          {!sessionId
-            ? <p className="text-[12px] text-red">无法确定图片所属会话，暂不能预览</p>
-            : current?.missing
-              ? <p className="text-[12px] text-amberink">文件不存在（可能已被删除或移动）；不会自动重新生成</p>
-              : current?.error
-                ? <p className="text-[12px] text-red break-words">{current.error}</p>
-                : current?.url
-                  ? (
-                    <button type="button" className="self-start rounded-lg overflow-hidden border border-line2 bg-inset cursor-zoom-in" title="在预览面板打开" onClick={() => onOpenFile?.(path)}>
-                      <img src={current.url} alt="生成的图片" className="block max-h-[260px] max-w-full object-contain" />
-                    </button>
-                  )
-                  : <div className="h-[120px] rounded-lg bg-inset flex items-center justify-center text-[12px] text-faint">正在载入缩略图…</div>}
-          <div className="text-[11px] text-faint">{image.width} × {image.height} · {fmtBytes(image.bytes)} · {image.mimeType}</div>
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="font-mono text-[12px] text-ink2 truncate min-w-0" title={path}>{basename(path)}</span>
-            <span className="font-mono text-[11px] text-faint truncate min-w-0" title={path}>{path}</span>
+        <div className="flex gap-3 items-start min-w-0">
+          {/* 紧凑缩略图：固定小框，不撑开卡片；点击与「预览」相同，右侧打开。 */}
+          {sessionId ? (
+            current?.missing ? (
+              <div className="flex-none w-[96px] h-[96px] rounded-lg border border-line2 bg-inset flex items-center justify-center px-1.5 text-center text-[11px] text-amberink leading-snug">文件不存在</div>
+            ) : current?.error ? (
+              <div className="flex-none w-[96px] h-[96px] rounded-lg border border-line2 bg-inset flex items-center justify-center px-1.5 text-center text-[11px] text-red leading-snug break-words">{current.error}</div>
+            ) : current?.url ? (
+              <button
+                type="button"
+                className="flex-none w-[96px] h-[96px] rounded-lg overflow-hidden border border-line2 bg-inset cursor-zoom-in hover:border-primary/50 transition"
+                title="在预览面板打开"
+                onClick={() => onOpenFile?.(path)}
+              >
+                <img src={current.url} alt="生成的图片" className="block w-full h-full object-cover" />
+              </button>
+            ) : (
+              <div className="flex-none w-[96px] h-[96px] rounded-lg border border-line2 bg-inset flex items-center justify-center text-[11px] text-faint">载入中…</div>
+            )
+          ) : (
+            <div className="flex-none w-[96px] h-[96px] rounded-lg border border-dashed border-line2 bg-inset flex items-center justify-center text-[11px] text-faint">缩略图</div>
+          )}
+          <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+            <div className="text-[11px] text-faint">{image.width} × {image.height} · {fmtBytes(image.bytes)} · {image.mimeType}</div>
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-mono text-[12px] text-ink2 truncate min-w-0" title={path}>{basename(path)}</span>
+            </div>
+            <div className="font-mono text-[11px] text-faint truncate min-w-0" title={path}>{path}</div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
+              <button type="button" className="text-primary hover:underline" onClick={() => onOpenFile?.(path)}>预览</button>
+              <button type="button" className="text-muted hover:text-ink" onClick={() => { actions.reveal(path).catch(() => {}) }}>在文件夹中显示</button>
+              <button type="button" className="text-muted hover:text-ink" onClick={() => { actions.external(path).catch(() => {}) }}>用系统程序打开</button>
+            </div>
           </div>
-          <div className="flex items-center gap-3 text-[12px]">
-            <button type="button" className="text-primary hover:underline" onClick={() => onOpenFile?.(path)}>预览</button>
-            <button type="button" className="text-muted hover:text-ink" onClick={() => { actions.reveal(path).catch(() => {}) }}>在文件夹中显示</button>
-            <button type="button" className="text-muted hover:text-ink" onClick={() => { actions.external(path).catch(() => {}) }}>用系统程序打开</button>
-          </div>
-        </>
+        </div>
       )}
 
       {result && result.status !== 'succeeded' && (
         <p className={`text-[12px] break-words ${result.status === 'failed' ? 'text-muted' : 'text-amberink'}`}>{imageGenerationResultSummary(result)}</p>
-      )}
-
-      {result && (
-        <div className="text-[11px] text-faint">
-          {accountingLabel(result.accountingStatus)}
-          {result.requestId && <span className="font-mono"> · 关联 ID {result.requestId}</span>}
-        </div>
       )}
     </div>
   )

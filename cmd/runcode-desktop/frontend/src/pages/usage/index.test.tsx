@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PassportStatus } from '@/core/bridge'
 import { UsagePage } from './index'
-import { pickInitialTenant } from './tenant'
+import { mergeUsageTenants, pickInitialTenant } from './tenant'
 import { fixtureOverview, fixtureRequests } from './fixtures'
 
 const native = vi.hoisted(() => ({
@@ -20,6 +20,7 @@ vi.mock('@/core/bridge', async (importOriginal) => ({
   getUsageOverview: native.overview,
   getUsageRequests: native.requests,
   getUsageDimensions: native.dimensions,
+  getLocalUsageTenants: native.tenants,
   passportTenants: native.tenants,
   activeTenant: native.active,
   setActiveTenant: native.setActive,
@@ -60,6 +61,12 @@ describe('pickInitialTenant', () => {
     expect(pickInitialTenant(list, '', '')).toBe('')
     expect(pickInitialTenant([], 'a', 'a')).toBe('')
   })
+  it('mergeUsageTenants 把令牌租户并进历史列表且去重', () => {
+    expect(mergeUsageTenants([{ id: 'a', name: '甲' }], 'wjtest', 'a')).toEqual([
+      { id: 'a', name: '甲' },
+      { id: 'wjtest', name: 'wjtest' },
+    ])
+  })
 })
 
 describe('UsagePage', () => {
@@ -74,17 +81,28 @@ describe('UsagePage', () => {
     expect(native.tenants).not.toHaveBeenCalled()
   })
 
-  it('已登录：范围条写明账号、租户、时区与口径限制；不修改聊天租户', async () => {
+  it('已登录：范围条写明账号、租户、时区与本机口径；不修改聊天租户', async () => {
     await render(user)
     const t = host.textContent ?? ''
     expect(t).toContain('张三')
     expect(t).toContain('租户甲')
     expect(t).toContain('Asia/Shanghai')
-    expect(t).toContain('暂不含嵌套子调用')
+    expect(t).toContain('本机采集的平台调用')
+    expect(t).not.toContain('关闭客户端期间可能有缺口')
+    expect(t).not.toContain('数据读取于')
+    expect(t).not.toContain('含起点、不含终点')
     expect(t).toContain('1.1万')
     expect(native.overview).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-a', range: 'today' }))
     expect(native.setActive).not.toHaveBeenCalled()
     expect(t).not.toMatch(/成本|费用|价格|¥/)
+  })
+
+  it('本机尚无历史租户时用令牌租户打开空统计，不再硬挡', async () => {
+    native.tenants.mockResolvedValue([])
+    native.overview.mockResolvedValue(fixtureOverview({ empty: true, summary: { ...fixtureOverview().summary, requestCount: '0', totalTokens: '0' } }))
+    await render({ ...user, tenantId: 'wjtest' })
+    expect(host.textContent).not.toContain('没有可用租户，无法查看用量')
+    expect(native.overview).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'wjtest' }))
   })
 
   it('多租户且无法确定时先要求选择，不以空租户查询', async () => {

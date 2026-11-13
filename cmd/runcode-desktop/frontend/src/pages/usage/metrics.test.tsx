@@ -82,4 +82,10 @@ describe('UsageFreshness', () => {
     expect(t).toContain('只读副本')
     expect(t).toContain('延迟约 12 秒')
   })
+  it('本机来源显示采集缺口提示，不展示副本延迟', () => {
+    const t = text(renderToStaticMarkup(<UsageFreshness overview={fixtureOverview({ sourceKind: 'local_platform', replicaLagSeconds: null })} refreshedAt={null} />))
+    expect(t).toContain('本机记录')
+    expect(t).toContain('本机采集记录')
+    expect(t).not.toContain('副本延迟')
+  })
 })

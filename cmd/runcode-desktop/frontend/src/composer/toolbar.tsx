@@ -148,10 +148,10 @@ export function ComposerToolbar({
   }, [])
   // Thresholds are the bar's natural content width: ~660px with every label, ~440px
   // once the secondary labels are icons. 0 = not measured yet → stay expanded.
-  // The image generation chip adds about 180px with its label, ~40px as an icon.
+  // 生图芯片只显示「生图」短文案（模型名放进菜单），约占 56px，不再按模型名拉宽。
   const chipShown = !!imageGeneration?.enabled
-  const compactBar = toolbarW > 0 && toolbarW < (chipShown ? 840 : 660)
-  const tinyBar = toolbarW > 0 && toolbarW < (chipShown ? 490 : 450)
+  const compactBar = toolbarW > 0 && toolbarW < (chipShown ? 720 : 660)
+  const tinyBar = toolbarW > 0 && toolbarW < (chipShown ? 470 : 450)
 
   return (
     <div
@@ -212,18 +212,27 @@ export function ComposerToolbar({
               className={`border text-[13px] px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 flex-none whitespace-nowrap transition ${imageGeneration.available ? 'border-primary text-primaryink bg-primarysoft font-medium' : 'border-amber/40 text-amberink bg-amber/12'}`}
             >
               <Icon name="image-gen" size={16} />
-              {!compactBar && <span className="truncate max-w-[160px]">{imageGeneration.available ? `生图 · ${imageGeneration.model}` : '生图 · 未就绪'}</span>}
+              {!compactBar && <span>{imageGeneration.available ? '生图' : '生图 · 未就绪'}</span>}
             </button>
             <Popover open={imageMenu} onClose={() => setImageMenu(false)} placement="up-left" className="w-[260px]">
-              <div className="px-3 py-2 text-[12px] text-muted break-words">
-                {imageGeneration.available
-                  ? <>模型 <span className="font-mono text-ink2">{imageGeneration.model}</span> · {imageGeneration.size}。下一轮生效；每次生成会计费，并照常需要你批准。</>
-                  : imageGeneration.reason}
-              </div>
-              <button type="button" disabled={imageToggleLocked} onClick={() => { setImageMenu(false); onToggleImageGeneration?.(false) }} className="w-full text-left px-3 py-[7px] text-[13px] text-ink hover:bg-surface2 disabled:opacity-40 disabled:cursor-default">关闭生成图片</button>
+              {imageGeneration.available ? (
+                <div className="px-3 py-2.5 flex flex-col gap-1.5 border-b border-line">
+                  <div className="flex items-baseline gap-2 text-[12px] min-w-0">
+                    <span className="text-muted flex-none w-8">模型</span>
+                    <span className="font-mono text-ink2 break-all leading-snug">{imageGeneration.model}</span>
+                  </div>
+                  <div className="flex items-baseline gap-2 text-[12px]">
+                    <span className="text-muted flex-none w-8">尺寸</span>
+                    <span className="tabular-nums text-ink2">{imageGeneration.size}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="px-3 py-2 text-[12px] text-muted break-words border-b border-line">{imageGeneration.reason}</div>
+              )}
+              <button type="button" disabled={imageToggleLocked} onClick={() => { setImageMenu(false); onToggleImageGeneration?.(false) }} className="w-full text-left px-3 py-[7px] text-[13px] text-ink hover:bg-surface2 disabled:opacity-40 disabled:cursor-default">关闭生图</button>
               {onOpenImageGenerationSettings
-                ? <button type="button" onClick={() => { setImageMenu(false); onOpenImageGenerationSettings() }} className="w-full text-left px-3 py-[7px] text-[13px] text-primary hover:bg-surface2">{imageGeneration.available ? '更换生图模型' : '选择生图模型'}</button>
-                : <div className="px-3 py-[7px] text-[12px] text-faint">在「设置 → 图片生成」中{imageGeneration.available ? '更换' : '选择'}生图模型</div>}
+                ? <button type="button" onClick={() => { setImageMenu(false); onOpenImageGenerationSettings() }} className="w-full text-left px-3 py-[7px] text-[13px] text-primary hover:bg-surface2">修改生图设置</button>
+                : <div className="px-3 py-[7px] text-[12px] text-faint">在「设置 → 图片生成」中修改生图设置</div>}
             </Popover>
           </div>
         )}

@@ -6,8 +6,8 @@
 //   2) 筛选候选 modelCandidate／providerCandidate —— 下拉可选 ID 的搜索与续载，
 //      pageSize 固定 50，独立于汇总表；选定才改 filters，搜索只改候选列表。
 //
-// 所有读取串行发出：Bridge 每个副本的统计并发上限是 2，同一页面并行打四条会被自己挤成
-// 503。identityKey 只用来丢弃旧响应，不是授权凭证——身份由 Bridge 按令牌独立校验。
+// 所有读取串行发出：本机 SQLite 查询共享一个快照水位，避免总览、日志和维度各读一份。
+// identityKey 只用来丢弃旧响应，不是授权凭证——身份由桌面端从当前登录态推导。
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   getUsageDimensions, getUsageOverview, getUsageRequests,

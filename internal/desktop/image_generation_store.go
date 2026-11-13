@@ -191,21 +191,23 @@ var errImageGenerationTurnSpent = errors.New("本回合已经提交过一次图�
 const imageGenerationMsgInterrupted = "上次生成过程中断，结果无法确认，可能已生成或计费；不会自动重新生成"
 
 type imageGenerationLedger struct {
-	Version          int                            `json:"version"`
-	GenerationID     string                         `json:"generationId"`
-	SessionID        string                         `json:"sessionId"`
-	TurnID           string                         `json:"turnId"`
-	QuestionID       string                         `json:"questionId"`
-	ToolUseID        string                         `json:"toolUseId"`
-	ScopeID          string                         `json:"scopeId"`
-	Model            string                         `json:"model"`
-	Size             string                         `json:"size"`
-	Status           string                         `json:"status"`
-	Result           *appwire.ImageGenerationResult `json:"result,omitempty"`
-	RequestID        string                         `json:"requestId,omitempty"`
-	AccountingStatus string                         `json:"accountingStatus,omitempty"`
-	SubmittedAt      time.Time                      `json:"submittedAt,omitzero"`
-	UpdatedAt        time.Time                      `json:"updatedAt,omitzero"`
+	Version      int                            `json:"version"`
+	GenerationID string                         `json:"generationId"`
+	SessionID    string                         `json:"sessionId"`
+	TurnID       string                         `json:"turnId"`
+	QuestionID   string                         `json:"questionId"`
+	ToolUseID    string                         `json:"toolUseId"`
+	ScopeID      string                         `json:"scopeId"`
+	Model        string                         `json:"model"`
+	Size         string                         `json:"size"`
+	Status       string                         `json:"status"`
+	Result       *appwire.ImageGenerationResult `json:"result,omitempty"`
+	RequestID    string                         `json:"requestId,omitempty"`
+	// SubmissionStatus 只记录客户端是否进入过生成 HTTP Do；submitted 本身不代表已发送。
+	SubmissionStatus string    `json:"submissionStatus,omitempty"`
+	AccountingStatus string    `json:"accountingStatus,omitempty"`
+	SubmittedAt      time.Time `json:"submittedAt,omitzero"`
+	UpdatedAt        time.Time `json:"updatedAt,omitzero"`
 }
 
 func normalizeAccountingStatus(s string) string {
@@ -214,6 +216,17 @@ func normalizeAccountingStatus(s string) string {
 		return s
 	default:
 		return "unverified"
+	}
+}
+
+// normalizeSubmissionStatus 对历史账本保持保守：缺失、非法或无法证明的值均为 unknown。
+func normalizeSubmissionStatus(s string) string {
+	switch s {
+	case appwire.ImageGenerationSubmissionNotSubmitted,
+		appwire.ImageGenerationSubmissionAttempted:
+		return s
+	default:
+		return appwire.ImageGenerationSubmissionUnknown
 	}
 }
 
@@ -232,9 +245,17 @@ func (rec imageGenerationLedger) finalized(result appwire.ImageGenerationResult)
 	if result.RequestID != "" {
 		rec.RequestID = result.RequestID
 	}
+	// 账本中已有的可信提交边界优先；只有初始 unknown 才接受本次宿主明确结论。
+	currentSubmission := normalizeSubmissionStatus(rec.SubmissionStatus)
+	incomingSubmission := normalizeSubmissionStatus(result.SubmissionStatus)
+	if currentSubmission == appwire.ImageGenerationSubmissionUnknown && incomingSubmission != appwire.ImageGenerationSubmissionUnknown {
+		currentSubmission = incomingSubmission
+	}
+	rec.SubmissionStatus = currentSubmission
 	rec.AccountingStatus = normalizeAccountingStatus(rec.AccountingStatus)
 	result.AccountingStatus = rec.AccountingStatus
 	result.RequestID = rec.RequestID
+	result.SubmissionStatus = rec.SubmissionStatus
 	rec.Result = &result
 	rec.UpdatedAt = time.Now().UTC()
 	return rec
@@ -261,6 +282,7 @@ func (rec imageGenerationLedger) effectiveResult() appwire.ImageGenerationResult
 		out.Images = []appwire.ImageGenerationArtifact{}
 	}
 	out.RequestID = rec.RequestID
+	out.SubmissionStatus = normalizeSubmissionStatus(rec.SubmissionStatus)
 	out.AccountingStatus = normalizeAccountingStatus(rec.AccountingStatus)
 	return out
 }
@@ -300,6 +322,7 @@ func writeImageGenerationLedger(workspace string, rec imageGenerationLedger) err
 		return err
 	}
 	rec.Version = imageGenerationStoreVersion
+	rec.SubmissionStatus = normalizeSubmissionStatus(rec.SubmissionStatus)
 	if rec.UpdatedAt.IsZero() {
 		rec.UpdatedAt = time.Now().UTC()
 	}
@@ -315,6 +338,7 @@ func decodeImageGenerationLedger(data []byte, sessionID, generationID string) (i
 	if json.Unmarshal(data, &rec) != nil || rec.Version != imageGenerationStoreVersion || rec.SessionID != sessionID || rec.GenerationID != generationID {
 		return imageGenerationLedger{}, errImageGenerationStorage
 	}
+	rec.SubmissionStatus = normalizeSubmissionStatus(rec.SubmissionStatus)
 	return rec, nil
 }
 

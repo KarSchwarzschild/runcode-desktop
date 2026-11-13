@@ -39,7 +39,11 @@ func TestImageGenerationLifecycleInjectedMessagesKeepTheBudget(t *testing.T) {
 	}
 	// 同回合重建工具实例（或进程重启）须被持久回合标记拒绝。
 	other := f.app.newImageGenerationTool(f.state)
-	r, _ := other.Run(context.Background(), json.RawMessage(`{"prompt":"再来一张"}`), &tool.Context{SessionID: f.id, MessageID: "q", ToolUseID: "tu_3"}, nil)
+	snap := f.state.snapshot()
+	token := imagegentool.NewInvocationToken(f.id, snap.Generation, "q_tu_3", snap.TurnID)
+	token.MarkPersisted(nil)
+	r, _ := other.Run(imagegentool.WithInvocation(context.Background(), token), json.RawMessage(`{"prompt":"再来一张"}`), &tool.Context{SessionID: f.id, ToolUseID: "tu_3"}, nil)
+	token.Close()
 	if !r.IsError || f.bridge.posts.Load() != 1 {
 		t.Fatalf("second tool instance resubmitted: posts=%d", f.bridge.posts.Load())
 	}
@@ -86,7 +90,7 @@ func TestImageGenerationLifecycleUnknownIsNotRetried(t *testing.T) {
 	f := newImageGenFlow(t)
 	f.bridge.fail.Store(http.StatusBadGateway)
 	got := f.run(t, "tu_1", `{"prompt":"海报"}`)
-	if got.Status != "unknown" || f.bridge.posts.Load() != 1 {
+	if got.Status != "unknown" || got.SubmissionStatus != "attempted" || f.bridge.posts.Load() != 1 {
 		t.Fatalf("result = %+v posts=%d", got, f.bridge.posts.Load())
 	}
 	f.bridge.fail.Store(0)
@@ -94,7 +98,7 @@ func TestImageGenerationLifecycleUnknownIsNotRetried(t *testing.T) {
 		t.Fatalf("unknown outcome retried: %+v posts=%d", again, f.bridge.posts.Load())
 	}
 	rec, err := readImageGenerationLedger(f.cwd, f.id, got.GenerationID)
-	if err != nil || rec.Status != "unknown" || rec.AccountingStatus != "unverified" {
+	if err != nil || rec.Status != "unknown" || rec.SubmissionStatus != "attempted" || rec.AccountingStatus != "unverified" {
 		t.Fatalf("ledger = %+v %v", rec, err)
 	}
 }
@@ -103,7 +107,11 @@ func TestImageGenerationLifecycleCancelKeepsBudgetAndSaysWhy(t *testing.T) {
 	f := newImageGenFlow(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	r, _ := f.tool.Run(ctx, json.RawMessage(`{"prompt":"海报"}`), &tool.Context{SessionID: f.id, MessageID: "q", ToolUseID: "tu_1"}, nil)
+	snap := f.state.snapshot()
+	token := imagegentool.NewInvocationToken(f.id, snap.Generation, "q_tu_1", snap.TurnID)
+	token.MarkPersisted(nil)
+	r, _ := f.tool.Run(imagegentool.WithInvocation(ctx, token), json.RawMessage(`{"prompt":"海报"}`), &tool.Context{SessionID: f.id, ToolUseID: "tu_1"}, nil)
+	token.Close()
 	var got struct {
 		Status, Message string
 	}
@@ -125,7 +133,7 @@ func TestImageGenerationLifecycleSaveFailureIsNotSuccessOrRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 	got := f.run(t, "tu_1", `{"prompt":"海报"}`)
-	if got.Status != "save_failed" || got.Code != "save_failed" || len(got.Images) != 0 || got.RequestID != "brg-synthetic-0002" ||
+	if got.Status != "save_failed" || got.SubmissionStatus != "attempted" || got.Code != "save_failed" || len(got.Images) != 0 || got.RequestID != "brg-synthetic-0002" ||
 		got.AccountingStatus != "unverified" || !strings.Contains(got.Message, "计费待核验") || strings.Contains(got.Message, "免费") {
 		t.Fatalf("save failure = %+v", got)
 	}
@@ -133,7 +141,7 @@ func TestImageGenerationLifecycleSaveFailureIsNotSuccessOrRetry(t *testing.T) {
 		t.Fatalf("save failure triggered another POST: %+v posts=%d", again, f.bridge.posts.Load())
 	}
 	rec, err := readImageGenerationLedger(f.cwd, f.id, got.GenerationID)
-	if err != nil || rec.Status != "save_failed" {
+	if err != nil || rec.Status != "save_failed" || rec.SubmissionStatus != "attempted" {
 		t.Fatalf("ledger = %+v %v", rec, err)
 	}
 }

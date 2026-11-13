@@ -75,10 +75,19 @@ type ImageGenerationArtifact struct {
 	Height   int    `json:"height"`
 }
 
+// 生图请求的本地提交边界。它只回答客户端是否进入 HTTP Do，不承诺网络字节
+// 是否送达、Bridge/Core 是否收到、图片是否生成或是否扣费。
+const (
+	ImageGenerationSubmissionNotSubmitted = "not_submitted"
+	ImageGenerationSubmissionAttempted    = "attempted"
+	ImageGenerationSubmissionUnknown      = "unknown"
+)
+
 // ImageGenerationResult 是模型工具正文、现场工具事件与历史回放共用的有界结果。
 // 从不携带图片字节、Base64、签名 URL 或凭据。Status 为 succeeded／failed／
-// unknown／cancelled／save_failed；AccountingStatus 为 verified／unverified／
-// ambiguous／observed_mismatch，与 Status 独立——自动路径一律 unverified。
+// unknown／cancelled／save_failed；SubmissionStatus 表示本地是否进入发送尝试；
+// AccountingStatus 为 verified／unverified／ambiguous／observed_mismatch，与前两者
+// 独立——自动路径一律 unverified，历史缺提交字段按 unknown。
 type ImageGenerationResult struct {
 	Version          int                       `json:"version"`
 	GenerationID     string                    `json:"generationId"`
@@ -89,5 +98,6 @@ type ImageGenerationResult struct {
 	Images           []ImageGenerationArtifact `json:"images"`
 	Message          string                    `json:"message,omitempty"`
 	RequestID        string                    `json:"requestId,omitempty"`
+	SubmissionStatus string                    `json:"submissionStatus,omitempty"`
 	AccountingStatus string                    `json:"accountingStatus"`
 }

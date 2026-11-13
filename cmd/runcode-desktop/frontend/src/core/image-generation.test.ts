@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ImageGenerationCatalog, ImageGenerationResult, PassportModel } from './bridge'
 import {
-  accountingLabel, imageGenerationModelKey, imageGenerationResultSummary, isChatModel, isImageGenerationModel,
+  accountingLabel, imageGenerationModelKey, imageGenerationResultSummary, isChatModel, isImageGenerationModel, submissionLabel,
   isImageGenerationResult, settingsSelection,
 } from './image-generation'
 
@@ -68,6 +68,12 @@ describe('results', () => {
     for (const status of ['failed', 'unknown', 'cancelled', 'save_failed']) {
       expect(imageGenerationResultSummary({ ...ok, status, images: [] })).not.toMatch(/免费|不收费|未扣费/)
     }
+  })
+  it('仅本地明确未进入发送边界时显示未提交，历史缺失保持保守', () => {
+    expect(submissionLabel('not_submitted')).toBe('未提交生成请求')
+    expect(submissionLabel('attempted')).toBe('')
+    expect(submissionLabel('unknown')).toBe('')
+    expect(submissionLabel(undefined)).toBe('')
   })
   it('未知与保存失败如实说明可能已生成', () => {
     expect(imageGenerationResultSummary({ ...ok, status: 'unknown', images: [] })).toContain('可能已生成')

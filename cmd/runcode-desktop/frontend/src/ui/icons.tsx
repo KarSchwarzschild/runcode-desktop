@@ -251,6 +251,12 @@ export function Icon({ name, size = 18, className }: Props) {
           <path d="m6 9.5 6 6 6-6" />
         </svg>
       )
+    case 'chevron-left':
+      return (
+        <svg {...common} {...stroke}>
+          <path d="m14.5 6-6 6 6 6" />
+        </svg>
+      )
     // Sidebar collapse/expand toggle: the conventional panel glyph (frame with a
     // divided left column), used for both directions since it reads as a toggle.
     case 'panel-left':

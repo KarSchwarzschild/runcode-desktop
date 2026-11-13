@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wt68/runcode/internal/imagegentool"
+	"github.com/wt68/runcode/internal/localusage"
 	appwire "github.com/wt68/runcode/internal/protocol"
 	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
@@ -36,8 +37,9 @@ func (a *App) imageGenerationTools(cfg *engine.Config, sessionID, generation str
 
 func (a *App) newImageGenerationTool(state *imageGenerationTurnState) *imagegentool.Tool {
 	return &imagegentool.Tool{
-		Host:         imageGenerationHost{app: a, state: state},
-		SnapshotFunc: func() imagegentool.Snapshot { return a.imageGenerationToolSnapshot(state) },
+		Host:              imageGenerationHost{app: a, state: state},
+		RequireInvocation: true,
+		SnapshotFunc:      func() imagegentool.Snapshot { return a.imageGenerationToolSnapshot(state) },
 	}
 }
 
@@ -71,7 +73,7 @@ type imageGenerationHost struct {
 }
 
 func imageGenerationRejected(snap imageGenerationSnapshot, size, code, message string) appwire.ImageGenerationResult {
-	return appwire.ImageGenerationResult{Version: 1, Status: "failed", Code: code, Model: snap.Model, Size: size, Images: []appwire.ImageGenerationArtifact{}, Message: message, AccountingStatus: "unverified"}
+	return appwire.ImageGenerationResult{Version: 1, Status: "failed", Code: code, Model: snap.Model, Size: size, Images: []appwire.ImageGenerationArtifact{}, Message: message, SubmissionStatus: appwire.ImageGenerationSubmissionNotSubmitted, AccountingStatus: "unverified"}
 }
 
 // checkImageGenerationLive 确认冻结回合仍归属当前会话实例与账号。
@@ -97,6 +99,12 @@ func (a *App) checkImageGenerationLive(snap imageGenerationSnapshot, state *imag
 // Generate 实现 imagegentool.Host。
 func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input, meta imagegentool.CallMeta) (appwire.ImageGenerationResult, error) {
 	a, snap := h.app, h.state.snapshot()
+	if meta.Invocation == nil || !meta.Invocation.Accepted() || meta.Invocation.Closed() ||
+		meta.Invocation.SessionID() != snap.SessionID || meta.Invocation.Generation() != snap.Generation ||
+		meta.Invocation.TurnID() != snap.TurnID || meta.Invocation.QuestionID() == "" ||
+		meta.MessageID != meta.Invocation.QuestionID() {
+		return imageGenerationRejected(snap, in.Size, "invalid_input", "本次未提交生成请求：调用身份信息缺失"), nil
+	}
 	if snap.TurnID != meta.TurnID || snap.SessionID != meta.SessionID || !snap.Available {
 		return imageGenerationRejected(snap, in.Size, "invalid_input", "回合已变化，本次未生成图片"), nil
 	}
@@ -132,7 +140,7 @@ func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input
 	}
 	rec := imageGenerationLedger{
 		GenerationID: generationID, SessionID: snap.SessionID, TurnID: snap.TurnID, QuestionID: meta.MessageID, ToolUseID: meta.ToolUseID,
-		ScopeID: snap.ScopeID, Model: snap.Model, Size: in.Size, Status: "submitted", AccountingStatus: "unverified", SubmittedAt: time.Now().UTC(),
+		ScopeID: snap.ScopeID, Model: snap.Model, Size: in.Size, Status: "submitted", SubmissionStatus: appwire.ImageGenerationSubmissionUnknown, AccountingStatus: "unverified", SubmittedAt: time.Now().UTC(),
 	}
 	if err := writeImageGenerationLedger(snap.Workspace, rec); err != nil {
 		return imageGenerationRejected(snap, in.Size, "", "无法记录本次提交，本次未生成图片"), nil
@@ -146,22 +154,67 @@ func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input
 		return rec.effectiveResult(), nil
 	}
 	if code, err := a.checkImageGenerationLive(snap, h.state); err != nil {
-		return finish(appwire.ImageGenerationResult{Status: "failed", Code: code, Message: err.Error()})
+		return finish(appwire.ImageGenerationResult{Status: "failed", Code: code, Message: err.Error(), SubmissionStatus: appwire.ImageGenerationSubmissionNotSubmitted})
 	}
 
-	resp, err := a.postImageGeneration(ctx, snap, in)
+	// 用量在 postImageGeneration 的可信发送边界回调中开始。配置、目录、账本、
+	// token／epoch、请求构造和发送前取消都不会创建图片调用；该回调拿到的 scope
+	// 来自同一受保护 token 快照，Finish 不再读取当前登录态。
+	var endUsage func(status, errCode string, images *int64)
+	if endUsage == nil {
+		endUsage = func(string, string, *int64) {}
+	}
+
+	resp, err := a.postImageGeneration(ctx, snap, in, func(scope localusage.Scope) {
+		// 先落盘 attempted 再开始统计；即使统计库写失败，也不能因此重发模型请求。
+		rec.SubmissionStatus = appwire.ImageGenerationSubmissionAttempted
+		if writeErr := writeImageGenerationLedger(snap.Workspace, rec); writeErr != nil {
+			debugLog("image generation ledger %s submission boundary not persisted: %v", generationID, writeErr)
+		}
+		// 发送边界一旦到达，统计不能被随后取消的业务 ctx 抑制；Finish 会按结果记 cancelled／unknown。
+		endUsage, _ = a.beginNonLLMCapture(context.Background(), localusage.StartRecord{
+			CallID: generationID, Scope: scope, Model: snap.Model, CallKind: localusage.CallKindImage,
+			SessionID: snap.SessionID, TurnID: snap.TurnID, GenerationID: generationID, StartedAt: time.Now().UTC(),
+		})
+		if endUsage == nil {
+			endUsage = func(string, string, *int64) {}
+		}
+	})
 	if err != nil {
 		f := imageGenerationFailureOf(err)
-		return finish(appwire.ImageGenerationResult{Status: f.Status, Code: f.Code, Message: f.Message, RequestID: f.RequestID})
+		endUsage(mapImageUsageStatus(f.Status), f.Code, nil)
+		return finish(appwire.ImageGenerationResult{Status: f.Status, Code: f.Code, Message: f.Message, RequestID: f.RequestID, SubmissionStatus: f.SubmissionStatus})
 	}
 	art, err := saveGeneratedImage(ctx, snap.Workspace, generationID, resp.Data[0])
 	if err != nil {
+		// 图像已生成但保存失败：保留张数与 save_failed。
+		one := int64(1)
+		endUsage(localusage.StatusSaveFailed, "save_failed", &one)
 		return finish(appwire.ImageGenerationResult{Status: "save_failed", Code: "save_failed", RequestID: resp.requestID,
 			Message: "已收到生成结果，但下载或保存失败，计费待核验；不会自动重新生成"})
 	}
 	if _, err := a.checkImageGenerationLive(snap, h.state); err != nil {
+		one := int64(1)
+		endUsage(localusage.StatusCancelled, "session_changed", &one)
 		return finish(appwire.ImageGenerationResult{Status: "cancelled", RequestID: resp.requestID,
 			Message: "会话或账号已变化，结果未投递到当前会话；图片可能已生成并计费"})
 	}
+	one := int64(1)
+	endUsage(localusage.StatusSucceeded, "", &one)
 	return finish(appwire.ImageGenerationResult{Status: "succeeded", RequestID: resp.requestID, Images: []appwire.ImageGenerationArtifact{art}})
+}
+
+func mapImageUsageStatus(status string) string {
+	switch status {
+	case "succeeded":
+		return localusage.StatusSucceeded
+	case "failed":
+		return localusage.StatusFailed
+	case "cancelled":
+		return localusage.StatusCancelled
+	case "save_failed":
+		return localusage.StatusSaveFailed
+	default:
+		return localusage.StatusUnknown
+	}
 }

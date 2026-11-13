@@ -1,4 +1,4 @@
-// 按模型 / 供应商汇总：服务端按请求数降序、稳定 ID 分页，每行合计原样展示；
+// 按模型 / 供应商汇总：桌面端按请求数降序、稳定 ID 分页，每行合计原样展示；
 // 已下线模型照样列出，供应商无法确定的记录归到「未记录」。
 import type { UsageDimensionsPage } from '@/core/bridge'
 import { formatExact, formatRate } from '@/core/usage'

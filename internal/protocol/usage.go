@@ -1,14 +1,12 @@
 package protocol
 
-// 用量统计（USAGE-001）的桌面 wire 契约，字段与 Bridge `/api/usage/*` 的公开 DTO
-// 一一对应（设计说明第 8 节）。三条约定贯穿全部类型：
+// 用量统计（USAGE-001）的桌面 wire 契约，字段对应本机 SQLite 快照与前端展示。三条约定贯穿全部类型：
 //
 //   - 计数与 Token 聚合一律是十进制整数字符串：64 位整数在 JS 里超过 2^53 就丢精度，
 //     前端用 BigInt 显示。字段为指针（TS 里 `string | null`）时，null 表示「未知 /
 //     不可统计」，与字符串 "0" 含义不同，任何一层都不得把 null 补成 0。
 //   - 比例是 0—1 的可空小数；分母为 0 或无可信样本时为 null，界面显示「—」。
-//   - 不含任何成本、价格、额度、正文、Details 或密钥字段；身份与 scope 由 Bridge
-//     按登录令牌和单租户授权在服务端生成，这里没有 userId / dependentId / scope。
+//   - 不含任何成本、价格、额度、正文、Details 或密钥字段；身份与 scope 由桌面端根据当前登录账号、Bridge 和租户冻结，这里没有 userId / dependentId 字段。
 //
 // 失败经 protocol.Error 返回，Code 取下面的 ErrCodeUsage* 或通用的 not_logged_in /
 // invalid_argument；界面按 code 区分未登录、无权、不支持、超时与暂不可用，绝不把
@@ -16,19 +14,19 @@ package protocol
 
 // 用量查询专属的错误码（与引擎的通用 ErrCode* 同属 ErrCodes 联合）。
 const (
-	// ErrCodeUsageForbidden：当前账号无权查看所选租户的用量（Bridge 403）。
+	// ErrCodeUsageForbidden：当前账号无权查看所选租户的用量（本机权限）。
 	ErrCodeUsageForbidden = "usage_forbidden"
-	// ErrCodeUsageInvalidRange：时间范围或筛选被 Bridge 拒绝（400 invalid_range 等）。
+	// ErrCodeUsageInvalidRange：时间范围或筛选不符合本机查询契约。
 	ErrCodeUsageInvalidRange = "usage_invalid_range"
-	// ErrCodeUsageInvalidCursor：分页游标失效（过期、筛选变化或密钥轮换），应回到第一页。
+	// ErrCodeUsageInvalidCursor：分页游标失效（快照过期或筛选变化），应回到第一页。
 	ErrCodeUsageInvalidCursor = "usage_invalid_cursor"
-	// ErrCodeUsageUnsupported：当前数据源 / 范围无法给出准确统计（422），不是零用量。
+	// ErrCodeUsageUnsupported：当前本机数据源 / 维度无法给出准确统计，不是零用量。
 	ErrCodeUsageUnsupported = "usage_unsupported"
-	// ErrCodeUsageTimeout：统计在时限内没有完成（504 或本机 20 秒命令预算用尽）。
+	// ErrCodeUsageTimeout：统计在时限内没有完成（本机命令时限内没有完成）。
 	ErrCodeUsageTimeout = "usage_timeout"
-	// ErrCodeUsageUnavailable：功能关闭、并发已满或服务不可达（503 / 网络失败）。
+	// ErrCodeUsageUnavailable：功能关闭、并发已满或本机库不可读。
 	ErrCodeUsageUnavailable = "usage_unavailable"
-	// ErrCodeUsageInvalidResponse：Bridge 返回了不符合契约的数据，整份丢弃不展示。
+	// ErrCodeUsageInvalidResponse：本机记录不符合契约，整份丢弃不展示。
 	ErrCodeUsageInvalidResponse = "usage_invalid_response"
 	// ErrCodeUsageIdentityChanged：请求期间登录账号已变化，旧结果作废。
 	ErrCodeUsageIdentityChanged = "usage_identity_changed"
@@ -36,7 +34,7 @@ const (
 
 // UsageQuery 是总览查询。range 取 today / last24h / last7d / last14d / last30d /
 // all / custom；custom 时 startAt 必填，endAt 与 followNow 二选一（followNow 只是
-// 页面偏好：每次刷新由 Bridge 固定成读取时刻）。timezone 固定 Asia/Shanghai。
+// 页面偏好：每次刷新由桌面端固定成读取时刻）。timezone 固定 Asia/Shanghai。
 type UsageQuery struct {
 	TenantID   string `json:"tenantId"`
 	Range      string `json:"range"`
@@ -48,7 +46,7 @@ type UsageQuery struct {
 	Model      string `json:"model,omitempty"`
 }
 
-// UsageEffectiveRange 是 Bridge 为一次查询固定下来的半开区间 [startAt, endAt)。
+// UsageEffectiveRange 是桌面端为一次查询固定下来的半开区间 [startAt, endAt)。
 type UsageEffectiveRange struct {
 	StartAt  string `json:"startAt"`
 	EndAt    string `json:"endAt"`
@@ -142,24 +140,25 @@ type UsageCoverageGap struct {
 	EndAt   string `json:"endAt"`
 }
 
-// UsageOverview 是同一次一致性读取得到的汇总、趋势与质量。dataAsOf 是服务端读取
-// 时刻，不是入账水位；replicaLagSeconds 为 null 表示副本延迟未知。
+// UsageOverview 是同一次本机快照读取到的汇总、趋势与质量。dataAsOf 是本机读取时刻；
+// local_platform 来源不使用 replicaLagSeconds。
 type UsageOverview struct {
-	ScopeID           string              `json:"scopeId"`
-	QueryKey          string              `json:"queryKey"`
-	EffectiveRange    UsageEffectiveRange `json:"effectiveRange"`
-	DataAsOf          string              `json:"dataAsOf"`
-	Summary           UsageTotals         `json:"summary"`
-	Trend             []UsageBucket       `json:"trend"`
-	Capabilities      UsageCapabilities   `json:"capabilities"`
-	Empty             bool                `json:"empty"`
-	CoverageStart     *string             `json:"coverageStart"`
-	CoverageGaps      []UsageCoverageGap  `json:"coverageGaps"`
-	CoverageStatus    string              `json:"coverageStatus"`
-	SourceKind        string              `json:"sourceKind,omitempty"`
-	ReplicaLagSeconds *int64              `json:"replicaLagSeconds"`
-	Consistency       string              `json:"consistency,omitempty"`
-	MappingVersion    string              `json:"mappingVersion,omitempty"`
+	ScopeID        string              `json:"scopeId"`
+	QueryKey       string              `json:"queryKey"`
+	EffectiveRange UsageEffectiveRange `json:"effectiveRange"`
+	DataAsOf       string              `json:"dataAsOf"`
+	Summary        UsageTotals         `json:"summary"`
+	Trend          []UsageBucket       `json:"trend"`
+	Capabilities   UsageCapabilities   `json:"capabilities"`
+	Empty          bool                `json:"empty"`
+	CoverageStart  *string             `json:"coverageStart"`
+	CoverageGaps   []UsageCoverageGap  `json:"coverageGaps"`
+	CoverageStatus string              `json:"coverageStatus"`
+	// SourceKind 首期固定为 local_platform；兼容字段仍允许其他只读来源。
+	SourceKind        string `json:"sourceKind,omitempty"`
+	ReplicaLagSeconds *int64 `json:"replicaLagSeconds"`
+	Consistency       string `json:"consistency,omitempty"`
+	MappingVersion    string `json:"mappingVersion,omitempty"`
 }
 
 // UsageRowQuality 是单条记录各项用量的来源口径（reported / estimated / derived /
@@ -191,8 +190,7 @@ type UsageRequestRow struct {
 	Quality         UsageRowQuality `json:"quality"`
 }
 
-// UsageRequestsPage 是一页请求日志。totalCount 是读取时刻的可见总数，不是快照；
-// nextCursor 由 Bridge 签名并绑定身份、范围与筛选，客户端原样回传。
+// UsageRequestsPage 是一页请求日志；totalCount 与 nextCursor 绑定同一个本机快照水位、范围与筛选。
 type UsageRequestsPage struct {
 	Items          []UsageRequestRow   `json:"items"`
 	TotalCount     string              `json:"totalCount"`

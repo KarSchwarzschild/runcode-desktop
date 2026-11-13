@@ -46,6 +46,7 @@ import { MarketPage } from '@/pages/market'
 import { PermissionsPage } from '@/pages/permissions'
 import { MemoryPage } from '@/pages/memory'
 import { SettingsPage } from '@/pages/settings'
+import type { SettingsSectionId } from '@/pages/settings/navigation-model'
 import { StartForm } from '@/pages/start'
 import { UsagePage } from '@/pages/usage'
 
@@ -53,6 +54,16 @@ export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 
 
 export default function App() {
   const [view, setView] = useState<View>('chat')
+  // 打开设置时可直达某一节（如生图菜单「修改生图设置」→ 图片生成）；侧栏普通入口保持空。
+  const [settingsSection, setSettingsSection] = useState<SettingsSectionId | undefined>()
+  const openSettings = (section?: SettingsSectionId) => {
+    setSettingsSection(section)
+    setView('settings')
+  }
+  const goView = (next: View) => {
+    setSettingsSection(undefined)
+    setView(next)
+  }
   // 输入草稿按会话存：在 A 里写了一半切到 B，那半句不该跟着过去。
   const taRef = useRef<ComposerEditorHandle>(null)
   // 侧栏折叠态：上提到这里，让折叠开关能放到主栏顶部状态条（「空闲」前），
@@ -257,7 +268,7 @@ export default function App() {
           onSwitchWorkspace={() => { if (!session.switching) void session.pickWorkspaceAndOpen() }}
           onDelete={session.deleteRecent}
           view={view}
-          onNav={setView}
+          onNav={goView}
           onNew={() => {
             if (session.switching) return
             setView('chat')
@@ -311,6 +322,7 @@ export default function App() {
               info={session.info}
               busy={conversation.busy}
               update={update}
+              initialSection={settingsSection}
               onSwitchModel={session.pickModel}
               onSaved={(i) => {
                 session.setInfo(i)
@@ -340,7 +352,7 @@ export default function App() {
             <MemoryPage />
           ) : view === 'usage' ? (
             // 统计页只读平台记录，不影响后台会话；未登录时页内引导去设置页登录。
-            <UsagePage passport={passport} onOpenSettings={() => setView('settings')} />
+            <UsagePage passport={passport} onOpenSettings={() => openSettings('passport')} />
           ) : (
             <>
               <ArtifactActionsContext.Provider value={preview.actions}><ChatPane
@@ -415,7 +427,7 @@ export default function App() {
                 onPickModel={session.pickModel}
                 builtinScenarios={builtinScenarios}
                 onPickScenario={(sc) => void pickScenario(sc)}
-                onOpenImageGenerationSettings={() => setView('settings')}
+                onOpenImageGenerationSettings={() => openSettings('image-generation')}
               />
             </>
           )}
@@ -434,6 +446,7 @@ export default function App() {
             onSelect={preview.setActive}
             onCloseTab={preview.close}
             onCloseAll={preview.closeAll}
+            onBackToBrowser={() => { preview.closeAll(); preview.setBrowseOpen(true) }}
             onCloseBrowser={() => preview.setBrowseOpen(false)}
             onPickFile={(p) => { if (isPreviewable(p)) preview.openFile(toWorkspaceRel(p, session.info?.cwd ?? '')) }}
           />

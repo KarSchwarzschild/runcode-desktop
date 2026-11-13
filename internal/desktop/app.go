@@ -19,6 +19,7 @@ import (
 	"github.com/wt68/runcode/internal/codexproxy"
 	"github.com/wt68/runcode/internal/imagegentool"
 	"github.com/wt68/runcode/internal/knowledgetool"
+	"github.com/wt68/runcode/internal/localusage"
 	"github.com/wt68/runcode/internal/officetool"
 	"github.com/wt68/runcode/internal/plantool"
 	"github.com/wt68/runcode/internal/previewtool"
@@ -270,6 +271,9 @@ type App struct {
 	// oaBindings 缓存"当前账号在 Passport 里绑没绑 OA"（见 oa.go）。与上一行同一套
 	// 理由：会话创建不能每次都去问一趟。键同样是租户 id。
 	oaBindings map[string]oaBindingEntry
+	// usageStore 是本机平台用量 SQLite（见 usage_capture.go／internal/localusage）。
+	// Startup 打开；Shutdown 在回合收尾后关闭。nil 表示未启用或打开失败。
+	usageStore *localusage.Store
 }
 
 // New returns an App that emits events to sink. Session events are enveloped
@@ -294,8 +298,20 @@ func newWithBuild(sink EventSink, build host.BuildFunc) *App {
 		// ChatGPT 账号在这里就读回落盘的令牌,所以重启后仍是登录态(见 codex.go)。
 		codex: newCodexAccount(),
 	}
+	// 真实引擎会话需要一层极薄包装，以便 host.Manager 的 SubmitQuestion
+	// 把它分配的问题 ID 透传到生图工具；测试 fake session 保持原样。
+	wrappedBuild := func(cfg engine.Config, opts engine.Options) (host.Session, error) {
+		session, err := build(cfg, opts)
+		if err != nil {
+			return nil, err
+		}
+		if real, ok := session.(*engine.Session); ok {
+			return &imageGenerationInvocationSession{Session: real, app: a, sessionID: cfg.SessionID}, nil
+		}
+		return session, nil
+	}
 	a.mgr = host.NewManager(host.Options{
-		Build:       build,
+		Build:       wrappedBuild,
 		Sink:        hostSinkAdapter{app: a},
 		Limits:      host.Limits{}, // single-user shell: unbounded, IdleTimeout 0
 		Configure:   a.configureSession,
@@ -388,6 +404,10 @@ func (a *App) Startup() {
 		if _, err := a.audit.enable(); err != nil {
 			debugLog("context audit restore: %v", err)
 		}
+	}
+	// 本机平台用量：独立 SQLite；失败只记日志，不阻断启动。
+	if err := a.initLocalUsage(); err != nil {
+		debugLog("local usage init: %v", err)
 	}
 }
 
@@ -670,7 +690,7 @@ var hostToolClasses = func() map[string]permissions.ToolClass {
 		officetool.Name:  permissions.ClassReadOnly,
 		runtimetool.Name: permissions.ClassMutating,
 		browsertool.Name: permissions.ClassMutating,
-		// 生图会计费并写本地文件：每次都要用户批准，不按知识库那样的只读分类。
+		// 生图会计费并写本地文件：ClassMutating 保留；会话开启「生成图片」后免弹窗放行。
 		imagegentool.Name:   permissions.ClassMutating,
 		imageinput.ToolName: permissions.ClassReadOnly,
 		knowledgetool.Name:  permissions.ClassReadOnly,
@@ -778,9 +798,13 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		// sudo 那一层（privilegePolicy，把 sudo 从硬拒改成每次询问）必须包在 OA 锁**里面**：
 		// OA 锁要有最终决定权。反过来的话，一条 `sudo curl …` 会被这一层从"拒绝"改回
 		// "询问"，OA 锁想挡的出网就漏了。
+		// svgWritePolicy 包在 appDir 外、提权内：.svg 的 Write/Edit 询问升级为放行
+		// （任意路径）；sudo 与 OA 锁仍在更外层，出网与提权规则不受影响。
 		Policy: newOALockPolicy(
 			privilegePolicy{
-				inner:   newAppDirPolicy(permissions.DefaultPolicy{TrustedMCPBindings: trustedMCPBindings(cfg.MCPServers)}),
+				inner: newSVGWritePolicy(
+					newAppDirPolicy(permissions.DefaultPolicy{TrustedMCPBindings: trustedMCPBindings(cfg.MCPServers)}),
+				),
 				enabled: a.privilegeReady,
 			},
 			func() string { return a.oaLockedModel(sctx.ID) },
@@ -831,7 +855,7 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 
 	// 联网搜索：登录了通行证就换成平台自己的搜索(经 Bridge 走 AI.Core)，否则保留
 	// 引擎内置的那条。同样是"替换"而非"新增"——理由见 websearch.go。
-	if ws := passportWebSearch(cfg); ws != nil {
+	if ws := passportWebSearchFor(a, cfg); ws != nil {
 		opts.WebSearchTool = ws
 	}
 
@@ -1304,7 +1328,7 @@ func (a *App) engineSessionOf(sessionID string) (*engine.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	es, ok := s.(*engine.Session)
+	es, ok := unwrapEngineSession(s)
 	if !ok {
 		return nil, errNoSession
 	}

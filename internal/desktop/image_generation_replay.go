@@ -89,5 +89,6 @@ func imageGenerationResultFromContent(content string) (appwire.ImageGenerationRe
 		r.Images = []appwire.ImageGenerationArtifact{}
 	}
 	r.AccountingStatus = normalizeAccountingStatus(r.AccountingStatus)
+	r.SubmissionStatus = normalizeSubmissionStatus(r.SubmissionStatus)
 	return r, true
 }

@@ -213,6 +213,11 @@ var constGroupSpecs = []constGroupSpec{
 		doc:      "Install stages of one managed runtime pack; the values of RuntimePack.stage.",
 		unionDoc: "RuntimeStage is the closed set of install stages — the shell drives this pipeline itself, so an unknown value is a bug, not a newer peer.",
 	},
+	{
+		goPrefix: "ImageGenerationSubmission", constName: "ImageGenerationSubmissionStatuses", unionName: "ImageGenerationSubmissionStatus", open: false,
+		doc:      "Local image-generation submission dispositions; they do not prove upstream receipt or billing.",
+		unionDoc: "ImageGenerationSubmissionStatus is the closed set of local send-boundary dispositions.",
+	},
 }
 
 // constExemptTypes names constant types that are transport metadata rather than

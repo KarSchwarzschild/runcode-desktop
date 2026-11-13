@@ -10,7 +10,7 @@ import { FIELD_CLS, SelectField } from '@/ui/fields'
 import { Icon } from '@/ui/icons'
 import { BTN, BTN_PRIMARY } from '@/ui/tokens'
 import { RangePicker } from './range-picker'
-import { UsageFreshness, UsageMetrics } from './metrics'
+import { UsageMetrics } from './metrics'
 import { UsageTrend, type TrendMode } from './trend'
 import { UsageRequests } from './requests'
 import { UsageDimensions } from './dimensions'
@@ -108,7 +108,7 @@ function LoginPrompt({ onOpenSettings, title }: { onOpenSettings: () => void; ti
   return (
     <div className={PANEL}>
       <div className="text-[14px] font-semibold text-ink">{title}</div>
-      <p className="m-0 text-[13px] text-muted">用量统计来自平台已入账的消费记录，需要用通行证账号查看；本机不会另行统计。</p>
+      <p className="m-0 text-[13px] text-muted">用量统计来自本机记录的平台调用，需要用通行证账号查看。</p>
       <button type="button" className={`${BTN} ${BTN_PRIMARY}`} onClick={onOpenSettings}>前往账号设置</button>
     </div>
   )
@@ -127,8 +127,8 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
 
   if (!identityKey) {
     return (
-      <PageShell title="用量统计" hint="我的平台用量 · 当前租户" width={PAGE_WIDTH}>
-        <LoginPrompt onOpenSettings={onOpenSettings} title="登录通行证后可查看你在平台上的用量" />
+      <PageShell title="用量统计" hint="我的本机用量 · 当前租户" width={PAGE_WIDTH}>
+        <LoginPrompt onOpenSettings={onOpenSettings} title="登录通行证后可查看本机采集的平台用量" />
       </PageShell>
     )
   }
@@ -162,8 +162,9 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
         <button type="button" className={BTN} onClick={tenants.retry}>重试</button>
       </div>
     )
-  } else if (tenants.tenants.length === 0) body = <Placeholder>当前账号没有可用租户，无法查看用量。</Placeholder>
-  else if (!tenants.selected) body = <Placeholder>请选择要统计的租户。</Placeholder>
+  } else if (tenants.tenants.length === 0) {
+    body = <Placeholder>本机暂无用量记录。登录后发起平台对话或生图，用量会显示在这里。</Placeholder>
+  } else if (!tenants.selected) body = <Placeholder>请选择要统计的租户。</Placeholder>
   else if (usage.error?.kind === 'notLoggedIn' && !overview) body = <LoginPrompt onOpenSettings={onOpenSettings} title="通行证登录已失效，请重新登录后查看用量" />
   else if (usage.error && !overview) {
     const title = FAILURE_TITLES[usage.error.kind] ?? '读取用量失败'
@@ -196,9 +197,8 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
           </Banner>
         )}
         <p className="m-0 text-[12px] text-muted">
-          统计范围 {formatShanghai(range.startAt)} — {formatShanghai(range.endAt)}（上海时间，含起点、不含终点）
+          统计范围 {formatShanghai(range.startAt)} — {formatShanghai(range.endAt)}
         </p>
-        <UsageFreshness overview={overview} refreshedAt={usage.refreshedAt} />
         <UsageMetrics totals={overview.summary} capabilities={overview.capabilities} empty={overview.empty} />
         <UsageTrend buckets={overview.trend ?? []} range={range} mode={trendMode} onModeChange={setTrendMode} coverageStatus={overview.coverageStatus} />
         <section className="flex flex-col gap-3" aria-label="明细">
@@ -246,7 +246,7 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
   const selectedProvider = usage.filters.providerId ?? ''
   const selectedProviderName = providers.find((p) => p.id === selectedProvider)?.name ?? selectedProvider
   return (
-    <PageShell title="用量统计" hint="我的平台用量 · 当前租户" width={PAGE_WIDTH} action={action}>
+    <PageShell title="用量统计" hint="我的本机用量 · 当前租户" width={PAGE_WIDTH} action={action}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12px] text-muted bg-surface2 border border-line2 rounded-field px-3 py-2">
         <span>账号：<b className="font-medium text-ink">{passportDisplayName(passport) || '已登录用户'}</b></span>
         <span className="inline-flex items-center gap-1.5">
@@ -264,7 +264,7 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
           ) : <b className="font-medium text-ink">{tenantName || '—'}</b>}
         </span>
         <span>时区：{USAGE_TIMEZONE}（UTC+8）</span>
-        <span>来源：平台已入账的消费记录（暂不含嵌套子调用，不含自定义直连模型）</span>
+        <span>来源：本机采集的平台调用（不含自定义直连模型）</span>
       </div>
       {tenants.selected && (
         <div className="flex flex-wrap items-end gap-3">

@@ -20,6 +20,12 @@ import (
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 )
 
+// imageGenBridgeHold 让假 Bridge 在进入生图 POST 后暂停，供取消／注入类测试抢窗口。
+type imageGenBridgeHold struct {
+	entered chan struct{}
+	release chan struct{}
+}
+
 // imageGenBridge：假 Bridge——可变的 fixture 目录 + 以 b64 fixture 应答的生图路由。
 type imageGenBridge struct {
 	srv     *httptest.Server
@@ -27,6 +33,7 @@ type imageGenBridge struct {
 	posts   atomic.Int32
 	models  atomic.Value // last requested model
 	fail    atomic.Int32 // non-zero: respond with this status and no body
+	hold    atomic.Pointer[imageGenBridgeHold]
 }
 
 func newImageGenBridge(t *testing.T) *imageGenBridge {
@@ -49,6 +56,14 @@ func newImageGenBridge(t *testing.T) *imageGenBridge {
 			var req imageGenerationWireRequest
 			_ = json.Unmarshal(raw, &req)
 			b.models.Store(req.Model)
+			if h := b.hold.Load(); h != nil {
+				select {
+				case <-h.entered:
+				default:
+					close(h.entered)
+				}
+				<-h.release
+			}
 			if status := b.fail.Load(); status != 0 {
 				w.WriteHeader(int(status))
 				return
@@ -116,7 +131,12 @@ func newImageGenFlow(t *testing.T) *imageGenFlow {
 
 func (f *imageGenFlow) run(t *testing.T, toolUseID, input string) appwire.ImageGenerationResult {
 	t.Helper()
-	r, err := f.tool.Run(context.Background(), json.RawMessage(input), &tool.Context{SessionID: f.id, MessageID: "q_" + toolUseID, ToolUseID: toolUseID}, nil)
+	snap := f.state.snapshot()
+	token := imagegentool.NewInvocationToken(f.id, snap.Generation, "q_"+toolUseID, snap.TurnID)
+	token.MarkPersisted(nil)
+	ctx := imagegentool.WithInvocation(context.Background(), token)
+	defer token.Close()
+	r, err := f.tool.Run(ctx, json.RawMessage(input), &tool.Context{SessionID: f.id, ToolUseID: toolUseID}, nil)
 	if err != nil {
 		t.Fatalf("tool returned a Go error: %v", err)
 	}
@@ -133,7 +153,7 @@ func (f *imageGenFlow) run(t *testing.T, toolUseID, input string) appwire.ImageG
 func TestImageGenerationFlowGeneratesWithConfiguredModel(t *testing.T) {
 	f := newImageGenFlow(t)
 	got := f.run(t, "tu_1", `{"prompt":"校园开放日海报背景"}`)
-	if got.Status != "succeeded" || len(got.Images) != 1 || got.Model != "image-only-b64" || got.Size != "1024x1024" || got.RequestID != "brg-synthetic-0002" || got.AccountingStatus != "unverified" {
+	if got.Status != "succeeded" || got.SubmissionStatus != "attempted" || len(got.Images) != 1 || got.Model != "image-only-b64" || got.Size != "1024x1024" || got.RequestID != "brg-synthetic-0002" || got.AccountingStatus != "unverified" {
 		t.Fatalf("result = %+v", got)
 	}
 	if f.bridge.posts.Load() != 1 || f.bridge.models.Load() != "image-only-b64" {
@@ -143,7 +163,7 @@ func TestImageGenerationFlowGeneratesWithConfiguredModel(t *testing.T) {
 		t.Fatalf("image not in workspace: %v", err)
 	}
 	rec, err := readImageGenerationLedger(f.cwd, f.id, got.GenerationID)
-	if err != nil || rec.Status != "succeeded" || rec.QuestionID != "q_tu_1" || rec.ToolUseID != "tu_1" || rec.TurnID != f.state.snapshot().TurnID {
+	if err != nil || rec.Status != "succeeded" || rec.SubmissionStatus != "attempted" || rec.QuestionID != "q_tu_1" || rec.ToolUseID != "tu_1" || rec.TurnID != f.state.snapshot().TurnID {
 		t.Fatalf("ledger = %+v %v", rec, err)
 	}
 }

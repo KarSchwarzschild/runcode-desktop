@@ -53,9 +53,11 @@ describe('GeneratedImageCard', () => {
     expect(api.openArtifact).toHaveBeenCalledWith('S', '生成图片/gen_1/image.png')
     const img = host.querySelector('img')!
     expect(img.getAttribute('src')).toBe('http://127.0.0.1:9/ref-1')
+    expect(img.closest('button')!.className).toContain('w-[96px]')
     expect(host.textContent).toContain('image-model')
     expect(host.textContent).toContain('1024 × 1024')
-    expect(host.textContent).toContain('计费待核验')
+    expect(host.textContent).not.toContain('计费待核验')
+    expect(host.textContent).not.toContain('关联 ID')
     await act(async () => img.closest('button')!.click())
     expect(onOpen).toHaveBeenCalledWith('生成图片/gen_1/image.png')
   })
@@ -84,9 +86,18 @@ describe('GeneratedImageCard', () => {
     expect(api.openArtifact).not.toHaveBeenCalled()
     expect(host.textContent).toContain('结果未知')
     expect(host.textContent).toContain('可能已生成')
-    expect(host.textContent).toContain('计费待核验')
+    expect(host.textContent).not.toContain('计费待核验')
+    expect(host.textContent).not.toContain('关联 ID')
     expect([...host.querySelectorAll('button')].some((b) => /重试|重新生成/.test(b.textContent ?? ''))).toBe(false)
     expect(host.textContent).not.toMatch(/免费|不收费/)
+  })
+
+  it('明确未提交时显示未提交请求，不把它误报为计费待核验', async () => {
+    await render(toolEvent({ ...ok, status: 'failed', code: 'auth', submissionStatus: 'not_submitted', images: [], message: '调用身份信息缺失' }, 'failed'))
+    expect(api.openArtifact).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('未提交生成请求')
+    expect(host.textContent).not.toContain('计费待核验')
+    expect(host.textContent).not.toContain('关联 ID')
   })
 
   it('进行中只显示真实阶段，不显示虚假百分比', async () => {
@@ -95,9 +106,12 @@ describe('GeneratedImageCard', () => {
     expect(host.textContent).not.toMatch(/\d+%/)
   })
 
-  it('没有来源会话时不猜测会话', async () => {
+  it('没有来源会话时不猜测会话，也不显示会话缺失告警文案', async () => {
     await render(toolEvent(ok), '')
     expect(api.openArtifact).not.toHaveBeenCalled()
-    expect(host.textContent).toContain('无法确定图片所属会话')
+    expect(host.textContent).not.toContain('无法确定图片所属会话')
+    expect(host.textContent).not.toContain('计费待核验')
+    expect(host.textContent).not.toContain('关联 ID')
+    expect(host.textContent).toContain('image.png')
   })
 })

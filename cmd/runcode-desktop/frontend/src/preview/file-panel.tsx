@@ -57,7 +57,7 @@ function fencedCode(text: string, lang?: string): string {
   return `${fence}${lang ?? ''}\n${text}\n${fence}`
 }
 
-export function PreviewPanel({ artifact, relPath, onClose }: { artifact?: ArtifactReference; relPath: string; onClose: () => void }) {
+export function PreviewPanel({ artifact, relPath, onClose, onBack }: { artifact?: ArtifactReference; relPath: string; onClose: () => void; onBack?: () => void }) {
   const reference = artifact?.reference ?? ''
   const sourceURL = artifact?.url ?? ''
   const src = (url: string) => `${url}?v=${bust}`
@@ -106,6 +106,7 @@ export function PreviewPanel({ artifact, relPath, onClose }: { artifact?: Artifa
       <div className="flex-none flex items-center gap-1.5 h-[44px] px-2.5 border-b border-line2">
         <span className="flex-none" style={{ color: fileColor(relPath) }}><Icon name={kindIcon(kind)} size={15} /></span>
         <span className="flex-none text-[11px] text-faint bg-inset rounded px-1.5 py-0.5 mr-auto">{artifactKindLabel(kind)}</span>
+        {onBack && <IconBtn name="chevron-left" title="返回上一级" onClick={onBack} />}
         <IconBtn name="refresh" title="刷新" onClick={() => setBust((v) => v + 1)} />
         <IconBtn name="external-link" title="用系统默认程序打开" onClick={() => { openExternal(reference).catch(() => {}) }} />
         <IconBtn name="copy" title="复制路径" onClick={copyPath} />

@@ -1,12 +1,15 @@
 package desktop
 
 import (
+	"context"
 	"os"
 	"strings"
+	"time"
 
 	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 
+	"github.com/wt68/runcode/internal/localusage"
 	"github.com/wt68/runcode/internal/websearchtool"
 )
 
@@ -50,13 +53,58 @@ func webSearchEndpoint(baseURL string) string {
 // 客户端，它拒连回环/内网地址，而 Bridge 常部署在内网——与 passportHTTP 同一条
 // 理由。
 func passportWebSearch(cfg *engine.Config) tool.Tool {
+	return passportWebSearchFor(nil, cfg)
+}
+
+// passportWebSearchFor 在有 App 时挂上本机用量 Capture（401 续期仍只记一次）。
+func passportWebSearchFor(a *App, cfg *engine.Config) tool.Tool {
 	if !usingPassport(cfg) {
 		return nil
 	}
-	return websearchtool.New(websearchtool.Config{
+	wc := websearchtool.Config{
 		Endpoint:       webSearchEndpoint(cfg.BaseURL),
 		Model:          os.Getenv("RUNCODE_WEBSEARCH_MODEL"),
 		Token:          cfg.TokenSource,
 		OnUnauthorized: cfg.OnUnauthorized,
-	})
+	}
+	if a != nil && platformEnabled.Load() {
+		tenant := tenantFromBridgeBaseURL(cfg.BaseURL)
+		bridge := passportConfig().BridgeBaseURL
+		wc.Capture = func(ctx context.Context, model string) func(ok bool, errCode string) {
+			scope, err := a.freezeUsageScopeParts(bridge, tenant)
+			if err != nil {
+				return func(bool, string) {}
+			}
+			end, began := a.beginNonLLMCapture(ctx, localusage.StartRecord{
+				CallID: localusage.NewCallID(), Scope: scope, Model: model, CallKind: localusage.CallKindSearch,
+				StartedAt: time.Now().UTC(),
+			})
+			if !began {
+				return func(bool, string) {}
+			}
+			return func(ok bool, errCode string) {
+				status := localusage.StatusSucceeded
+				if !ok {
+					status = localusage.StatusFailed
+				}
+				end(status, errCode, nil)
+			}
+		}
+	}
+	return websearchtool.New(wc)
+}
+
+// tenantFromBridgeBaseURL 从 <bridge>/t/<tenant>/v1 解析租户；无前缀则空串。
+func tenantFromBridgeBaseURL(baseURL string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	const marker = "/t/"
+	i := strings.Index(base, marker)
+	if i < 0 {
+		return ""
+	}
+	rest := base[i+len(marker):]
+	if j := strings.IndexByte(rest, '/'); j >= 0 {
+		rest = rest[:j]
+	}
+	return rest
 }

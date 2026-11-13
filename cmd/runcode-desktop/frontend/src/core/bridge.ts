@@ -135,6 +135,7 @@ export {
   interrupt,
   listAgents,
   getVisionSettings, saveVisionSettings, setPlatformImageCapability,
+  getLocalUsageTenants,
   listCustomModels,
   listEdits,
   listFiles,

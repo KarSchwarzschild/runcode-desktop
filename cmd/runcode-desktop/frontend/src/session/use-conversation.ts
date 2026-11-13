@@ -206,10 +206,11 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
           if (idx >= 0) {
             const existing = next[idx] as Extract<Block, { kind: 'tool' }>
             next = [...next]
-            next[idx] = { ...existing, tool: mergeTool(existing.tool, ev) }
+            // 保留首次写入的来源 sessionId；合并事件不得把它冲掉或改成焦点会话。
+            next[idx] = { ...existing, tool: mergeTool(existing.tool, ev), sessionId: existing.sessionId ?? sessionOf(env) }
             return next
           }
-          return [...next, { kind: 'tool', id: nextID(), tool: ev }]
+          return [...next, { kind: 'tool', id: nextID(), tool: ev, sessionId: sessionOf(env) }]
         })
       }),
       // Live context occupancy: emitted before every model round-trip inside a turn,
@@ -517,6 +518,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         return [{
           kind: 'tool',
           id: nextID(),
+          sessionId: sid,
           tool: {
             type: t.isError ? 'failed' : 'completed',
             toolName: t.toolName,
@@ -527,6 +529,8 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
             message: t.isError ? 'completed with error' : 'completed',
             files: matched ?? (t.path ? [{ path: t.path }] : undefined),
             output: matched ? [] : lines,
+            // 生图结果在历史里单独字段；卡片读的是 tool.data，恢复时要接回去。
+            data: t.imageGeneration,
           },
         }]
       }),

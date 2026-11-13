@@ -193,6 +193,12 @@ export function getImageGenerationSettings(tenantID: string): Promise<ImageGener
   return call<ImageGenerationSettings>('GetImageGenerationSettings', tenantID);
 }
 
+// GetLocalUsageTenants 只读本机 SQLite 中当前账号与 Bridge 关联过的历史租户。 它不访问 Bridge，也不切换聊天会话当前租户。
+// kind: query
+export function getLocalUsageTenants(): Promise<PassportTenant[] | null> {
+  return call<PassportTenant[] | null>('GetLocalUsageTenants');
+}
+
 // GetModelContextSettings reads defaults and local overrides for one model.
 // kind: query
 export function getModelContextSettings(ref: ModelReference): Promise<ModelContextView> {
@@ -229,19 +235,19 @@ export function getSessionKnowledgeSnapshot(sessionID: string): Promise<SessionK
   return call<SessionKnowledgeView>('GetSessionKnowledgeSnapshot', sessionID);
 }
 
-// GetUsageDimensions 读取按模型或供应商分组的汇总，也是历史模型筛选项的来源。
+// GetUsageDimensions 返回本机已采集的平台模型维度；供应商维度首期不提供。
 // kind: query
 export function getUsageDimensions(req: UsageDimensionsQuery): Promise<UsageDimensionsPage> {
   return call<UsageDimensionsPage>('GetUsageDimensions', req);
 }
 
-// GetUsageOverview 读取当前租户、所选范围的用量汇总、趋势与口径。
+// GetUsageOverview 返回当前登录账号与租户的本机汇总。
 // kind: query
 export function getUsageOverview(req: UsageQuery): Promise<UsageOverview> {
   return call<UsageOverview>('GetUsageOverview', req);
 }
 
-// GetUsageRequests 读取一页请求日志；范围必须是总览返回的 effectiveRange。
+// GetUsageRequests 返回固定本机快照中的一页调用记录。
 // kind: query
 export function getUsageRequests(req: UsageRequestsQuery): Promise<UsageRequestsPage> {
   return call<UsageRequestsPage>('GetUsageRequests', req);

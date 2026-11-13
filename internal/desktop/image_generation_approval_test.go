@@ -6,15 +6,20 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/wt68/runcode/internal/imagegentool"
+	"github.com/wt68/runcode/internal/localusage"
 	appwire "github.com/wt68/runcode/internal/protocol"
 	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/sessions"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 )
 
@@ -29,127 +34,7 @@ func (h countingImageHost) Generate(ctx context.Context, in imagegentool.Input, 
 	return h.inner.Generate(ctx, in, meta)
 }
 
-type imageGenApprovalSession struct {
-	app       *App
-	bridge    *imageGenBridge
-	cwd       string
-	sessionID string
-	session   *engine.Session
-	approver  *host.AsyncApprover
-	hostCalls *atomic.Int32
-	approvals *atomic.Int32
-}
-
-// startImageGenApprovalSession 走真实 configureSession → 引擎回合 → AsyncApprover 链。
-// 假 LLM 只发起一次 image_generate；Bridge 生图路由计数 POST。
-func startImageGenApprovalSession(t *testing.T, onPermission func(*host.AsyncApprover, PermissionRequest)) *imageGenApprovalSession {
-	t.Helper()
-	isolateConfigDir(t)
-	bridge := newImageGenBridge(t)
-	app := New(&recordingSink{})
-	app.tokens.setInMemory(tokenSet{AccessToken: imageGenJWT("user-a"), Expiry: time.Now().Add(time.Hour)})
-	saveImageModel(t, app, "tenant-a", "image-only-b64", "1024x1024")
-
-	cwd := t.TempDir()
-	sessionID := "image-gen-approval"
-	input, _ := json.Marshal(map[string]string{"prompt": "校园开放日海报背景", "size": "1024x1024"})
-	var requests atomic.Int32
-	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		calls := requests.Add(1)
-		delta := map[string]any{"content": "已按审批结果处理。"}
-		finish := "stop"
-		if calls == 1 {
-			delta = map[string]any{"tool_calls": []any{map[string]any{
-				"index": 0, "id": "call_image_gen", "type": "function",
-				"function": map[string]any{"name": imagegentool.Name, "arguments": string(input)},
-			}}}
-			finish = "tool_calls"
-		}
-		w.Header().Set("Content-Type", "text/event-stream")
-		for _, chunk := range []any{
-			map[string]any{"choices": []any{map[string]any{"index": 0, "delta": delta}}},
-			map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}}},
-		} {
-			data, _ := json.Marshal(chunk)
-			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
-		}
-		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
-	}))
-	t.Cleanup(model.Close)
-
-	cfg := engine.Config{
-		CWD: cwd, SessionID: sessionID, Provider: "openai", Model: "image-gen-approval",
-		BaseURL: model.URL + "/v1", APIKey: "fixture", PermissionMode: "interactive",
-		MaxIterations: 3, TokenSource: app.tokens.Token,
-	}
-	hostCalls, approvals := &atomic.Int32{}, &atomic.Int32{}
-	var approver *host.AsyncApprover
-	approver = host.NewAsyncApprover(func(event string, payload any) {
-		if event != EventPermissionRequest {
-			return
-		}
-		req := payload.(PermissionRequest)
-		if req.Summary.ToolName != imagegentool.Name {
-			t.Errorf("unexpected approval tool: %+v", req.Summary)
-		}
-		approvals.Add(1)
-		onPermission(approver, req)
-	}, cwd)
-	t.Cleanup(approver.DenyAll)
-
-	opts := engine.Options{}
-	app.configureSession(host.SessionContext{
-		ID: sessionID, Generation: "gen-approval", Approver: approver, Emit: func(string, any) {},
-	}, &cfg, &opts)
-
-	found := false
-	for _, extra := range opts.ExtraTools {
-		ig, ok := extra.(*imagegentool.Tool)
-		if !ok {
-			continue
-		}
-		found = true
-		ig.Host = countingImageHost{inner: ig.Host, n: hostCalls}
-	}
-	if !found {
-		t.Fatal("configureSession 未注册 image_generate")
-	}
-
-	app.mu.Lock()
-	state := app.pendingImageGeneration
-	app.mu.Unlock()
-	if state == nil {
-		t.Fatal("image generation state not parked")
-	}
-	account, epoch, err := app.imageGenerationAccount()
-	if err != nil {
-		t.Fatal(err)
-	}
-	bridgeURL := imageGenerationBridge()
-	state.setSnapshot(imageGenerationSnapshot{
-		Enabled: true, Available: true,
-		SessionID: sessionID, TurnID: "turn_approval_1", Generation: "gen-approval", Workspace: cwd,
-		Account: account, Epoch: epoch, Bridge: bridgeURL, Tenant: "tenant-a",
-		ScopeID: imageGenerationScope(account, bridgeURL, "tenant-a"),
-		Model:   "image-only-b64", Size: "1024x1024", SupportedSizes: []string{"1024x1024"},
-		ResponseFormat: "b64_json",
-	})
-	app.mu.Lock()
-	app.pendingImageGeneration = state
-	app.mu.Unlock()
-
-	session, err := engine.Build(cfg, opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = session.Close(context.Background()) })
-	return &imageGenApprovalSession{
-		app: app, bridge: bridge, cwd: cwd, sessionID: sessionID, session: session,
-		approver: approver, hostCalls: hostCalls, approvals: approvals,
-	}
-}
-
-func assertNoImageGenerationSubmit(t *testing.T, f *imageGenApprovalSession) {
+func assertNoImageGenerationSubmit(t *testing.T, f *imageGenHostQuestionSession) {
 	t.Helper()
 	if f.hostCalls.Load() != 0 {
 		t.Fatalf("Host.Generate called %d times after approval rejection/cancel", f.hostCalls.Load())
@@ -157,7 +42,7 @@ func assertNoImageGenerationSubmit(t *testing.T, f *imageGenApprovalSession) {
 	if f.bridge.posts.Load() != 0 {
 		t.Fatalf("Bridge POST = %d, want 0", f.bridge.posts.Load())
 	}
-	recs, err := listImageGenerationLedgers(f.cwd, f.sessionID)
+	recs, err := listImageGenerationLedgers(f.cwd, f.id)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,59 +51,93 @@ func assertNoImageGenerationSubmit(t *testing.T, f *imageGenApprovalSession) {
 	}
 }
 
-func TestImageGenerationApprovalDeniedDoesNotSubmit(t *testing.T) {
-	f := startImageGenApprovalSession(t, func(approver *host.AsyncApprover, req PermissionRequest) {
-		if err := approver.Resolve(req.ID, "deny"); err != nil {
-			t.Error(err)
-		}
-	})
-	if _, err := f.session.RunTurn(context.Background(), "请生成一张校园开放日海报"); err != nil {
-		t.Fatal(err)
-	}
-	if f.approvals.Load() != 1 {
-		t.Fatalf("approvals = %d, want 1", f.approvals.Load())
-	}
-	assertNoImageGenerationSubmit(t, f)
+// submitImageGenerationQuestion 启动真实 App→Manager 提问，并返回等待确认的
+// receipt；调用方可在审批出现后选择 deny 或通过 Interrupt 取消回合。
+func submitImageGenerationQuestion(t *testing.T, f *imageGenHostQuestionSession) <-chan struct {
+	receipt QuestionReceipt
+	err     error
+} {
+	t.Helper()
+	done := make(chan struct {
+		receipt QuestionReceipt
+		err     error
+	}, 1)
+	go func() {
+		receipt, err := f.app.SubmitQuestion(SubmitQuestionRequest{SessionID: f.id, Text: "请生成一张校园开放日海报"})
+		done <- struct {
+			receipt QuestionReceipt
+			err     error
+		}{receipt, err}
+	}()
+	return done
 }
 
-func TestImageGenerationApprovalCancelledDoesNotSubmit(t *testing.T) {
-	// 审批通过前取消回合：Host／POST／账本都必须为零。
-	// 已经发出的取消不能假装免费 failed（见 TestImageGenerationCancelAfterSendIsNotFreeFailure
-	// 与 client fixture cancel）。
-	// emit 回调必须立刻返回，让 AsyncApprover.Prompt 在 select 里等 ctx；
-	// 若回调自己阻塞，取消回合解不开。
-	ready := make(chan struct{}, 1)
-	f := startImageGenApprovalSession(t, func(_ *host.AsyncApprover, _ PermissionRequest) {
-		select {
-		case ready <- struct{}{}:
-		default:
+func TestImageGenerationDeniedHostQuestion(t *testing.T) {
+	// 产品侧：会话已开启「生成图片」即知情同意，不再弹引擎审批窗，因此也不再有
+	// 「拒绝」按钮可点。这里钉住「全程无 PermissionRequest」，并确认仍能成功生成。
+	f := startImageGenHostQuestionSession(t, false)
+	receipt := waitImageGenerationSubmit(t, f, "请生成一张校园开放日海报")
+	if receipt.QuestionID == "" {
+		t.Fatal("empty QuestionID")
+	}
+	waitForTurns(t, f.sink, 1, time.Now().Add(10*time.Second))
+	assertNoImageGenerationPermission(t, f.sink, f.id)
+	if f.bridge.posts.Load() != 1 || f.hostCalls.Load() != 1 {
+		t.Fatalf("expected auto-allow generate: posts=%d host=%d", f.bridge.posts.Load(), f.hostCalls.Load())
+	}
+}
+
+func TestImageGenerationCancelledApprovalHostQuestion(t *testing.T) {
+	// 已无审批等待窗口；改为在真正进入生成 HTTP 后 Interrupt，确认不会当成「免费失败」
+	// 悄悄重试（与 CancelAfterSend 同边界，但走 App→Manager 装配）。
+	f := startImageGenHostQuestionSession(t, false)
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	f.bridge.hold.Store(&imageGenBridgeHold{entered: entered, release: release})
+	done := submitImageGenerationQuestion(t, f)
+	select {
+	case result := <-done:
+		if result.err != nil || result.receipt.QuestionID == "" {
+			t.Fatalf("SubmitQuestion = %+v", result)
 		}
-	})
-
-	ctx, cancel := context.WithCancel(context.Background())
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := f.session.RunTurn(ctx, "请生成一张校园开放日海报")
-		errCh <- err
-	}()
-
-	select {
-	case <-ready:
 	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for approval prompt")
+		t.Fatal("SubmitQuestion did not acknowledge persistence")
 	}
-	// 给 Prompt 进入 select 一点时间，再取消回合。
-	time.Sleep(20 * time.Millisecond)
-	cancel()
 	select {
-	case <-errCh:
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for cancelled turn")
+	case <-entered:
+	case <-time.After(8 * time.Second):
+		t.Fatal("generate did not reach Bridge POST")
 	}
-	if f.approvals.Load() != 1 {
-		t.Fatalf("approvals = %d, want 1", f.approvals.Load())
+	assertNoImageGenerationPermission(t, f.sink, f.id)
+	if err := f.app.Interrupt(f.id); err != nil {
+		t.Fatal(err)
 	}
-	assertNoImageGenerationSubmit(t, f)
+	close(release)
+	waitImageGenerationTurnFinished(t, f.sink, f.id)
+	if f.bridge.posts.Load() < 1 {
+		t.Fatal("interrupt before send should not be the path under test")
+	}
+}
+
+func waitImageGenerationTurnFinished(t *testing.T, sink *recordingSink, sessionID string) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		sink.mu.Lock()
+		for _, event := range sink.events {
+			if event.name != EventTurnEnd && event.name != EventTurnError {
+				continue
+			}
+			env, ok := event.data.(protocol.Envelope)
+			if ok && env.SessionID == sessionID {
+				sink.mu.Unlock()
+				return
+			}
+		}
+		sink.mu.Unlock()
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for cancelled Manager turn")
 }
 
 func TestImageGenerationCancelAfterSendIsNotFreeFailure(t *testing.T) {
@@ -250,10 +169,14 @@ func TestImageGenerationCancelAfterSendIsNotFreeFailure(t *testing.T) {
 	f.state.setSnapshot(snap)
 
 	ctx, cancel := context.WithCancel(context.Background())
+	token := imagegentool.NewInvocationToken(f.id, f.state.snapshot().Generation, "q_cancel", f.state.snapshot().TurnID)
+	token.MarkPersisted(nil)
+	ctx = imagegentool.WithInvocation(ctx, token)
+	defer token.Close()
 	done := make(chan appwire.ImageGenerationResult, 1)
 	go func() {
 		r, err := f.tool.Run(ctx, json.RawMessage(`{"prompt":"海报"}`), &tool.Context{
-			SessionID: f.id, MessageID: "q_cancel", ToolUseID: "tu_cancel",
+			SessionID: f.id, ToolUseID: "tu_cancel",
 		}, nil)
 		if err != nil {
 			t.Errorf("tool Go error: %v", err)
@@ -284,5 +207,249 @@ func TestImageGenerationCancelAfterSendIsNotFreeFailure(t *testing.T) {
 	}
 	if strings.Contains(got.Message, "免费") || !strings.Contains(got.Message, "可能已生成") {
 		t.Fatalf("cancel after send must warn about possible charge, got %q", got.Message)
+	}
+}
+
+// imageGenHostQuestionSession 是批准链路的真实装配 fixture：模型请求仍由
+// httptest OpenAI 端点提供，但会话由 App 的 host.Manager 创建，并通过
+// SubmitQuestion 进入 Manager.RunQuestion。这样测试不会绕过宿主身份边界，
+// 也不会在 tool.Context 中手填 MessageID。
+type imageGenHostQuestionSession struct {
+	app          *App
+	sink         *recordingSink
+	bridge       *imageGenBridge
+	cwd          string
+	id           string
+	hostCalls    *atomic.Int32
+	modelCalls   *atomic.Int32
+	usageStore   *localusage.Store
+	modelEntered chan struct{}
+	modelRelease chan struct{}
+}
+
+// startImageGenHostQuestionSession 用 fake OpenAI SSE 与 fake Bridge 装配一条
+// 真实 engine.Session。captureUsage=true 时还接入已完成 S09 的临时 Recorder，
+// 用来证明一次生图和普通聊天请求分别计数。
+func startImageGenHostQuestionSession(t *testing.T, captureUsage bool) *imageGenHostQuestionSession {
+	return startImageGenHostQuestionSessionOpts(t, captureUsage, false)
+}
+
+// startImageGenHostQuestionSessionWithModelHold 在首轮模型响应前暂停，供注入测试抢窗口。
+func startImageGenHostQuestionSessionWithModelHold(t *testing.T) *imageGenHostQuestionSession {
+	return startImageGenHostQuestionSessionOpts(t, false, true)
+}
+
+func startImageGenHostQuestionSessionOpts(t *testing.T, captureUsage, holdFirstModel bool) *imageGenHostQuestionSession {
+	t.Helper()
+	isolateConfigDir(t)
+	t.Setenv("RUNCODE_LOCAL_USAGE_ENABLED", "true")
+	bridge := newImageGenBridge(t)
+	sink := &recordingSink{}
+	hostCalls, modelCalls := &atomic.Int32{}, &atomic.Int32{}
+	var modelEntered, modelRelease chan struct{}
+	if holdFirstModel {
+		modelEntered, modelRelease = make(chan struct{}), make(chan struct{})
+	}
+	input, _ := json.Marshal(map[string]string{"prompt": "校园开放日海报背景", "size": "1024x1024"})
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls := modelCalls.Add(1)
+		if holdFirstModel && calls == 1 {
+			close(modelEntered)
+			<-modelRelease
+		}
+		delta := map[string]any{"content": "已处理。"}
+		finish := "stop"
+		if calls == 1 {
+			delta = map[string]any{"tool_calls": []any{map[string]any{
+				"index": 0, "id": "call_image_gen_manager", "type": "function",
+				"function": map[string]any{"name": imagegentool.Name, "arguments": string(input)},
+			}}}
+			finish = "tool_calls"
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, chunk := range []any{
+			map[string]any{"choices": []any{map[string]any{"index": 0, "delta": delta}}},
+			map[string]any{"choices": []any{map[string]any{"index": 0, "delta": map[string]any{}, "finish_reason": finish}}},
+		} {
+			data, _ := json.Marshal(chunk)
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", data)
+		}
+		_, _ = fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	t.Cleanup(model.Close)
+
+	app := newWithBuild(sink, func(cfg engine.Config, opts engine.Options) (host.Session, error) {
+		for i, extra := range opts.ExtraTools {
+			if ig, ok := extra.(*imagegentool.Tool); ok {
+				ig.Host = countingImageHost{inner: ig.Host, n: hostCalls}
+				opts.ExtraTools[i] = ig
+			}
+		}
+		return engine.Build(cfg, opts)
+	})
+	app.tokens.setInMemory(tokenSet{AccessToken: imageGenJWT("user-a"), Expiry: time.Now().Add(time.Hour)})
+	var usageStore *localusage.Store
+	if captureUsage {
+		usageStore = usageTestStore(t)
+		enableUsageCapture(t, app, usageStore)
+	}
+	saveImageModel(t, app, "tenant-a", "image-only-b64", "1024x1024")
+	cwd := t.TempDir()
+	cfg := engine.Config{
+		CWD: cwd, SessionID: "image-gen-manager", Provider: "openai", Model: "image-gen-manager",
+		BaseURL: model.URL + "/v1", APIKey: "fixture", PermissionMode: "interactive",
+		MaxIterations: 3, PersistSession: true, SessionBackend: sessions.BackendJSONL,
+		TokenSource: app.tokens.Token,
+	}
+	if captureUsage {
+		// 让模型请求走 S09 平台采集器；Bridge 地址随后仍由生图快照使用。
+		cfg = app.applyPassport(cfg, StartSessionRequest{Provider: "passport", TenantID: "tenant-a", Model: cfg.Model})
+		cfg.BaseURL = model.URL + "/v1"
+	}
+	id, _, err := app.mgr.Create(context.Background(), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.mgr.CloseAll(context.Background()) })
+
+	// Manager.Create 只负责引擎会话；以下登记沿用 App 正式建会话路径的同一
+	// pending store 接缝。所有身份字段在发布前一次性绑定，不从历史猜测。
+	app.mu.Lock()
+	edits, plans, emit, imageState := app.pendingEdits, app.pendingPlans, app.pendingEmit, app.pendingImageGeneration
+	app.pendingEdits, app.pendingPlans, app.pendingEmit, app.pendingImageGeneration = nil, nil, nil, nil
+	app.registerSessionLocked(id, cwd, edits, plans, emit)
+	e := app.entryLocked(id)
+	e.passport, e.tenantID, e.imageGeneration = true, "tenant-a", imageState
+	app.bindKnowledgeLocked(e)
+	app.mu.Unlock()
+	if imageState == nil {
+		t.Fatal("manager build did not park image generation state")
+	}
+	setImageGen(t, app, id, true)
+	return &imageGenHostQuestionSession{
+		app: app, sink: sink, bridge: bridge, cwd: cwd, id: id,
+		hostCalls: hostCalls, modelCalls: modelCalls, usageStore: usageStore,
+		modelEntered: modelEntered, modelRelease: modelRelease,
+	}
+}
+
+func assertNoImageGenerationPermission(t *testing.T, sink *recordingSink, sessionID string) {
+	t.Helper()
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	for _, event := range sink.events {
+		if event.name != EventPermissionRequest {
+			continue
+		}
+		env, ok := event.data.(protocol.Envelope)
+		if !ok || env.SessionID != sessionID {
+			continue
+		}
+		if req, ok := env.Payload.(PermissionRequest); ok && req.Summary.ToolName == imagegentool.Name {
+			t.Fatalf("image_generate must not raise permission modal, got %+v", req)
+		}
+	}
+}
+
+func waitImageGenerationSubmit(t *testing.T, f *imageGenHostQuestionSession, text string) QuestionReceipt {
+	t.Helper()
+	type result struct {
+		receipt QuestionReceipt
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		receipt, err := f.app.SubmitQuestion(SubmitQuestionRequest{SessionID: f.id, Text: text})
+		done <- result{receipt: receipt, err: err}
+	}()
+	select {
+	case got := <-done:
+		if got.err != nil {
+			t.Fatal(got.err)
+		}
+		assertNoImageGenerationPermission(t, f.sink, f.id)
+		return got.receipt
+	case <-time.After(8 * time.Second):
+		t.Fatal("SubmitQuestion did not acknowledge persistence")
+		return QuestionReceipt{}
+	}
+}
+
+func readGeneratedImage(t *testing.T, workspace string, result appwire.ImageGenerationResult) {
+	t.Helper()
+	if len(result.Images) != 1 {
+		t.Fatalf("images = %+v, want one", result.Images)
+	}
+	path := filepath.Join(workspace, filepath.FromSlash(result.Images[0].Path))
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) < 8 || string(raw[:8]) != "\x89PNG\r\n\x1a\n" {
+		t.Fatalf("generated image is not a PNG: %q", path)
+	}
+}
+
+func TestImageGenerationApprovedHostQuestion(t *testing.T) {
+	f := startImageGenHostQuestionSession(t, false)
+	receipt := waitImageGenerationSubmit(t, f, "请生成一张校园开放日海报")
+	if receipt.QuestionID == "" {
+		t.Fatal("Manager returned an empty QuestionID")
+	}
+	waitForTurns(t, f.sink, 1, time.Now().Add(10*time.Second))
+	if f.bridge.posts.Load() != 1 || f.hostCalls.Load() != 1 {
+		t.Fatalf("host calls=%d bridge posts=%d, want one each", f.hostCalls.Load(), f.bridge.posts.Load())
+	}
+	recs, err := listImageGenerationLedgers(f.cwd, f.id)
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("ledgers = %+v, err=%v", recs, err)
+	}
+	rec := recs[0]
+	if rec.QuestionID != receipt.QuestionID {
+		t.Fatalf("ledger QuestionID=%q, Manager receipt=%q", rec.QuestionID, receipt.QuestionID)
+	}
+	account, _, err := f.app.imageGenerationAccount()
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantScope := imageGenerationScope(account, imageGenerationBridge(), "tenant-a")
+	if rec.GenerationID == "" || rec.TurnID == "" || rec.ScopeID != wantScope || rec.SessionID != f.id || rec.ToolUseID != "call_image_gen_manager" || rec.Status != "succeeded" {
+		t.Fatalf("ledger identity/result = %+v", rec)
+	}
+	if rec.Result == nil {
+		t.Fatal("ledger has no result")
+	}
+	readGeneratedImage(t, f.cwd, *rec.Result)
+}
+
+func TestImageGenerationApprovedHostUsage(t *testing.T) {
+	f := startImageGenHostQuestionSession(t, true)
+	receipt := waitImageGenerationSubmit(t, f, "请生成一张校园开放日海报")
+	waitForTurns(t, f.sink, 1, time.Now().Add(10*time.Second))
+	if receipt.QuestionID == "" || f.bridge.posts.Load() != 1 || f.hostCalls.Load() != 1 || f.modelCalls.Load() < 2 {
+		t.Fatalf("receipt=%+v host=%d bridge=%d model=%d", receipt, f.hostCalls.Load(), f.bridge.posts.Load(), f.modelCalls.Load())
+	}
+	scope, err := f.app.freezeUsageScopeParts(imageGenerationBridge(), "tenant-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := f.usageStore.QuerySnapshot(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Minute), EndAt: time.Now().Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var llmCalls, imageCalls int
+	for _, call := range snapshot.Calls {
+		switch call.CallKind {
+		case localusage.CallKindLLM:
+			llmCalls++
+		case localusage.CallKindImage:
+			imageCalls++
+			if call.GeneratedImages == nil || *call.GeneratedImages != 1 || call.InputTokensKnown || call.OutputTokensKnown {
+				t.Fatalf("image usage = %+v, want one image and unknown tokens", call)
+			}
+		}
+	}
+	if llmCalls != int(f.modelCalls.Load()) || llmCalls < 2 || imageCalls != 1 {
+		t.Fatalf("usage calls llm=%d (model requests=%d) image=%d, want independent chat count and one image", llmCalls, f.modelCalls.Load(), imageCalls)
 	}
 }

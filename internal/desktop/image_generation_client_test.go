@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/wt68/runcode/internal/imagegentool"
+	"github.com/wt68/runcode/internal/localusage"
 )
 
 type fixtureCase struct {
@@ -129,6 +130,49 @@ func TestImageGenerationClientRequestShape(t *testing.T) {
 	}
 	if resp.requestID != "brg-synthetic-0001" || len(resp.Data) != 1 || posts.Load() != 1 {
 		t.Fatalf("response = %+v posts=%d", resp, posts.Load())
+	}
+}
+
+func TestImageGenerationClientBeforeSendCallbackIsExactlyAtDoBoundary(t *testing.T) {
+	var posts atomic.Int32
+	var callbacks atomic.Int32
+	var captured localusage.Scope
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posts.Add(1)
+		_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://images.example.invalid/x.png"}]}`)
+	}))
+	defer srv.Close()
+	app, _ := imageGenClientApp(t, srv)
+	snap := clientSnapshot(app)
+	resp, err := app.postImageGeneration(context.Background(), snap, imagegentool.Input{Prompt: "海报", Size: snap.Size}, func(scope localusage.Scope) {
+		callbacks.Add(1)
+		captured = scope
+	})
+	if err != nil || len(resp.Data) != 1 {
+		t.Fatalf("response = %+v, err = %v", resp, err)
+	}
+	if callbacks.Load() != 1 || posts.Load() != 1 {
+		t.Fatalf("callbacks=%d posts=%d, want one callback immediately before one POST", callbacks.Load(), posts.Load())
+	}
+	if captured.TenantID != snap.Tenant || captured.BridgeDigest == "" || captured.AccountDigest == "" || captured.ScopeID == "" {
+		t.Fatalf("callback received incomplete frozen scope: %+v", captured)
+	}
+}
+
+func TestImageGenerationClientCancellationBeforeDoDoesNotInvokeCallback(t *testing.T) {
+	var posts atomic.Int32
+	var callbacks atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { posts.Add(1) }))
+	defer srv.Close()
+	app, _ := imageGenClientApp(t, srv)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := app.postImageGeneration(ctx, clientSnapshot(app), imagegentool.Input{Prompt: "海报", Size: "2048x2048"}, func(localusage.Scope) { callbacks.Add(1) })
+	if outcome := imageGenerationFailureOf(err); outcome.Status != "failed" || outcome.SubmissionStatus != "not_submitted" {
+		t.Fatalf("cancelled before Do = %+v", outcome)
+	}
+	if callbacks.Load() != 0 || posts.Load() != 0 {
+		t.Fatalf("callbacks=%d posts=%d, want zero before Do", callbacks.Load(), posts.Load())
 	}
 }
 

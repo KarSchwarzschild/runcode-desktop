@@ -50,6 +50,12 @@ export function accountingLabel(status?: string): string {
   }
 }
 
+// 只有宿主明确证明尚未进入 HTTP Do 时才显示未提交；历史缺字段和非法值按
+// unknown，继续保留结果／计费待核验提示，不能从错误码或 requestId 反推。
+export function submissionLabel(status?: string): string {
+  return status === 'not_submitted' ? '未提交生成请求' : ''
+}
+
 export const IMAGE_GENERATION_STATUS_LABEL: Record<string, string> = {
   succeeded: '已生成',
   failed: '未生成',
@@ -59,6 +65,7 @@ export const IMAGE_GENERATION_STATUS_LABEL: Record<string, string> = {
 }
 
 export function imageGenerationResultSummary(r: ImageGenerationResult): string {
+  if (r.submissionStatus === 'not_submitted') return `未提交生成请求${r.message ? `：${r.message}` : ''}`
   switch (r.status) {
     case 'succeeded': return '图片已生成并保存到工作区'
     case 'failed': return r.message || '图片未生成'

@@ -76,6 +76,48 @@ func TestImageGenerationStoreFinalizeKeepsObservation(t *testing.T) {
 	}
 }
 
+func TestImageGenerationStoreSubmissionDispositionRoundTripsAndStaysConservative(t *testing.T) {
+	ws := t.TempDir()
+	rec := sampleLedger("submitted")
+	rec.SubmissionStatus = "attempted"
+	if err := writeImageGenerationLedger(ws, rec); err != nil {
+		t.Fatal(err)
+	}
+	got, err := readImageGenerationLedger(ws, rec.SessionID, rec.GenerationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SubmissionStatus != "attempted" {
+		t.Fatalf("submission status = %q, want attempted", got.SubmissionStatus)
+	}
+	done := got.finalized(appwire.ImageGenerationResult{Status: "failed", SubmissionStatus: "not_submitted"})
+	if done.SubmissionStatus != "attempted" || done.effectiveResult().SubmissionStatus != "attempted" {
+		t.Fatalf("finalization downgraded attempted submission: %+v", done)
+	}
+
+	// 旧账本没有字段，或字段被破坏，都只能按 unknown 解释；不能从 submitted 推断网络状态。
+	for _, raw := range []string{
+		`{"version":1,"generationId":"gen_1","sessionId":"sess_1","turnId":"turn_1","status":"submitted"}`,
+		`{"version":1,"generationId":"gen_1","sessionId":"sess_1","turnId":"turn_1","status":"submitted","submissionStatus":"bogus"}`,
+	} {
+		legacy := sampleLedger("submitted")
+		path, err := imageGenerationLedgerPath(legacy.SessionID, legacy.GenerationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := writeRootedFileAtomic(ws, path, []byte(raw)); err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := readImageGenerationLedger(ws, legacy.SessionID, legacy.GenerationID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if decoded.SubmissionStatus != "unknown" || decoded.effectiveResult().SubmissionStatus != "unknown" {
+			t.Fatalf("legacy submission status = %q, result = %q", decoded.SubmissionStatus, decoded.effectiveResult().SubmissionStatus)
+		}
+	}
+}
+
 func TestImageGenerationStoreRecoversSubmittedAsUnknown(t *testing.T) {
 	var fx struct {
 		Cases []struct {

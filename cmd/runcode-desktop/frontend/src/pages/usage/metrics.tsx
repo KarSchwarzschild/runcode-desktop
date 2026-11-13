@@ -1,4 +1,4 @@
-// 指标卡与数据新鲜度。数值全部来自 Bridge 的合计，不在当前分页里重算；null 显示「—」并
+// 指标卡与数据新鲜度。数值全部来自桌面端快照合计，不在当前分页里重算；null 显示「—」并
 // 说明原因，"0" 才是 0。没有任何成本、价格或货币。
 import { type ReactNode } from 'react'
 import type { UsageCapabilities, UsageOverview, UsageTotals } from '@/core/bridge'
@@ -79,21 +79,21 @@ export function UsageMetrics({ totals, capabilities, empty }: {
   )
 }
 
-const SOURCE_KIND: Record<string, string> = { primary: '主库', replica: '只读副本' }
+const SOURCE_KIND: Record<string, string> = { primary: '主库', replica: '只读副本', local_platform: '本机记录' }
 
-// UsageFreshness 说明这份数据「什么时候、从哪读的」：dataAsOf 是服务端读取时刻，不是入账
-// 水位；副本延迟拿不到时如实写未知，不让人以为刷新后所有调用都已经出现。
+// UsageFreshness 说明这份数据「什么时候、从哪读的」：dataAsOf 是快照读取时刻，不是入账
+// 水位；本机记录可能因客户端关闭而存在覆盖缺口。
 export function UsageFreshness({ overview, refreshedAt }: { overview: UsageOverview; refreshedAt: Date | null }) {
   const source = SOURCE_KIND[overview.sourceKind ?? ''] ?? '数据源类型未说明'
-  const lag = overview.sourceKind === 'primary'
+  const lag = overview.sourceKind === 'primary' || overview.sourceKind === 'local_platform'
     ? ''
     : overview.replicaLagSeconds == null ? '副本延迟未知' : `延迟约 ${overview.replicaLagSeconds} 秒`
   const coverage = overview.coverageStatus === 'known' && overview.coverageStart
     ? `记录自 ${formatShanghai(overview.coverageStart)} 起可查询`
-    : '覆盖起点未知，仅统计当前可查询的记录'
+    : overview.sourceKind === 'local_platform' ? '本机采集记录，可能存在关闭期间缺口' : '覆盖起点未知，仅统计当前可查询的记录'
   return (
     <p className="m-0 text-[12px] text-faint leading-[1.6]">
-      数据读取于 {formatShanghai(overview.dataAsOf, true)}（服务端读取时刻，不是入账水位）· {source}{lag ? ` · ${lag}` : ''} · {coverage}
+      数据读取于 {formatShanghai(overview.dataAsOf, true)}（快照读取时刻，不是入账水位）· {source}{lag ? ` · ${lag}` : ''} · {coverage}
       {refreshedAt && <> · 本机最后刷新 {formatShanghai(refreshedAt.toISOString(), true)}</>}
     </p>
   )

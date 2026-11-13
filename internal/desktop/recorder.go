@@ -832,6 +832,8 @@ func (a *App) Shutdown() {
 	a.closeRecorder()
 	// 撤掉 askpass 的套接字：它的路径带着本进程的 pid，留下来只是一个死文件。
 	a.askpassSrv.Load().close()
+	// 用量库在回合／生图收尾之后关：外壳退出路径已先停会话；此处只卸 Recorder。
+	a.closeLocalUsage()
 }
 
 func (r *recorderCtl) uplinkerOrDefault() recorder.Uplinker {

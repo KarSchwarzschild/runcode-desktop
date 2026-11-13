@@ -6,7 +6,7 @@
 // 分类目录只改滚动与焦点：不保存、不重建账号协调器、不改变业务小节的 key。
 // 正文按完整清单顺序挂载；目录按可见清单过滤。录音按品牌决定是否挂载；审核探测
 // 始终挂载，未知／不支持只隐藏包装与目录项。
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
 import { BTN, BTN_PRIMARY } from '@/ui/tokens'
 import { toModelOptions, type ModelOption } from '@/ui/model-picker'
 import {
@@ -48,7 +48,7 @@ function sectionMeta(id: SettingsSectionId) {
   throw new Error(`unknown settings section: ${id}`)
 }
 
-export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchModel }: {
+export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchModel, initialSection }: {
   initial: Partial<SettingsView>
   info: SessionInfo | null
   busy: boolean
@@ -58,6 +58,8 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   // Switch the live session's model/connection in place (platform ↔ custom), the same
   // path the composer's in-chat picker uses — no new session, history preserved.
   onSwitchModel: (choice: ModelOption) => void
+  // 从会话工具条等入口直达某一节（如「图片生成」），不从目录顶开始。
+  initialSection?: SettingsSectionId
 }) {
   // 选库不锁设置页；仅真实只读历史限制改写。
   const sessionRestriction = info?.readOnlyReason || ''
@@ -96,6 +98,13 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   const categories = useMemo(() => buildSettingsNavigation(caps), [caps])
   const visibleIds = useMemo(() => visibleSectionIds(categories), [categories])
   const nav = useSettingsNavigation({ visibleIds })
+  const navigateTo = nav.navigateTo
+
+  // 入口指定了目标节时，子锚点 ref 已挂上后再滚过去（layout），避免停在目录顶。
+  useLayoutEffect(() => {
+    if (!initialSection || !visibleIds.includes(initialSection)) return
+    navigateTo(initialSection)
+  }, [initialSection, visibleIds, navigateTo])
 
   // switchOpts drives the live 模型 switcher: platform + custom together, since
   // picking either now switches the connection in place (via SwitchModel). modelOpts

@@ -3,6 +3,7 @@ package desktop
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/wt68/runcode/internal/imagegentool"
+	"github.com/wt68/runcode/internal/localusage"
 )
 
 // 生图请求：发往业务网关 POST {Bridge}/t/{tenant}/v1/Images/Generations（设计 6.2）。
@@ -73,6 +75,8 @@ type imageGenerationFailure struct {
 	Code      string
 	Message   string
 	RequestID string
+	// SubmissionStatus 只表示本地是否进入 HTTP Do；不推断上游是否收到或扣费。
+	SubmissionStatus string
 }
 
 func (f *imageGenerationFailure) Error() string { return f.Message }
@@ -86,11 +90,11 @@ func imageGenerationFailureOf(err error) imageGenerationFailure {
 	if errors.As(err, &f) {
 		return *f
 	}
-	return imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown}
+	return imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, SubmissionStatus: "unknown"}
 }
 
 func notSent(code, message string) error {
-	return &imageGenerationFailure{Status: "failed", Code: code, Message: message}
+	return &imageGenerationFailure{Status: "failed", Code: code, Message: message, SubmissionStatus: "not_submitted"}
 }
 
 func bridgeRequestID(h http.Header) string {
@@ -112,21 +116,80 @@ func imageGenerationHTTPClient() *http.Client {
 	}
 }
 
+// imageGenerationSendSnapshot 是同一把 tokenManager 锁下取得的发送身份与本地统计归属。
+// 发送结束后不得重新读取登录态，否则账号切换会把结束事件错误归到新账号。
+type imageGenerationSendSnapshot struct {
+	Token string
+	Epoch string
+	Scope localusage.Scope
+	// unlock 只保护“冻结后到发送边界”的短窗口；HTTP 响应阶段不持身份锁，
+	// 允许用户正常切换账号，而 Finish 仍使用 Scope 的不可变副本。
+	unlock func()
+}
+
+func imageGenerationTokenClaims(token string) (issuer, subject string) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", ""
+	}
+	b, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return "", ""
+	}
+	var claims struct {
+		Issuer  string `json:"iss"`
+		Subject string `json:"sub"`
+	}
+	if json.Unmarshal(b, &claims) != nil || claims.Subject == "" {
+		return "", ""
+	}
+	return claims.Issuer, claims.Subject
+}
+
+// prepareImageGenerationSend 完成所有本地拒绝条件后，返回不可变的 token／epoch／scope。
+// Token() 可能刷新令牌；随后再次在锁下比对同一个 access token，避免把切换前后身份拼接。
+func (a *App) prepareImageGenerationSend(snap imageGenerationSnapshot) (imageGenerationSendSnapshot, error) {
+	if a.tokens == nil {
+		return imageGenerationSendSnapshot{}, notSent("auth", "请先登录通行证；本次未生成图片")
+	}
+	token, err := a.tokens.Token()
+	if err != nil {
+		return imageGenerationSendSnapshot{}, notSent("auth", "请先登录通行证；本次未生成图片")
+	}
+	a.tokens.mu.Lock()
+	currentToken, epoch := a.tokens.ts.AccessToken, a.tokens.identity
+	if token == "" || currentToken != token || tokenIdentity(token) != snap.Account || epoch != snap.Epoch {
+		a.tokens.mu.Unlock()
+		return imageGenerationSendSnapshot{}, notSent("auth", "会话账号已变化，本次未生成图片；请重新打开会话")
+	}
+	issuer, subject := imageGenerationTokenClaims(token)
+	if issuer == "" || subject == "" {
+		a.tokens.mu.Unlock()
+		return imageGenerationSendSnapshot{}, notSent("auth", "调用身份信息缺失，本次未提交生成请求")
+	}
+	scope := (ScopeFreeze{AccountIssuer: issuer, AccountSub: subject, BridgeBase: snap.Bridge, TenantID: snap.Tenant}).toScope()
+	return imageGenerationSendSnapshot{Token: token, Epoch: epoch, Scope: scope, unlock: func() { a.tokens.mu.Unlock() }}, nil
+}
+
 // postImageGeneration 为冻结快照发送恰好一次生图请求。调用方必须先持久化 submitted 账本。
-func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnapshot, in imagegentool.Input) (imageGenerationWireResponse, error) {
+// beforeSend 在所有 notSent 检查后、HTTP Do 紧邻之前同步调用；它是图片用量的唯一起点。
+func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnapshot, in imagegentool.Input, beforeSend ...func(localusage.Scope)) (imageGenerationWireResponse, error) {
 	if snap.Account == "" || snap.Bridge == "" || snap.Model == "" || in.Size == "" || (snap.ResponseFormat != "url" && snap.ResponseFormat != "b64_json") {
 		return imageGenerationWireResponse{}, notSent("not_configured", "生图配置不完整，本次未生成图片")
 	}
 	if snap.Bridge != imageGenerationBridge() {
 		return imageGenerationWireResponse{}, notSent("model_unavailable", "生图服务地址已变化，本次未生成图片；请重新打开会话")
 	}
-	token, err := a.tokens.Token()
+	prepared, err := a.prepareImageGenerationSend(snap)
 	if err != nil {
-		return imageGenerationWireResponse{}, notSent("auth", "请先登录通行证；本次未生成图片")
+		return imageGenerationWireResponse{}, err
 	}
-	if tokenIdentity(token) != snap.Account || a.tokens.loginEpoch() != snap.Epoch {
-		return imageGenerationWireResponse{}, notSent("auth", "会话账号已变化，本次未生成图片；请重新打开会话")
-	}
+	defer func() {
+		if prepared.unlock != nil {
+			prepared.unlock()
+		}
+	}()
+	token := prepared.Token
 	body, _ := json.Marshal(imageGenerationWireRequest{Model: snap.Model, Prompt: in.Prompt, N: 1, Size: in.Size, ResponseFormat: snap.ResponseFormat})
 	postCtx, cancel := context.WithTimeout(ctx, imageGenerationPostTimeout)
 	defer cancel()
@@ -138,6 +201,16 @@ func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnaps
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
+	if err := postCtx.Err(); err != nil {
+		return imageGenerationWireResponse{}, notSent("cancelled", "已停止等待，本次未提交生成请求")
+	}
+	// 这是唯一的提交边界：回调返回后立即进入一次 Do，任何 Do 错误都保持 attempted。
+	if len(beforeSend) > 0 && beforeSend[0] != nil {
+		beforeSend[0](prepared.Scope)
+	}
+	// attempted 已经在回调中持久化；从这里起允许账号切换，结束记账使用冻结 Scope。
+	prepared.unlock()
+	prepared.unlock = nil
 
 	resp, err := imageGenerationHTTPClient().Do(req)
 	if err != nil {
@@ -150,7 +223,7 @@ func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnaps
 		return imageGenerationWireResponse{}, interruptedOutcome(ctx, requestID)
 	}
 	if len(raw) > imageGenerationResponseLimit {
-		return imageGenerationWireResponse{}, &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID}
+		return imageGenerationWireResponse{}, &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID, SubmissionStatus: "attempted"}
 	}
 	if resp.StatusCode != http.StatusOK {
 		return imageGenerationWireResponse{}, classifyImageGenerationStatus(resp.StatusCode, raw, requestID)
@@ -158,7 +231,7 @@ func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnaps
 	var out imageGenerationWireResponse
 	if json.Unmarshal(raw, &out) != nil || len(out.Data) != 1 || (out.Data[0].URL == "" && out.Data[0].B64JSON == "") {
 		// 2xx 但不是恰好一张可用图：可能已生成并计费，只能记 unknown。
-		return imageGenerationWireResponse{}, &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID}
+		return imageGenerationWireResponse{}, &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID, SubmissionStatus: "attempted"}
 	}
 	out.requestID = requestID
 	return out, nil
@@ -167,9 +240,9 @@ func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnaps
 // interruptedOutcome 表示请求已发出（或可能已发出）但没有完整响应——禁止重发。
 func interruptedOutcome(ctx context.Context, requestID string) error {
 	if errors.Is(ctx.Err(), context.Canceled) {
-		return &imageGenerationFailure{Status: "cancelled", Message: imageGenerationMsgCancelled, RequestID: requestID}
+		return &imageGenerationFailure{Status: "cancelled", Message: imageGenerationMsgCancelled, RequestID: requestID, SubmissionStatus: "attempted"}
 	}
-	return &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID}
+	return &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID, SubmissionStatus: "attempted"}
 }
 
 func classifyImageGenerationStatus(status int, raw []byte, requestID string) error {
@@ -183,11 +256,11 @@ func classifyImageGenerationStatus(status int, raw []byte, requestID string) err
 		code = envelope.Error.Code
 	}
 	if known, ok := bridgeImageErrors[code]; ok && known.status == status {
-		return &imageGenerationFailure{Status: "failed", Code: code, Message: known.message, RequestID: requestID}
+		return &imageGenerationFailure{Status: "failed", Code: code, Message: known.message, RequestID: requestID, SubmissionStatus: "attempted"}
 	}
 	if code == "unknown_outcome" {
-		return &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID}
+		return &imageGenerationFailure{Status: "unknown", Code: "unknown_outcome", Message: imageGenerationMsgUnknown, RequestID: requestID, SubmissionStatus: "attempted"}
 	}
 	// 其余（Core 不透明 500、Bridge 包装的内部 401/403、网关 HTML）都不能证明「什么都没生成」。
-	return &imageGenerationFailure{Status: "unknown", Code: "generation_failed", Message: imageGenerationMsgGeneric, RequestID: requestID}
+	return &imageGenerationFailure{Status: "unknown", Code: "generation_failed", Message: imageGenerationMsgGeneric, RequestID: requestID, SubmissionStatus: "attempted"}
 }

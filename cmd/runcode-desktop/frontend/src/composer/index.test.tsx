@@ -168,7 +168,14 @@ describe('Composer image generation entry', () => {
     await act(async () => item.click())
     expect(imageApi.set).toHaveBeenCalledWith({ sessionId: 'A', enabled: true, expectedRevision: 0 })
     expect(app.saves).toEqual([])
-    expect(host.textContent).toContain('生图 · image-model')
+    // 工具条只显示短「生图」；模型名与尺寸在菜单里，不把按钮拉宽。
+    expect(findButton('生图')).not.toBeNull()
+    expect(host.textContent).not.toContain('生图 · image-model')
+    await act(async () => findButton('生图')!.click())
+    expect(host.textContent).toContain('image-model')
+    expect(host.textContent).toContain('1024x1024')
+    expect(host.textContent).not.toContain('下一轮生效')
+    expect(host.textContent).not.toContain('每次生成会计费')
   })
 
   it('回合进行中禁止切换', async () => {
@@ -183,7 +190,7 @@ describe('Composer image generation entry', () => {
     expect(host.textContent).toContain('生图 · 未就绪')
     await act(async () => findButton('生图')!.click())
     expect(host.textContent).toContain('尚未选择生图模型')
-    expect(host.textContent).toContain('选择生图模型')
+    expect(host.textContent).toContain('修改生图设置')
     expect(imageApi.set).not.toHaveBeenCalled()
   })
 
@@ -193,7 +200,7 @@ describe('Composer image generation entry', () => {
     await openAddMenu()
     await act(async () => findButton('生成图片')!.click())
     expect(app.toast()).toContain('无法读取或保存')
-    expect(host.textContent).not.toContain('生图 · image-model')
+    expect(findButton('生图')).toBeUndefined()
   })
 
   it('新会话草稿保存失败时不发送首条消息', async () => {

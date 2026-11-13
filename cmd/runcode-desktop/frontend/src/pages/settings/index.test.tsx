@@ -146,13 +146,14 @@ async function mount(page: ReactElement) {
   await flush()
 }
 
-function page(opts: { busy?: boolean; session?: SessionInfo; initial?: Record<string, unknown> } = {}) {
+function page(opts: { busy?: boolean; session?: SessionInfo; initial?: Record<string, unknown>; initialSection?: 'image-generation' | 'passport' } = {}) {
   return (
     <SettingsPage
       initial={{ permissionMode: 'interactive', skipLogin: false, harmJudgeModel: '', harmJudgeVotes: 1, ...(opts.initial ?? {}) }}
       info={opts.session ?? info()}
       busy={opts.busy ?? false}
       update={update}
+      initialSection={opts.initialSection}
       onSaved={onSaved}
       onSwitchModel={onSwitchModel}
     />
@@ -236,6 +237,13 @@ describe('SettingsPage navigation shell', () => {
     ])
     expect(host.querySelector<HTMLElement>('#settings-context-audit')!.hidden).toBe(true)
     expect(labels).not.toContain('上下文审核')
+  })
+
+  it('initialSectionFocusesImageGenerationInDirectory', async () => {
+    await mount(page({ initialSection: 'image-generation' }))
+    const active = host.querySelector('nav[aria-label="设置目录"] button[aria-current="location"]')
+    expect(active?.textContent).toBe('图片生成')
+    expect(document.activeElement?.closest('#settings-image-generation')).not.toBeNull()
   })
 
   it('showsAuditDirectoryOnlyAfterSupportedCallback', async () => {

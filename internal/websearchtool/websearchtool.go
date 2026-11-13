@@ -60,6 +60,9 @@ type Config struct {
 	// Client 是发请求用的 HTTP 客户端。nil 用一个带超时的普通客户端——**不能**用
 	// 引擎那个加固客户端：它拒连回环/内网地址，而 Bridge 常部署在内网。
 	Client *http.Client
+	// Capture 若非空，在一次逻辑搜索开始时调用，返回的 end 在该次搜索结束时调用
+	// （含内部 401 续期重试，仍只算一次）。ok=false 时 errCode 为安全短码。
+	Capture func(ctx context.Context, model string) (end func(ok bool, errCode string))
 }
 
 // Tool 是走平台搜索服务的 WebSearch 工具。
@@ -179,19 +182,28 @@ func (t Tool) Run(ctx context.Context, raw json.RawMessage, _ *tool.Context, eve
 		return tool.Result{}, fmt.Errorf("build search request: %w", err)
 	}
 
+	endCapture := func(bool, string) {}
+	if t.cfg.Capture != nil {
+		endCapture = t.cfg.Capture(ctx, t.cfg.Model)
+	}
+
 	status, payload, err := t.post(ctx, body)
 	if err != nil {
+		endCapture(false, "transport")
 		return tool.Result{}, err
 	}
 	if status < 200 || status >= 300 {
+		endCapture(false, "http_error")
 		return errorResult(fmt.Sprintf("联网搜索服务返回 HTTP %d：%s", status, upstreamMessage(payload))), nil
 	}
 
 	var env searchEnvelope
 	if err := json.Unmarshal(payload, &env); err != nil {
+		endCapture(false, "parse_error")
 		return tool.Result{}, fmt.Errorf("parse search results: %w", err)
 	}
 	if !env.State {
+		endCapture(false, "upstream_reject")
 		return errorResult("联网搜索失败：" + fallback(strings.TrimSpace(env.Message), "服务端未说明原因")), nil
 	}
 
@@ -200,10 +212,12 @@ func (t Tool) Run(ctx context.Context, raw json.RawMessage, _ *tool.Context, eve
 		results = results[:limit]
 	}
 	if len(results) == 0 {
+		endCapture(true, "")
 		return tool.Result{
 			Content: []tool.ResultContent{{Type: tool.ResultContentTypeText, Text: fmt.Sprintf("No results found for %q.", query)}},
 		}, nil
 	}
+	endCapture(true, "")
 	return tool.Result{
 		Content: []tool.ResultContent{{Type: tool.ResultContentTypeText, Text: format(query, results, events)}},
 	}, nil

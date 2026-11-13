@@ -163,6 +163,16 @@ export const RuntimeStages = {
 // RuntimeStage is the closed set of install stages — the shell drives this pipeline itself, so an unknown value is a bug, not a newer peer.
 export type RuntimeStage = (typeof RuntimeStages)[keyof typeof RuntimeStages];
 
+// Mirrors the protocol.ImageGenerationSubmission* constants. Local image-generation submission dispositions; they do not prove upstream receipt or billing.
+export const ImageGenerationSubmissionStatuses = {
+  Attempted: 'attempted',
+  NotSubmitted: 'not_submitted',
+  Unknown: 'unknown',
+} as const;
+
+// ImageGenerationSubmissionStatus is the closed set of local send-boundary dispositions.
+export type ImageGenerationSubmissionStatus = (typeof ImageGenerationSubmissionStatuses)[keyof typeof ImageGenerationSubmissionStatuses];
+
 // Mirrors protocol.AgentInfo. AgentInfo is one sub-agent for the UI's sub-agent manager.
 export interface AgentInfo {
   name: string;
@@ -445,7 +455,7 @@ export interface ImageGenerationProfile {
   unavailableReason?: string;
 }
 
-// Mirrors protocol.ImageGenerationResult. ImageGenerationResult 是模型工具正文、现场工具事件与历史回放共用的有界结果。 从不携带图片字节、Base64、签名 URL 或凭据。Status 为 succeeded／failed／ unknown／cancelled／save_failed；AccountingStatus 为 verified／unverified／ ambiguous／observed_mismatch，与 Status 独立——自动路径一律 unverified。
+// Mirrors protocol.ImageGenerationResult. ImageGenerationResult 是模型工具正文、现场工具事件与历史回放共用的有界结果。 从不携带图片字节、Base64、签名 URL 或凭据。Status 为 succeeded／failed／ unknown／cancelled／save_failed；SubmissionStatus 表示本地是否进入发送尝试； AccountingStatus 为 verified／unverified／ambiguous／observed_mismatch，与前两者 独立——自动路径一律 unverified，历史缺提交字段按 unknown。
 export interface ImageGenerationResult {
   version: number;
   generationId: string;
@@ -456,6 +466,7 @@ export interface ImageGenerationResult {
   images: ImageGenerationArtifact[] | null;
   message?: string;
   requestId?: string;
+  submissionStatus?: string;
   accountingStatus: string;
 }
 
@@ -1361,14 +1372,14 @@ export interface UsageDimensionsQuery {
   pageSize: number;
 }
 
-// Mirrors protocol.UsageEffectiveRange. UsageEffectiveRange 是 Bridge 为一次查询固定下来的半开区间 [startAt, endAt)。
+// Mirrors protocol.UsageEffectiveRange. UsageEffectiveRange 是桌面端为一次查询固定下来的半开区间 [startAt, endAt)。
 export interface UsageEffectiveRange {
   startAt: string;
   endAt: string;
   timezone: string;
 }
 
-// Mirrors protocol.UsageOverview. UsageOverview 是同一次一致性读取得到的汇总、趋势与质量。dataAsOf 是服务端读取 时刻，不是入账水位；replicaLagSeconds 为 null 表示副本延迟未知。
+// Mirrors protocol.UsageOverview. UsageOverview 是同一次本机快照读取到的汇总、趋势与质量。dataAsOf 是本机读取时刻； local_platform 来源不使用 replicaLagSeconds。
 export interface UsageOverview {
   scopeId: string;
   queryKey: string;
@@ -1397,7 +1408,7 @@ export interface UsageQuality {
   invalidRecordCount: string;
 }
 
-// Mirrors protocol.UsageQuery. UsageQuery 是总览查询。range 取 today / last24h / last7d / last14d / last30d / all / custom；custom 时 startAt 必填，endAt 与 followNow 二选一（followNow 只是 页面偏好：每次刷新由 Bridge 固定成读取时刻）。timezone 固定 Asia/Shanghai。
+// Mirrors protocol.UsageQuery. UsageQuery 是总览查询。range 取 today / last24h / last7d / last14d / last30d / all / custom；custom 时 startAt 必填，endAt 与 followNow 二选一（followNow 只是 页面偏好：每次刷新由桌面端固定成读取时刻）。timezone 固定 Asia/Shanghai。
 export interface UsageQuery {
   tenantId: string;
   range: string;
@@ -1429,7 +1440,7 @@ export interface UsageRequestRow {
   quality: UsageRowQuality;
 }
 
-// Mirrors protocol.UsageRequestsPage. UsageRequestsPage 是一页请求日志。totalCount 是读取时刻的可见总数，不是快照； nextCursor 由 Bridge 签名并绑定身份、范围与筛选，客户端原样回传。
+// Mirrors protocol.UsageRequestsPage. UsageRequestsPage 是一页请求日志；totalCount 与 nextCursor 绑定同一个本机快照水位、范围与筛选。
 export interface UsageRequestsPage {
   items: UsageRequestRow[] | null;
   totalCount: string;

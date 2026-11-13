@@ -170,9 +170,9 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"GetSessionImageGeneration":   hostproto.CommandQuery,
 	"SetSessionImageGeneration":   hostproto.CommandIdempotentSet,
 
-	// 用量统计（USAGE-001）：只读 GET Bridge /api/usage/*，可安全重试；不提供重算、
-	// 导出或读取日志正文的命令。
-	"GetUsageOverview":   hostproto.CommandQuery,
-	"GetUsageRequests":   hostproto.CommandQuery,
-	"GetUsageDimensions": hostproto.CommandQuery,
+	// 用量统计（USAGE-001）：只读本机平台调用记录；不提供重算、导出或读取日志正文。
+	"GetUsageOverview":     hostproto.CommandQuery,
+	"GetUsageRequests":     hostproto.CommandQuery,
+	"GetUsageDimensions":   hostproto.CommandQuery,
+	"GetLocalUsageTenants": hostproto.CommandQuery,
 }

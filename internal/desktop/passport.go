@@ -511,6 +511,8 @@ func (a *App) applyPassport(cfg engine.Config, req StartSessionRequest) engine.C
 	cfg.TokenSource = a.tokens.Token
 	// 服务端 401(令牌过期/被拒)时强制刷新一次令牌后重试。
 	cfg.OnUnauthorized = a.tokens.ForceRefresh
+	// 平台采集适配器：仅改构建用 Provider 名，用户设置仍写 passport／openai 语义。
+	cfg = usePlatformCaptureProvider(cfg, true)
 	return cfg
 }
 
