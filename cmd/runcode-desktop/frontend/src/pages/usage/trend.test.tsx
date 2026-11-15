@@ -7,6 +7,16 @@ const text = (markup: string) => markup.replace(/<[^>]+>/g, ' ').replace(/\s+/g,
 const noop = () => {}
 
 describe('UsageTrend', () => {
+  it.each([
+    [{ inputTokens: '1000', outputTokens: null }, '输入 1,000，输出 —', 'fill-primary'],
+    [{ inputTokens: null, outputTokens: '500' }, '输入 —，输出 500', 'fill-primary/35'],
+  ])('单项 Token 未知时仍绘制另一项已知值：%o', (tokens, label, fill) => {
+    const bucket = fixtureBucket(FIXTURE_RANGE.startAt, FIXTURE_RANGE.endAt, { ...tokens, totalTokens: null })
+    const markup = renderToStaticMarkup(<UsageTrend buckets={[bucket]} range={FIXTURE_RANGE} mode="tokens" onModeChange={noop} coverageStatus="known" />)
+    expect(markup).toContain(`${label}（已知部分）`)
+    expect(markup).toContain(`height="156" class="${fill}"`)
+  })
+
   it('Tokens 模式：输入（含缓存命中）与输出两段，表格给出精确值与完整区间', () => {
     const o = fixtureOverview()
     const markup = renderToStaticMarkup(<UsageTrend buckets={o.trend ?? []} range={FIXTURE_RANGE} mode="tokens" onModeChange={noop} coverageStatus="known" />)

@@ -17,6 +17,15 @@ const page = (over: Partial<UsageDimensionsPage> = {}): UsageDimensionsPage => (
 })
 
 describe('UsageDimensions', () => {
+  it('部分 Token 合计展示各自样本，未知输出不隐藏已知输入', () => {
+    const totals = fixtureTotals({ inputTokens: '1000', outputTokens: null, totalTokens: '1000', inputTokenSampleCount: '1', outputTokenSampleCount: '0', totalTokenSampleCount: '1', quality: { ...fixtureTotals().quality, tokenCoverage: 'partial' } })
+    const t = text(renderToStaticMarkup(<UsageDimensions page={page({ items: [{ id: 'partial', name: 'partial', totals }] })} loading={false} onPage={noop} />))
+    expect(t).toContain('1,000')
+    expect(t).toContain('已知合计')
+    expect(t).toContain('样本 1/2 次')
+    expect(t).toContain('样本 0/2 次')
+  })
+
   it('按模型汇总：服务端合计原样展示，已下线模型保留，未知命中率为 —', () => {
     const t = text(renderToStaticMarkup(<UsageDimensions page={page()} loading={false} onPage={noop} />))
     for (const col of ['模型', '请求数', '输入 Token', '输出 Token', '消耗 Token', '缓存命中率']) expect(t).toContain(col)

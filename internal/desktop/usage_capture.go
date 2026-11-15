@@ -83,7 +83,7 @@ func ensurePlatformCaptureRegistered() {
 			if !platformEnabled.Load() || rec == nil || freeze == nil {
 				return base, nil
 			}
-			return localusage.WrapPlatformProvider(base, platformUsageFreezer(cfg.BaseURL, freeze), rec), nil
+			return localusage.WrapPlatformProvider(base, platformUsageFreezer(cfg.BaseURL, freeze, rec), rec), nil
 		})
 	})
 }
@@ -101,18 +101,14 @@ func setPlatformCapture(rec localusage.Recorder, freeze func(context.Context) (S
 	ensurePlatformCaptureRegistered()
 	platformCaptureMu.Lock()
 	defer platformCaptureMu.Unlock()
-	platformRecorder = rec
+	platformRecorder = localusage.WithCoverageDiagnostics(rec)
 	platformFreeze = freeze
 	platformEnabled.Store(localUsageEnvEnabled() && rec != nil && freeze != nil)
 }
 
 func (a *App) initLocalUsage() error {
 	ensurePlatformCaptureRegistered()
-	if !localUsageEnvEnabled() {
-		setPlatformCapture(nil, nil)
-		platformEnabled.Store(false)
-		return nil
-	}
+	// 关闭开关只停止新采集；仍打开本机库，保留历史查询和缺口说明。
 	dir, err := os.UserConfigDir()
 	if err != nil {
 		return err
@@ -177,42 +173,86 @@ func platformUsageBaseURLScope(raw string) (bridge, tenant string, ok bool) {
 	return strings.TrimRight(u.String(), "/"), tenant, true
 }
 
-func platformUsageFreezer(baseURL string, identity func(context.Context) (ScopeFreeze, error)) func(context.Context) (localusage.Scope, error) {
+func platformUsageFreezer(baseURL string, identity func(context.Context) (ScopeFreeze, error), recorders ...localusage.Recorder) func(context.Context) (localusage.Scope, error) {
 	bridge, tenant, ok := platformUsageBaseURLScope(baseURL)
+	rec := currentPlatformRecorder()
+	if len(recorders) > 0 {
+		rec = recorders[0]
+	}
 	var diagnostic sync.Once
-	gap := func(code string) (localusage.Scope, error) {
-		// 只记录安全短码，且每个 provider 最多一次；不泄露 token、URL 或账号。
+	gap := func(code string, sf ScopeFreeze) (localusage.Scope, error) {
+		sf.BridgeBase, sf.TenantID = "", ""
+		if ok {
+			sf.BridgeBase, sf.TenantID = bridge, tenant
+		}
+		recordPlatformCoverageGap(rec, sf, code)
+		// 日志每个 provider 最多一次；持久化诊断合并首末时间以覆盖后续失败。
 		diagnostic.Do(func() { debugLog("local usage coverage gap: %s", code) })
 		return localusage.Scope{}, fmt.Errorf("采集身份不足: %s", code)
 	}
 	return func(ctx context.Context) (localusage.Scope, error) {
-		if !ok {
-			return gap("invalid_platform_scope")
+		var sf ScopeFreeze
+		var err error
+		if identity != nil {
+			sf, err = identity(ctx)
 		}
-		sf, err := identity(ctx)
+		if err != nil {
+			sf = ScopeFreeze{}
+		}
+		if !ok {
+			return gap("invalid_platform_scope", sf)
+		}
 		if err != nil || strings.TrimSpace(sf.AccountIssuer) == "" || strings.TrimSpace(sf.AccountSub) == "" {
-			return gap("missing_stable_identity")
+			return gap("missing_stable_identity", sf)
 		}
 		sf.BridgeBase, sf.TenantID = bridge, tenant
 		return sf.toScope(), nil
 	}
 }
 
+func recordPlatformCoverageGap(rec localusage.Recorder, sf ScopeFreeze, reason string) {
+	d := localusage.CoverageDiagnostic{At: time.Now().UTC(), Reason: reason}
+	if strings.TrimSpace(sf.AccountIssuer) != "" && strings.TrimSpace(sf.AccountSub) != "" {
+		d.AccountDigest = digestPair(sf.AccountIssuer, sf.AccountSub)
+	}
+	if strings.TrimSpace(sf.BridgeBase) != "" {
+		d.BridgeDigest = digestBridge(sf.BridgeBase)
+	}
+	if validLocalTenant(sf.TenantID) && sf.TenantID != "." && sf.TenantID != ".." {
+		d.TenantID = sf.TenantID
+	}
+	if d.AccountDigest != "" && d.BridgeDigest != "" && d.TenantID != "" {
+		d.ScopeID = sf.toScope().ScopeID
+	}
+	if sink, ok := rec.(interface {
+		RecordCoverageGap(context.Context, localusage.CoverageDiagnostic) error
+	}); ok {
+		// SQL 失败仍保留内存缺口；只传摘要与固定原因，不传底层异常或凭据。
+		_ = sink.RecordCoverageGap(context.Background(), d)
+	}
+}
+
 // freezeUsageScopeParts 用调用方已冻结的 Bridge／租户构造 scope（生图／搜索）。
 func (a *App) freezeUsageScopeParts(bridge, tenant string) (localusage.Scope, error) {
 	iss, sub := a.tokens.identityParts()
-	if iss == "" || sub == "" {
-		return localusage.Scope{}, fmt.Errorf("登录身份不足")
-	}
 	if strings.TrimSpace(bridge) == "" {
 		bridge = passportConfig().BridgeBaseURL
 	}
-	return ScopeFreeze{
+	sf := ScopeFreeze{
 		AccountIssuer: iss,
 		AccountSub:    sub,
 		BridgeBase:    bridge,
 		TenantID:      tenant,
-	}.toScope(), nil
+	}
+	if !validLocalTenant(tenant) || tenant == "." || tenant == ".." {
+		recordPlatformCoverageGap(currentPlatformRecorder(), sf, "invalid_platform_scope")
+		return localusage.Scope{}, fmt.Errorf("采集租户不足")
+	}
+	if strings.TrimSpace(iss) == "" || strings.TrimSpace(sub) == "" {
+		recordPlatformCoverageGap(currentPlatformRecorder(), sf, "missing_stable_identity")
+		return localusage.Scope{}, fmt.Errorf("登录身份不足")
+	}
+	return sf.toScope(), nil
 }
 
 func currentPlatformRecorder() localusage.Recorder {
@@ -248,7 +288,7 @@ func wrapVisionForCapture(p llm.Provider, platform bool, baseURL string) llm.Pro
 	if rec == nil || freeze == nil {
 		return p
 	}
-	return localusage.WrapPlatformProviderKind(p, platformUsageFreezer(baseURL, freeze), rec, localusage.CallKindVision)
+	return localusage.WrapPlatformProviderKind(p, platformUsageFreezer(baseURL, freeze, rec), rec, localusage.CallKindVision)
 }
 
 // beginNonLLMCapture 在平台生图／搜索真正发出前开始记账；失败则跳过，不阻断业务。

@@ -26,16 +26,18 @@ function bars(buckets: UsageBucket[], mode: TrendMode): Bar[] {
   const rows = buckets.map((b) => {
     const a = parseCount(mode === 'tokens' ? b.inputTokens : b.requestCount)
     const o = mode === 'tokens' ? parseCount(b.outputTokens) : 0n
-    return { b, a, o, total: a === null || o === null ? null : a + o }
+    return { b, a, o, total: a === null && o === null ? null : (a ?? 0n) + (o ?? 0n) }
   })
   const max = rows.reduce<bigint>((m, r) => (r.total !== null && r.total > m ? r.total : m), 0n)
   return rows.map(({ b, a, o, total }) => {
     const range = formatBucketRange(b.startAt, b.endAt)
     let detail: string
-    if (b.coverage === 'gap') detail = '采集缺口'
-    else if (total === null) detail = b.coverage === 'unknown' ? '无数据（覆盖未知）' : '无可统计的 Token'
-    else detail = mode === 'tokens' ? `输入 ${formatExact(b.inputTokens)}，输出 ${formatExact(b.outputTokens)}` : `请求 ${formatExact(b.requestCount)}`
-    return { bucket: b, label: `${range}：${detail}`, first: ratio(a, max), second: ratio(o, max), noData: total === null || b.coverage === 'gap' }
+    if (total === null) detail = b.coverage === 'unknown' ? '无数据（覆盖未知）' : '无可统计的 Token'
+    else detail = mode === 'tokens'
+      ? `输入 ${formatExact(b.inputTokens)}，输出 ${formatExact(b.outputTokens)}${a === null || o === null ? '（已知部分）' : ''}`
+      : `请求 ${formatExact(b.requestCount)}`
+    if (b.coverage === 'gap') detail += ' · 采集缺口'
+    return { bucket: b, label: `${range}：${detail}`, first: ratio(a, max), second: ratio(o, max), noData: total === null }
   })
 }
 
@@ -112,7 +114,7 @@ export function UsageTrend({ buckets, range, mode, onModeChange, coverageStatus 
 
       <p className="m-0 text-[12px] text-muted">
         {mode === 'tokens' ? '非 Token 计量的调用不计入此图。' : '请求数包含非 Token 计量的调用。'}
-        {coverageStatus !== 'known' && ' 覆盖范围未知：空白时段不代表零用量。'}
+        {coverageStatus === 'gap' ? ' 存在采集缺口：仅显示已采集用量。' : coverageStatus !== 'known' && ' 覆盖范围未知：空白时段不代表零用量。'}
       </p>
 
       <details>

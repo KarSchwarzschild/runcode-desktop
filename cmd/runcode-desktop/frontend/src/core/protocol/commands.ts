@@ -193,7 +193,7 @@ export function getImageGenerationSettings(tenantID: string): Promise<ImageGener
   return call<ImageGenerationSettings>('GetImageGenerationSettings', tenantID);
 }
 
-// GetLocalUsageTenants 只读本机 SQLite 中当前账号与 Bridge 关联过的历史租户。 它不访问 Bridge，也不切换聊天会话当前租户。
+// GetLocalUsageTenants 只读本机 SQLite 中当前账号与 Bridge 关联过的历史租户， 并补上当前活动／会话租户（即使尚无采集记录），方便直接查看本机空统计。 它不访问 Bridge，也不切换聊天会话当前租户。
 // kind: query
 export function getLocalUsageTenants(): Promise<PassportTenant[] | null> {
   return call<PassportTenant[] | null>('GetLocalUsageTenants');

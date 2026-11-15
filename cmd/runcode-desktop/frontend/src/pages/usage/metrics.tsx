@@ -2,7 +2,7 @@
 // 说明原因，"0" 才是 0。没有任何成本、价格或货币。
 import { type ReactNode } from 'react'
 import type { UsageCapabilities, UsageOverview, UsageTotals } from '@/core/bridge'
-import { COVERAGE_LABELS, formatCompact, formatDurationMs, formatExact, formatRate, formatShanghai, parseCount } from '@/core/usage'
+import { COVERAGE_LABELS, formatCompact, formatDurationMs, formatExact, formatRate, formatShanghai, parseCount, tokenSampleLabel } from '@/core/usage'
 
 const CARD = 'bg-surface border border-line2 rounded-card px-4 py-3.5 flex flex-col gap-1 min-w-0 shadow-xs'
 
@@ -30,16 +30,17 @@ function cacheCard(t: UsageTotals, caps: UsageCapabilities): { value: string; su
   return { value: formatRate(t.cacheHitRate), sub: t.quality.containsLegacyInferredCache ? `${coverage} · 含历史推导` : coverage }
 }
 
-export function UsageMetrics({ totals, capabilities, empty }: {
+export function UsageMetrics({ totals, capabilities, empty, statusCounts }: {
   totals: UsageTotals
   capabilities: UsageCapabilities
   empty: boolean
+  statusCounts?: UsageOverview['statusCounts']
 }) {
   const cache = cacheCard(totals, capabilities)
   const partialCache = totals.quality.cacheCoverage === 'partial' ? '（已知部分）' : ''
   const invalid = parseCount(totals.quality.invalidRecordCount) ?? 0n
   const more: [string, string][] = [
-    ['输入 Token', formatExact(totals.inputTokens)],
+    ['输入 Token', `${formatExact(totals.inputTokens)}（${tokenSampleLabel(totals.inputTokenSampleCount, totals.tokenRequestCount)}）`],
     [`缓存命中${partialCache}`, formatExact(totals.cacheHitTokens)],
     [`未命中输入${partialCache}`, formatExact(totals.cacheMissTokens)],
     ['思考 Token', formatExact(totals.reasoningTokens)],
@@ -50,16 +51,24 @@ export function UsageMetrics({ totals, capabilities, empty }: {
   return (
     <section aria-label="用量指标" className="@container flex flex-col gap-2">
       <div className="grid grid-cols-1 @md:grid-cols-2 @3xl:grid-cols-4 gap-3">
-        <Card label="请求数" value={formatCompact(totals.requestCount)} exact={formatExact(totals.requestCount)} sub="按平台已入账调用计数，可能不含失败或中断请求" />
+        <Card label="请求数" value={formatCompact(totals.requestCount)} exact={formatExact(totals.requestCount)} sub="按本机采集的平台调用计数" />
         <Card
           label="消耗 Token"
           value={formatCompact(totals.totalTokens)}
           exact={formatExact(totals.totalTokens)}
-          sub={totals.totalTokens == null ? '暂无可统计的 Token 记录' : tokenQuality(totals)}
+          sub={`${totals.totalTokens == null ? '暂无可统计的 Token 记录' : `已知合计 · ${tokenQuality(totals)}`} · ${tokenSampleLabel(totals.totalTokenSampleCount, totals.tokenRequestCount)}`}
         />
-        <Card label="输出 Token" value={formatCompact(totals.outputTokens)} exact={formatExact(totals.outputTokens)} sub={`输入 ${formatCompact(totals.inputTokens)}`} />
+        <Card label="输出 Token" value={formatCompact(totals.outputTokens)} exact={formatExact(totals.outputTokens)} sub={<>
+          <span className="block">{tokenSampleLabel(totals.outputTokenSampleCount, totals.tokenRequestCount)}</span>
+          <span className="block">输入 {formatCompact(totals.inputTokens)}（{tokenSampleLabel(totals.inputTokenSampleCount, totals.tokenRequestCount)}）</span>
+        </>} />
         <Card label="缓存命中率" value={cache.value} sub={cache.sub} />
       </div>
+      <p aria-label="请求状态分布" className="m-0 text-[12px] text-muted">
+        {statusCounts
+          ? `请求状态：处理中 ${formatExact(statusCounts.pending)} · 成功 ${formatExact(statusCounts.succeeded)} · 失败 ${formatExact(statusCounts.failed)} · 已取消 ${formatExact(statusCounts.cancelled)} · 未知 ${formatExact(statusCounts.unknown)} · 保存失败 ${formatExact(statusCounts.saveFailed)}`
+          : '状态分布未知'}
+      </p>
       {empty && <p className="m-0 text-[12px] text-muted">所选时间段暂无记录。</p>}
       {invalid > 0n && (
         <p className="m-0 text-[12px] text-amberink">{formatExact(totals.quality.invalidRecordCount)} 条记录计量异常，已排除出 Token 与缓存统计。</p>
@@ -80,6 +89,7 @@ export function UsageMetrics({ totals, capabilities, empty }: {
 }
 
 const SOURCE_KIND: Record<string, string> = { primary: '主库', replica: '只读副本', local_platform: '本机记录' }
+const STORAGE_STATUS: Record<string, string> = { ok: '存储正常', degraded: '存储降级，部分调用可能未记录', unavailable: '存储不可用，无法保证采集完整' }
 
 // UsageFreshness 说明这份数据「什么时候、从哪读的」：dataAsOf 是快照读取时刻，不是入账
 // 水位；本机记录可能因客户端关闭而存在覆盖缺口。
@@ -88,13 +98,26 @@ export function UsageFreshness({ overview, refreshedAt }: { overview: UsageOverv
   const lag = overview.sourceKind === 'primary' || overview.sourceKind === 'local_platform'
     ? ''
     : overview.replicaLagSeconds == null ? '副本延迟未知' : `延迟约 ${overview.replicaLagSeconds} 秒`
-  const coverage = overview.coverageStatus === 'known' && overview.coverageStart
-    ? `记录自 ${formatShanghai(overview.coverageStart)} 起可查询`
-    : overview.sourceKind === 'local_platform' ? '本机采集记录，可能存在关闭期间缺口' : '覆盖起点未知，仅统计当前可查询的记录'
+  const gaps = overview.coverageGaps ?? []
+  const coverage = gaps.length > 0 || overview.coverageStatus === 'gap'
+    ? '存在采集缺口，统计仅含已采集记录'
+    : overview.coverageStatus === 'known' ? '当前查询范围已覆盖' : '覆盖范围未知，空白时段不代表零用量'
   return (
-    <p className="m-0 text-[12px] text-faint leading-[1.6]">
-      数据读取于 {formatShanghai(overview.dataAsOf, true)}（快照读取时刻，不是入账水位）· {source}{lag ? ` · ${lag}` : ''} · {coverage}
-      {refreshedAt && <> · 本机最后刷新 {formatShanghai(refreshedAt.toISOString(), true)}</>}
-    </p>
+    <div className="text-[12px] text-muted leading-[1.6]">
+      <p className="m-0">数据读取于 {formatShanghai(overview.dataAsOf, true)}（快照读取时刻，不是入账水位）· {source}{lag ? ` · ${lag}` : ''}
+        {refreshedAt && <> · 本机最后刷新 {formatShanghai(refreshedAt.toISOString(), true)}</>}
+      </p>
+      <p className="m-0">
+        {overview.sourceKind === 'local_platform' && '本机采集记录 · '}
+        {overview.collectionStartedAt ? `开始采集于 ${formatShanghai(overview.collectionStartedAt)}` : '采集起点未知'}
+        {' · '}{STORAGE_STATUS[overview.storageStatus ?? ''] ?? '存储状态未知'} · {coverage}
+        {overview.coverageStart && <> · 可查询记录起点 {formatShanghai(overview.coverageStart)}</>}
+      </p>
+      {overview.coverageMessage && <p className="m-0">{overview.coverageMessage}</p>}
+      {gaps.length > 0 && <details>
+        <summary className="cursor-pointer w-fit">查看采集缺口（{gaps.length} 段）</summary>
+        <ul className="m-0 pl-4">{gaps.map((gap, i) => <li key={`${gap.startAt}:${gap.endAt}:${i}`}>{formatShanghai(gap.startAt)} — {formatShanghai(gap.endAt)}</li>)}</ul>
+      </details>}
+    </div>
   )
 }

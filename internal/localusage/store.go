@@ -18,6 +18,9 @@ import (
 // 写入预算：统计失败不得拖垮业务路径（设计：200ms）。
 const writeBudget = 200 * time.Millisecond
 
+const queryBudget = 5 * time.Second
+const readPoolSize = 4
+
 var (
 	// ErrSchemaTooNew 表示库 schema 比本二进制新，拒绝打开，不得删库。
 	ErrSchemaTooNew = errors.New("本地用量库版本过新，当前客户端无法打开")
@@ -31,13 +34,18 @@ var (
 
 // Store 是本机 usage.sqlite3 的唯一写入／查询入口；实现 Recorder。
 type Store struct {
-	db   *sql.DB
-	path string
-	now  func() time.Time
-	run  string
+	db       *sql.DB
+	readDB   *sql.DB
+	path     string
+	now      func() time.Time
+	run      string
+	coverage coverageMemory
 
-	mu     sync.Mutex
-	closed bool
+	mu        sync.Mutex
+	closed    bool
+	active    sync.WaitGroup
+	closeDone chan struct{}
+	closeErr  error
 }
 
 // Open 打开或创建独立用量库。path 必须是绝对路径；now 可注入测试时钟。
@@ -56,13 +64,13 @@ func Open(path string, now func() time.Time) (*Store, error) {
 	if !strings.HasPrefix(uriPath, "/") {
 		uriPath = "/" + uriPath
 	}
-	u := url.URL{Scheme: "file", Path: uriPath, RawQuery: "_pragma=busy_timeout(200)"}
+	u := url.URL{Scheme: "file", Path: uriPath, RawQuery: "_pragma=busy_timeout(200)&_pragma=foreign_keys(1)"}
 	db, err := sql.Open("sqlite", u.String())
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1) // 单写序列
-	s := &Store{db: db, path: path, now: now, run: fmt.Sprintf("run-%d", now().UTC().UnixNano())}
+	s := &Store{db: db, path: path, now: now, run: fmt.Sprintf("run-%d", now().UTC().UnixNano()), closeDone: make(chan struct{})}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -75,7 +83,39 @@ func Open(path string, now func() time.Time) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if _, err := db.Exec(queryIndexesSQL); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	u.RawQuery = "mode=ro&_pragma=busy_timeout(200)&_pragma=query_only(1)"
+	readDB, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	readDB.SetMaxOpenConns(readPoolSize)
+	readDB.SetMaxIdleConns(readPoolSize)
+	s.readDB = readDB
 	return s, nil
+}
+
+// acquire protects the connection lifetime only. Database work never holds mu;
+// the bounded writer connection queue is governed by the caller's context.
+func (s *Store) acquire(ctx context.Context) (func(), error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return nil, ErrStoreClosed
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.active.Add(1)
+	return s.active.Done, nil
+}
+
+func boundedQueryContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, queryBudget)
 }
 
 func (s *Store) initSchema() error {
@@ -226,11 +266,11 @@ func (s *Store) Begin(ctx context.Context, start StartRecord) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, writeBudget)
 	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return ErrStoreClosed
+	release, err := s.acquire(ctx)
+	if err != nil {
+		return err
 	}
+	defer release()
 	return s.beginLocked(ctx, start)
 }
 
@@ -285,11 +325,11 @@ func (s *Store) Finish(ctx context.Context, finish FinishRecord) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, writeBudget)
 	defer cancel()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return ErrStoreClosed
+	release, err := s.acquire(ctx)
+	if err != nil {
+		return err
 	}
+	defer release()
 	return s.finishLocked(ctx, finish)
 }
 
@@ -477,13 +517,18 @@ func validateFinish(f FinishRecord) error {
 // Close 标记干净退出并释放连接。必须在回合收尾之后调用。
 func (s *Store) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.closed {
-		return nil
+		s.mu.Unlock()
+		<-s.closeDone
+		return s.closeErr
 	}
 	s.closed = true
+	s.mu.Unlock()
+	s.active.Wait()
 	_, _ = s.db.Exec(`DELETE FROM meta WHERE key = 'active_run_id'`)
-	return s.db.Close()
+	s.closeErr = errors.Join(s.readDB.Close(), s.db.Close())
+	close(s.closeDone)
+	return s.closeErr
 }
 
 // Path 返回库文件绝对路径（测试／诊断用）。

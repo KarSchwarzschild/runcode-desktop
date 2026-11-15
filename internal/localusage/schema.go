@@ -1,5 +1,15 @@
 package localusage
 
+// Partial indexes keep page seeks and bucket scans on start events, including
+// existing databases without changing their append-only event schema.
+const queryIndexesSQL = `
+PRAGMA journal_mode=WAL;
+CREATE INDEX IF NOT EXISTS idx_events_start_scope_time
+  ON events(scope_id, started_at_ms DESC, call_id DESC, seq) WHERE phase='start';
+CREATE INDEX IF NOT EXISTS idx_events_start_scope_model_time
+  ON events(scope_id, model, started_at_ms DESC, call_id DESC, seq) WHERE phase='start';
+`
+
 // 本地用量 schema：append-only 事件表 + scope 覆盖元数据。
 // 设计见 DOC 用量统计/设计说明.md「持久化」节。
 

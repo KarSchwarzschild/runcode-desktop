@@ -61,6 +61,7 @@ interface LoadParams {
 
 function resolvedFrom(tenantId: string, overview: UsageOverview, filters: UsageFilters): ResolvedUsageQuery {
   const q: ResolvedUsageQuery = { tenantId, effectiveRange: overview.effectiveRange }
+  if (overview.snapshotSeq !== undefined) q.snapshotSeq = overview.snapshotSeq
   if (filters.providerId) q.providerId = filters.providerId
   if (filters.model) q.model = filters.model
   return q
@@ -353,7 +354,7 @@ export function useUsage(identityKey: string, tenantId: string) {
       const o = await getUsageOverview(buildUsageQuery(tenant, sel, f))
       if (gen.current !== my) return
       const before = s.overview.summary
-      if (o.summary.requestCount !== before.requestCount || o.summary.totalTokens !== before.totalTokens) setHasUpdate(true)
+      if (o.snapshotSeq !== s.overview.snapshotSeq || o.summary.requestCount !== before.requestCount || o.summary.totalTokens !== before.totalTokens) setHasUpdate(true)
     } catch {
       /* 探测失败不打扰：用户仍在看冻结的那一页 */
     } finally {

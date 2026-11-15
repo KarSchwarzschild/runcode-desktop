@@ -77,6 +77,26 @@ afterEach(async () => {
 })
 
 describe('useUsage', () => {
+  it('logs, dimensions and candidates reuse the overview snapshot including sequence zero', async () => {
+    native.overview.mockResolvedValue({ ...overview('A'), snapshotSeq: '0' })
+    await mount('user-1', 'tenant-a')
+    expect(native.requests).toHaveBeenCalledWith(expect.objectContaining({ query: expect.objectContaining({ snapshotSeq: '0' }) }))
+    expect(native.dimensions).toHaveBeenCalledWith(expect.objectContaining({ query: expect.objectContaining({ snapshotSeq: '0' }) }))
+    await act(async () => usage.searchOptions('model', 'needle'))
+    expect(native.dimensions).toHaveBeenLastCalledWith(expect.objectContaining({ query: expect.objectContaining({ snapshotSeq: '0' }) }))
+  })
+
+  it('a newer snapshot flags status changes even when request and token totals stay unchanged', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    native.overview.mockResolvedValue({ ...overview('A'), snapshotSeq: '10' })
+    await mount('user-1', 'tenant-a')
+    await act(async () => usage.nextPage())
+    native.overview.mockResolvedValue({ ...overview('A'), snapshotSeq: '11' })
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000) })
+    expect(usage.hasUpdate).toBe(true)
+    expect(usage.overview?.snapshotSeq).toBe('10')
+  })
+
   it('rejectsStaleIdentityAndTenantResponses', async () => {
     let releaseA!: (v: UsageOverview) => void
     native.overview.mockImplementation(async (q: { tenantId: string }) =>

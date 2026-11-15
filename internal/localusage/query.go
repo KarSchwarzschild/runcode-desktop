@@ -13,11 +13,12 @@ import (
 // QueryFilter 是本机查询的最小条件。ScopeID 已由宿主根据当前账号、Bridge 和租户冻结，
 // 查询层不接受自由账号字段，也不会访问在线服务补齐身份。
 type QueryFilter struct {
-	ScopeID     string
-	StartAt     time.Time
-	EndAt       time.Time
-	Model       string
-	SnapshotSeq int64
+	ScopeID        string
+	StartAt        time.Time
+	EndAt          time.Time
+	Model          string
+	SnapshotSeq    int64
+	SnapshotPinned bool // distinguishes a pinned empty snapshot (0) from a fresh query
 }
 
 // CallRecord 是从 start 与 finish 事件还原的一次逻辑调用；同一 callId 永远只返回一行。
@@ -66,30 +67,57 @@ type queryCursor struct {
 	EndRange   int64  `json:"endRange"`
 }
 
-// QuerySnapshot 按过滤条件返回完整调用列表与水位。
+var (
+	ErrInvalidCursor   = errors.New("分页游标无效")
+	ErrInvalidSnapshot = errors.New("查询快照已失效")
+)
+
+// readSnapshot pins all statements to one SQLite read transaction and event seq.
+func (s *Store) readSnapshot(ctx context.Context, filter QueryFilter) (*sql.Tx, int64, func(), error) {
+	ctx, cancel := boundedQueryContext(ctx)
+	release, err := s.acquire(ctx)
+	if err != nil {
+		cancel()
+		return nil, 0, nil, err
+	}
+	tx, err := s.readDB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		release()
+		cancel()
+		return nil, 0, nil, err
+	}
+	cleanup := func() { _ = tx.Rollback(); release(); cancel() }
+	seq, err := snapshotSeq(ctx, tx, filter.SnapshotSeq, filter.SnapshotPinned)
+	if err != nil {
+		cleanup()
+		return nil, 0, nil, err
+	}
+	return tx, seq, cleanup, nil
+}
+
+// QuerySnapshot retains pending calls for internal compatibility. User-facing
+// callers use SQL aggregates or QueryPage so they never materialize all calls.
 func (s *Store) QuerySnapshot(ctx context.Context, filter QueryFilter) (QuerySnapshot, error) {
 	if err := validateQueryFilter(filter); err != nil {
 		return QuerySnapshot{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return QuerySnapshot{}, ErrStoreClosed
-	}
-	seq, err := s.snapshotSeq(ctx, filter.SnapshotSeq)
+	ctx, cancel := boundedQueryContext(ctx)
+	defer cancel()
+	tx, seq, done, err := s.readSnapshot(ctx, filter)
 	if err != nil {
 		return QuerySnapshot{}, err
 	}
+	defer done()
 	filter.SnapshotSeq = seq
-	calls, err := s.queryCallsLocked(ctx, filter)
+	from, args := callsFrom(filter, true)
+	calls, err := queryCalls(ctx, tx, callColumns+from+` ORDER BY s.started_at_ms DESC, s.call_id DESC`, args)
 	if err != nil {
 		return QuerySnapshot{}, err
 	}
 	return QuerySnapshot{Seq: seq, Calls: calls}, nil
 }
 
-// QueryPage 使用固定 snapshotSeq 还原页；迟到 finish 不会改写已经发出的旧页。
-// 页码由客户端维护，游标绑定快照、scope、模型、时间范围和上一行排序键。
+// QueryPage uses a SQL keyset and LIMIT; late finishes remain outside its seq.
 func (s *Store) QueryPage(ctx context.Context, filter QueryFilter, cursor string, limit int) (QueryPage, error) {
 	if limit <= 0 || limit > 1000 {
 		return QueryPage{}, fmt.Errorf("查询页大小无效")
@@ -97,77 +125,72 @@ func (s *Store) QueryPage(ctx context.Context, filter QueryFilter, cursor string
 	if err := validateQueryFilter(filter); err != nil {
 		return QueryPage{}, err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return QueryPage{}, ErrStoreClosed
-	}
+	var decoded queryCursor
 	if cursor != "" {
-		decoded, err := decodeCursor(cursor)
-		if err != nil || decoded.ScopeID != filter.ScopeID || decoded.Model != filter.Model || decoded.StartRange != filter.StartAt.UTC().UnixMilli() || decoded.EndRange != filter.EndAt.UTC().UnixMilli() {
-			return QueryPage{}, fmt.Errorf("分页游标无效")
+		var err error
+		decoded, err = decodeCursor(cursor)
+		if err != nil || decoded.ScopeID != filter.ScopeID || decoded.Model != filter.Model || decoded.StartRange != filter.StartAt.UTC().UnixMilli() || decoded.EndRange != filter.EndAt.UTC().UnixMilli() || ((filter.SnapshotPinned || filter.SnapshotSeq > 0) && filter.SnapshotSeq != decoded.Seq) {
+			return QueryPage{}, ErrInvalidCursor
 		}
-		filter.SnapshotSeq = decoded.Seq
+		filter.SnapshotSeq, filter.SnapshotPinned = decoded.Seq, true
 	}
-	seq, err := s.snapshotSeq(ctx, filter.SnapshotSeq)
+	ctx, cancel := boundedQueryContext(ctx)
+	defer cancel()
+	tx, seq, done, err := s.readSnapshot(ctx, filter)
 	if err != nil {
 		return QueryPage{}, err
 	}
+	defer done()
 	filter.SnapshotSeq = seq
-	calls, err := s.queryCallsLocked(ctx, filter)
-	if err != nil {
+	from, args := callsFrom(filter, false)
+	var total int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*)`+from, args...).Scan(&total); err != nil {
 		return QueryPage{}, err
 	}
 	if cursor != "" {
-		decoded, _ := decodeCursor(cursor)
-		start := -1
-		for i, call := range calls {
-			if call.StartedAt.UnixMilli() == decoded.Started && call.CallID == decoded.CallID {
-				start = i + 1
-				break
-			}
+		var exists int
+		checkArgs := append(append([]any{}, args...), decoded.Started, decoded.CallID)
+		err := tx.QueryRowContext(ctx, `SELECT 1`+from+` AND s.started_at_ms=? AND s.call_id=?`, checkArgs...).Scan(&exists)
+		if errors.Is(err, sql.ErrNoRows) {
+			return QueryPage{}, ErrInvalidCursor
 		}
-		if start < 0 {
-			return QueryPage{}, fmt.Errorf("分页游标无效")
-		}
-		calls = calls[start:]
-	}
-	total := len(calls)
-	if cursor != "" {
-		// totalCount 需要反映整份快照，而不是当前游标之后的剩余行。
-		all, err := s.queryCallsLocked(ctx, QueryFilter{ScopeID: filter.ScopeID, StartAt: filter.StartAt, EndAt: filter.EndAt, Model: filter.Model, SnapshotSeq: seq})
 		if err != nil {
 			return QueryPage{}, err
 		}
-		total = len(all)
+		from += ` AND (s.started_at_ms, s.call_id) < (?, ?)`
+		args = append(args, decoded.Started, decoded.CallID)
 	}
-	page := calls
-	if len(page) > limit {
-		page = page[:limit]
+	args = append(args, limit+1)
+	calls, err := queryCalls(ctx, tx, callColumns+from+` ORDER BY s.started_at_ms DESC, s.call_id DESC LIMIT ?`, args)
+	if err != nil {
+		return QueryPage{}, err
 	}
-	out := QueryPage{Seq: seq, Calls: page, TotalCount: total, HasMore: len(calls) > len(page)}
-	if out.HasMore && len(page) > 0 {
-		last := page[len(page)-1]
+	out := QueryPage{Seq: seq, Calls: calls, TotalCount: total, HasMore: len(calls) > limit}
+	if out.HasMore {
+		out.Calls = calls[:limit]
+		last := out.Calls[len(out.Calls)-1]
 		out.NextCursor = encodeCursor(queryCursor{Seq: seq, Started: last.StartedAt.UnixMilli(), CallID: last.CallID, ScopeID: filter.ScopeID, Model: filter.Model, StartRange: filter.StartAt.UTC().UnixMilli(), EndRange: filter.EndAt.UTC().UnixMilli()})
 	}
 	return out, nil
 }
 
-// ListTenantIDs 列出某账号+Bridge 下已出现过的租户 ID。
+// ListTenantIDs lists the current account's historical tenants.
 func (s *Store) ListTenantIDs(ctx context.Context, accountDigest, bridgeDigest string) ([]string, error) {
 	if accountDigest == "" || bridgeDigest == "" {
 		return nil, fmt.Errorf("账号或 Bridge 摘要不能为空")
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.closed {
-		return nil, ErrStoreClosed
-	}
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT tenant_id FROM scopes WHERE account_digest=? AND bridge_digest=? AND tenant_id<>'' ORDER BY tenant_id`, accountDigest, bridgeDigest)
+	ctx, cancel := boundedQueryContext(ctx)
+	defer cancel()
+	release, err := s.acquire(ctx)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer release()
+	rows, err := s.readDB.QueryContext(ctx, `SELECT DISTINCT tenant_id FROM scopes WHERE account_digest=? AND bridge_digest=? AND tenant_id<>'' ORDER BY tenant_id`, accountDigest, bridgeDigest)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	var out []string
 	for rows.Next() {
 		var tenant string
@@ -176,7 +199,10 @@ func (s *Store) ListTenantIDs(ctx context.Context, accountDigest, bridgeDigest s
 		}
 		out = append(out, tenant)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func validateQueryFilter(f QueryFilter) error {
@@ -186,44 +212,48 @@ func validateQueryFilter(f QueryFilter) error {
 	return nil
 }
 
-func (s *Store) snapshotSeq(ctx context.Context, requested int64) (int64, error) {
-	var current sql.NullInt64
-	if err := s.db.QueryRowContext(ctx, `SELECT MAX(seq) FROM events`).Scan(&current); err != nil {
+func snapshotSeq(ctx context.Context, tx *sql.Tx, requested int64, pinned bool) (int64, error) {
+	var current int64
+	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq),0) FROM events`).Scan(&current); err != nil {
 		return 0, err
 	}
-	if requested > 0 {
-		if !current.Valid || requested > current.Int64 {
-			return 0, fmt.Errorf("查询快照已失效")
-		}
+	if requested < 0 || requested > current {
+		return 0, ErrInvalidSnapshot
+	}
+	if requested > 0 || pinned {
 		return requested, nil
 	}
-	if !current.Valid {
-		return 0, nil
-	}
-	return current.Int64, nil
+	return current, nil
 }
 
-func (s *Store) queryCallsLocked(ctx context.Context, f QueryFilter) ([]CallRecord, error) {
-	query := `
-SELECT s.call_id, s.scope_id, s.model, s.call_kind, s.started_at_ms,
-       f.finished_at_ms, f.duration_ms, COALESCE(f.status, 'pending'),
-	   f.input_tokens, f.input_tokens_known, f.output_tokens, f.output_tokens_known,
-	   f.cache_hit_tokens, f.cache_hit_tokens_known, f.cache_miss_tokens, f.cache_miss_tokens_known,
-	   f.generated_images
-FROM events s
-LEFT JOIN events f ON f.call_id=s.call_id AND f.phase='finish' AND f.seq<=?
-WHERE s.phase='start' AND s.seq<=? AND s.scope_id=? AND s.started_at_ms>=? AND s.started_at_ms<?`
+const callColumns = `SELECT s.call_id, s.scope_id, s.model, s.call_kind, s.started_at_ms,
+ f.finished_at_ms, f.duration_ms, CASE WHEN f.seq IS NULL THEN 'pending'
+ WHEN f.status IN ('succeeded','failed','cancelled','unknown','save_failed') THEN f.status ELSE 'unknown' END,
+ f.input_tokens, f.input_tokens_known, f.output_tokens, f.output_tokens_known,
+ f.cache_hit_tokens, f.cache_hit_tokens_known, f.cache_miss_tokens, f.cache_miss_tokens_known,
+ f.generated_images`
+
+func callsFrom(f QueryFilter, includePending bool) (string, []any) {
+	join := ` JOIN `
+	if includePending {
+		join = ` LEFT JOIN `
+	}
+	query := ` FROM events s` + join + `events f ON f.call_id=s.call_id AND f.phase='finish' AND f.seq<=?
+ WHERE s.phase='start' AND s.seq<=? AND s.scope_id=? AND s.started_at_ms>=? AND s.started_at_ms<?`
 	args := []any{f.SnapshotSeq, f.SnapshotSeq, f.ScopeID, f.StartAt.UTC().UnixMilli(), f.EndAt.UTC().UnixMilli()}
 	if f.Model != "" {
 		query += ` AND s.model=?`
 		args = append(args, f.Model)
 	}
-	query += ` ORDER BY s.started_at_ms DESC, s.call_id DESC`
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	return query, args
+}
+
+func queryCalls(ctx context.Context, tx *sql.Tx, query string, args []any) ([]CallRecord, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
+	defer rows.Close()
 	var out []CallRecord
 	for rows.Next() {
 		var call CallRecord
@@ -267,7 +297,10 @@ WHERE s.phase='start' AND s.seq<=? AND s.scope_id=? AND s.started_at_ms>=? AND s
 		}
 		out = append(out, call)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func encodeCursor(c queryCursor) string {

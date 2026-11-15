@@ -10,7 +10,7 @@ import { FIELD_CLS, SelectField } from '@/ui/fields'
 import { Icon } from '@/ui/icons'
 import { BTN, BTN_PRIMARY } from '@/ui/tokens'
 import { RangePicker } from './range-picker'
-import { UsageMetrics } from './metrics'
+import { UsageFreshness, UsageMetrics } from './metrics'
 import { UsageTrend, type TrendMode } from './trend'
 import { UsageRequests } from './requests'
 import { UsageDimensions } from './dimensions'
@@ -199,7 +199,8 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
         <p className="m-0 text-[12px] text-muted">
           统计范围 {formatShanghai(range.startAt)} — {formatShanghai(range.endAt)}
         </p>
-        <UsageMetrics totals={overview.summary} capabilities={overview.capabilities} empty={overview.empty} />
+        <UsageFreshness overview={overview} refreshedAt={usage.refreshedAt} />
+        <UsageMetrics totals={overview.summary} capabilities={overview.capabilities} empty={overview.empty} statusCounts={overview.statusCounts} />
         <UsageTrend buckets={overview.trend ?? []} range={range} mode={trendMode} onModeChange={setTrendMode} coverageStatus={overview.coverageStatus} />
         <section className="flex flex-col gap-3" aria-label="明细">
           <div role="tablist" className="flex gap-1 border-b border-line2">
@@ -225,6 +226,7 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
               pageIndex={usage.requestPage}
               pageSize={usage.pageSize}
               providerColumn={providerBreakdown}
+              statusColumn={overview.capabilities.requestStatus}
               loading={usage.loading}
               onPrev={() => void usage.prevPage()}
               onNext={() => void usage.nextPage()}

@@ -8,6 +8,32 @@ const caps = fixtureOverview().capabilities
 const COST_WORDS = ['成本', '费用', '价格', '单价', '余额', '¥', '$', '元']
 
 describe('UsageMetrics', () => {
+  it('部分 Token 保留单项已知合计，并分别显示样本数', () => {
+    const totals = fixtureTotals({
+      tokenRequestCount: '3', inputTokens: '10000', outputTokens: null, totalTokens: '10000',
+      inputTokenSampleCount: '2', outputTokenSampleCount: '0', totalTokenSampleCount: '2',
+      quality: { ...fixtureTotals().quality, tokenCoverage: 'partial' },
+    })
+    const t = text(renderToStaticMarkup(<UsageMetrics totals={totals} capabilities={caps} empty={false} />))
+    expect(t).toContain('消耗 Token 1.0万')
+    expect(t).toContain('已知合计')
+    expect(t).toContain('样本 2/3 次')
+    expect(t).toContain('输出 Token —')
+    expect(t).toContain('样本 0/3 次')
+    expect(t).toContain('输入 Token 10,000')
+  })
+
+  it('历史缺失的样本数和状态分布保持未知', () => {
+    const t = text(renderToStaticMarkup(<UsageMetrics totals={fixtureTotals()} capabilities={caps} empty={false} />))
+    expect(t).toContain('样本未知')
+    expect(t).toContain('状态分布未知')
+  })
+
+  it('状态分布逐项展示，包括处理中、取消和保存失败', () => {
+    const t = text(renderToStaticMarkup(<UsageMetrics totals={fixtureTotals()} capabilities={caps} empty={false} statusCounts={{ pending: '1', succeeded: '2', failed: '3', cancelled: '4', unknown: '5', saveFailed: '6' }} />))
+    for (const label of ['处理中 1', '成功 2', '失败 3', '已取消 4', '未知 5', '保存失败 6']) expect(t).toContain(label)
+  })
+
   it('消耗 Token 是输入加输出，缓存与思考不重复相加；精确值在 tooltip 里', () => {
     const markup = renderToStaticMarkup(<UsageMetrics totals={fixtureTotals({ reasoningTokens: '300' })} capabilities={caps} empty={false} />)
     expect(text(markup)).toContain('1.1万')
@@ -70,6 +96,32 @@ describe('UsageMetrics', () => {
 })
 
 describe('UsageFreshness', () => {
+  it('采集关闭时展示原因，仍保留历史数据的查询时间', () => {
+    const t = text(renderToStaticMarkup(<UsageFreshness overview={fixtureOverview({ sourceKind: 'local_platform', storageStatus: 'degraded', coverageMessage: '本机采集已关闭，历史记录仍可查询' })} refreshedAt={null} />))
+    expect(t).toContain('本机采集已关闭，历史记录仍可查询')
+    expect(t).toContain('2026-11-10 11:59:30')
+  })
+
+  it('展示采集起点、存储降级和具体缺口，不把已知起点当作覆盖完整', () => {
+    const t = text(renderToStaticMarkup(<UsageFreshness overview={fixtureOverview({
+      sourceKind: 'local_platform', collectionStartedAt: '2026-11-09T00:00:00+08:00',
+      coverageStart: '2026-11-09T00:00:00+08:00', coverageStatus: 'gap', storageStatus: 'degraded',
+      coverageGaps: [{ startAt: '2026-11-10T01:00:00+08:00', endAt: '2026-11-10T02:00:00+08:00' }],
+    })} refreshedAt={null} />))
+    expect(t).toContain('开始采集于 2026-11-09 00:00')
+    expect(t).toContain('存储降级')
+    expect(t).toContain('采集缺口')
+    expect(t).toContain('2026-11-10 01:00 — 2026-11-10 02:00')
+    expect(t).not.toContain('覆盖完整')
+  })
+
+  it('缺失的存储和采集字段保持未知', () => {
+    const t = text(renderToStaticMarkup(<UsageFreshness overview={fixtureOverview({ sourceKind: 'local_platform' })} refreshedAt={null} />))
+    expect(t).toContain('存储状态未知')
+    expect(t).toContain('采集起点未知')
+    expect(t).toContain('覆盖范围未知')
+  })
+
   it('副本延迟未知如实说明；dataAsOf 是服务端读取时刻，不是本机刷新时刻', () => {
     const t = text(renderToStaticMarkup(<UsageFreshness overview={fixtureOverview()} refreshedAt={new Date('2026-11-10T04:05:00Z')} />))
     expect(t).toContain('副本延迟未知')

@@ -232,6 +232,18 @@ export const COVERAGE_LABELS: Record<string, string> = {
   none: '暂无可统计记录',
 }
 
+export function tokenSampleLabel(sampleCount: string | undefined, tokenRequestCount: string): string {
+  return parseCount(sampleCount) === null ? '样本未知' : `样本 ${formatExact(sampleCount)}/${formatExact(tokenRequestCount)} 次`
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  pending: '处理中', succeeded: '成功', failed: '失败', cancelled: '已取消', unknown: '未知', save_failed: '保存失败',
+}
+
+export function requestStatusLabel(status: string | undefined): string {
+  return STATUS_LABELS[status ?? ''] ?? '未知'
+}
+
 // ---- 失败分类 ----------------------------------------------------------------------
 
 export type UsageFailureKind =

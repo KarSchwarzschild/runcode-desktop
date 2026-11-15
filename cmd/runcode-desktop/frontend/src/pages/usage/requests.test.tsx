@@ -17,6 +17,15 @@ function render(over: Partial<Parameters<typeof UsageRequests>[0]> = {}) {
 }
 
 describe('UsageRequests', () => {
+  it('启用状态列后展示显式状态，历史缺失字段仍为未知', () => {
+    const page = fixtureRequests({ items: [fixtureRow({ id: 'known', status: 'save_failed' }), fixtureRow({ id: 'legacy' })] })
+    const t = text(render({ page, statusColumn: true }))
+    expect(t).toContain('状态')
+    expect(t).toContain('保存失败')
+    expect(t).toContain('未知')
+    expect(t).not.toContain('未提交')
+  })
+
   it('默认列与时长文案：总耗时不冒充首字时间', () => {
     const t = text(render())
     for (const col of ['时间（入账）', '模型', '输入 Token', '输出 Token', '缓存命中', '未命中输入', '总耗时']) expect(t).toContain(col)

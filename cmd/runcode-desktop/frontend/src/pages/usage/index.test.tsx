@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { PassportStatus } from '@/core/bridge'
 import { UsagePage } from './index'
 import { mergeUsageTenants, pickInitialTenant } from './tenant'
-import { fixtureOverview, fixtureRequests } from './fixtures'
+import { fixtureOverview, fixtureRequests, fixtureRow } from './fixtures'
 
 const native = vi.hoisted(() => ({
   overview: vi.fn(),
@@ -70,6 +70,20 @@ describe('pickInitialTenant', () => {
 })
 
 describe('UsagePage', () => {
+  it('总览契约连接到采集说明、状态分布与请求状态列', async () => {
+    native.overview.mockResolvedValue(fixtureOverview({
+      sourceKind: 'local_platform', collectionStartedAt: '2026-11-09T00:00:00+08:00', storageStatus: 'unavailable',
+      capabilities: { ...fixtureOverview().capabilities, requestStatus: true },
+      statusCounts: { pending: '0', succeeded: '0', failed: '0', cancelled: '0', unknown: '0', saveFailed: '1' },
+    }))
+    native.requests.mockResolvedValue(fixtureRequests({ items: [fixtureRow({ status: 'save_failed' })] }))
+    await render(user)
+    expect(host.textContent).toContain('开始采集于 2026-11-09 00:00')
+    expect(host.textContent).toContain('存储不可用')
+    expect(host.querySelector('[aria-label="请求状态分布"]')?.textContent).toContain('保存失败 1')
+    expect(host.querySelector('[aria-label="明细"] tbody')?.textContent).toContain('保存失败')
+  })
+
   it('未登录：显示登录说明与前往账号设置，不发任何统计请求', async () => {
     const onOpenSettings = vi.fn()
     await render({ loggedIn: false }, onOpenSettings)
@@ -89,7 +103,7 @@ describe('UsagePage', () => {
     expect(t).toContain('Asia/Shanghai')
     expect(t).toContain('本机采集的平台调用')
     expect(t).not.toContain('关闭客户端期间可能有缺口')
-    expect(t).not.toContain('数据读取于')
+    expect(t).toContain('数据读取于')
     expect(t).not.toContain('含起点、不含终点')
     expect(t).toContain('1.1万')
     expect(native.overview).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-a', range: 'today' }))

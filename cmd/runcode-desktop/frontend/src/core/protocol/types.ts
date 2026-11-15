@@ -908,6 +908,7 @@ export interface RecordingInfo {
 // Mirrors protocol.ResolvedUsageQuery. ResolvedUsageQuery 是总览返回范围之后，日志与分组共用的查询条件；翻页沿用它， 不再各自解析相对时间。
 export interface ResolvedUsageQuery {
   tenantId: string;
+  snapshotSeq?: string;
   effectiveRange: UsageEffectiveRange;
   providerId?: string;
   model?: string;
@@ -1330,7 +1331,7 @@ export interface UsageBucket {
   coverage: string;
 }
 
-// Mirrors protocol.UsageCapabilities. UsageCapabilities 声明本次数据能可靠支持哪些维度；requestStatus 与 ttft 首期恒为 false（日志里没有这些字段）。
+// Mirrors protocol.UsageCapabilities. UsageCapabilities 声明本次数据能可靠支持哪些维度；本机记录支持请求状态，TTFT 未采集。
 export interface UsageCapabilities {
   providerBreakdown: boolean;
   cacheMetrics: boolean;
@@ -1342,6 +1343,7 @@ export interface UsageCapabilities {
 export interface UsageCoverageGap {
   startAt: string;
   endAt: string;
+  reason?: string;
 }
 
 // Mirrors protocol.UsageDimensionRow. UsageDimensionRow 是一个模型或供应商的汇总；供应商无法确定时归入 unknown 分组。
@@ -1382,6 +1384,10 @@ export interface UsageEffectiveRange {
 // Mirrors protocol.UsageOverview. UsageOverview 是同一次本机快照读取到的汇总、趋势与质量。dataAsOf 是本机读取时刻； local_platform 来源不使用 replicaLagSeconds。
 export interface UsageOverview {
   scopeId: string;
+  snapshotSeq?: string;
+  collectionStartedAt?: string;
+  storageStatus?: string;
+  statusCounts?: UsageStatusCounts;
   queryKey: string;
   effectiveRange: UsageEffectiveRange;
   dataAsOf: string;
@@ -1392,6 +1398,7 @@ export interface UsageOverview {
   coverageStart: string | null;
   coverageGaps: UsageCoverageGap[] | null;
   coverageStatus: string;
+  coverageMessage?: string;
   sourceKind?: string;
   replicaLagSeconds: number | null;
   consistency?: string;
@@ -1423,6 +1430,7 @@ export interface UsageQuery {
 // Mirrors protocol.UsageRequestRow. UsageRequestRow 是一条已入账的消费记录，只有计量与口径，没有正文或成本。 meterKind 不是 tokens 时 Token 各列为 null，用量见 usageQuantity + usageUnit。
 export interface UsageRequestRow {
   id: string;
+  status?: string;
   recordedAt: string;
   startedAt: string | null;
   model: string;
@@ -1465,10 +1473,23 @@ export interface UsageRowQuality {
   reasoningSource: string;
 }
 
-// Mirrors protocol.UsageTotals. UsageTotals 是一组记录的聚合。totalTokens = inputTokens + outputTokens（缓存是输入 子集、思考是输出子集，都不再相加）；缓存三项只统计可信缓存子集，命中率是 SUM(命中)/SUM(可信输入)。
+// Mirrors protocol.UsageStatusCounts. UsageStatusCounts 保留在途与五种终态的独立计数，pending 不进入已完成请求数。
+export interface UsageStatusCounts {
+  pending: string;
+  succeeded: string;
+  failed: string;
+  cancelled: string;
+  unknown: string;
+  saveFailed: string;
+}
+
+// Mirrors protocol.UsageTotals. UsageTotals 是一组记录的聚合。tokenRequestCount 是全部已结束的 LLM/识图调用数， sampleCount 是其中有可信数值的样本数；totalTokens 汇总所有已知输入与输出。 totalTokens = inputTokens + outputTokens（缓存是输入 子集、思考是输出子集，都不再相加）；缓存三项只统计可信缓存子集，命中率是 SUM(命中)/SUM(可信输入)。
 export interface UsageTotals {
   requestCount: string;
   tokenRequestCount: string;
+  inputTokenSampleCount?: string;
+  outputTokenSampleCount?: string;
+  totalTokenSampleCount?: string;
   inputTokens: string | null;
   outputTokens: string | null;
   totalTokens: string | null;

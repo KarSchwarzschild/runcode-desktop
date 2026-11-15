@@ -3,7 +3,7 @@
 // 模型、时间、用量与口径，没有正文、成本或密钥。
 import { Fragment, useState } from 'react'
 import type { UsageRequestRow, UsageRequestsPage } from '@/core/bridge'
-import { TOKENS_METER, formatDurationMs, formatExact, formatShanghai, sourceLabel } from '@/core/usage'
+import { TOKENS_METER, formatDurationMs, formatExact, formatShanghai, requestStatusLabel, sourceLabel } from '@/core/usage'
 import { BTN } from '@/ui/tokens'
 import type { UsagePageSize } from './use-usage'
 
@@ -43,11 +43,12 @@ function Detail({ row }: { row: UsageRequestRow }) {
   )
 }
 
-export function UsageRequests({ page, pageIndex, pageSize, providerColumn, loading, onPrev, onNext, onPageSize }: {
+export function UsageRequests({ page, pageIndex, pageSize, providerColumn, statusColumn = false, loading, onPrev, onNext, onPageSize }: {
   page: UsageRequestsPage
   pageIndex: number
   pageSize: UsagePageSize
   providerColumn: boolean
+  statusColumn?: boolean
   loading: boolean
   onPrev: () => void
   onNext: () => void
@@ -55,7 +56,7 @@ export function UsageRequests({ page, pageIndex, pageSize, providerColumn, loadi
 }) {
   const [expanded, setExpanded] = useState('')
   const items = page.items ?? []
-  const columns = providerColumn ? 9 : 8
+  const columns = 8 + Number(providerColumn) + Number(statusColumn)
   return (
     <div className="flex flex-col gap-2">
       <div className="overflow-x-auto border border-line2 rounded-card bg-surface">
@@ -65,6 +66,7 @@ export function UsageRequests({ page, pageIndex, pageSize, providerColumn, loadi
               <th className={TH}>时间（入账）</th>
               <th className={TH}>模型</th>
               {providerColumn && <th className={TH}>供应商</th>}
+              {statusColumn && <th className={TH}>状态</th>}
               <th className={`${TH} text-right`}>输入 Token</th>
               <th className={`${TH} text-right`}>输出 Token</th>
               <th className={`${TH} text-right`}>缓存命中</th>
@@ -83,6 +85,7 @@ export function UsageRequests({ page, pageIndex, pageSize, providerColumn, loadi
                   <td className={TD}>{formatShanghai(row.recordedAt, true)}</td>
                   <td className="py-2 px-3 max-w-[240px]"><span className="block truncate" title={row.model}>{row.model || '未记录'}</span></td>
                   {providerColumn && <td className={TD}>{row.providerName ?? row.providerId ?? '未记录'}</td>}
+                  {statusColumn && <td className={TD}>{requestStatusLabel(row.status)}</td>}
                   <td className={`${TD} text-right`}>{tokenCell(row, row.inputTokens)}</td>
                   <td className={`${TD} text-right`}>{tokenCell(row, row.outputTokens)}</td>
                   <td className={`${TD} text-right`}>{tokenCell(row, row.cacheHitTokens)}</td>

@@ -57,6 +57,7 @@ type UsageEffectiveRange struct {
 // 不再各自解析相对时间。
 type ResolvedUsageQuery struct {
 	TenantID       string              `json:"tenantId"`
+	SnapshotSeq    string              `json:"snapshotSeq,omitempty"`
 	EffectiveRange UsageEffectiveRange `json:"effectiveRange"`
 	ProviderID     string              `json:"providerId,omitempty"`
 	Model          string              `json:"model,omitempty"`
@@ -90,12 +91,17 @@ type UsageQuality struct {
 	InvalidRecordCount          string `json:"invalidRecordCount"`
 }
 
-// UsageTotals 是一组记录的聚合。totalTokens = inputTokens + outputTokens（缓存是输入
+// UsageTotals 是一组记录的聚合。tokenRequestCount 是全部已结束的 LLM/识图调用数，
+// sampleCount 是其中有可信数值的样本数；totalTokens 汇总所有已知输入与输出。
+// totalTokens = inputTokens + outputTokens（缓存是输入
 // 子集、思考是输出子集，都不再相加）；缓存三项只统计可信缓存子集，命中率是
 // SUM(命中)/SUM(可信输入)。
 type UsageTotals struct {
 	RequestCount              string       `json:"requestCount"`
 	TokenRequestCount         string       `json:"tokenRequestCount"`
+	InputTokenSampleCount     string       `json:"inputTokenSampleCount,omitempty"`
+	OutputTokenSampleCount    string       `json:"outputTokenSampleCount,omitempty"`
+	TotalTokenSampleCount     string       `json:"totalTokenSampleCount,omitempty"`
 	InputTokens               *string      `json:"inputTokens"`
 	OutputTokens              *string      `json:"outputTokens"`
 	TotalTokens               *string      `json:"totalTokens"`
@@ -125,8 +131,7 @@ type UsageBucket struct {
 	Coverage                 string  `json:"coverage"`
 }
 
-// UsageCapabilities 声明本次数据能可靠支持哪些维度；requestStatus 与 ttft 首期恒为
-// false（日志里没有这些字段）。
+// UsageCapabilities 声明本次数据能可靠支持哪些维度；本机记录支持请求状态，TTFT 未采集。
 type UsageCapabilities struct {
 	ProviderBreakdown bool `json:"providerBreakdown"`
 	CacheMetrics      bool `json:"cacheMetrics"`
@@ -138,22 +143,38 @@ type UsageCapabilities struct {
 type UsageCoverageGap struct {
 	StartAt string `json:"startAt"`
 	EndAt   string `json:"endAt"`
+	Reason  string `json:"reason,omitempty"`
+}
+
+// UsageStatusCounts 保留在途与五种终态的独立计数，pending 不进入已完成请求数。
+type UsageStatusCounts struct {
+	Pending    string `json:"pending"`
+	Succeeded  string `json:"succeeded"`
+	Failed     string `json:"failed"`
+	Cancelled  string `json:"cancelled"`
+	Unknown    string `json:"unknown"`
+	SaveFailed string `json:"saveFailed"`
 }
 
 // UsageOverview 是同一次本机快照读取到的汇总、趋势与质量。dataAsOf 是本机读取时刻；
 // local_platform 来源不使用 replicaLagSeconds。
 type UsageOverview struct {
-	ScopeID        string              `json:"scopeId"`
-	QueryKey       string              `json:"queryKey"`
-	EffectiveRange UsageEffectiveRange `json:"effectiveRange"`
-	DataAsOf       string              `json:"dataAsOf"`
-	Summary        UsageTotals         `json:"summary"`
-	Trend          []UsageBucket       `json:"trend"`
-	Capabilities   UsageCapabilities   `json:"capabilities"`
-	Empty          bool                `json:"empty"`
-	CoverageStart  *string             `json:"coverageStart"`
-	CoverageGaps   []UsageCoverageGap  `json:"coverageGaps"`
-	CoverageStatus string              `json:"coverageStatus"`
+	ScopeID             string              `json:"scopeId"`
+	SnapshotSeq         string              `json:"snapshotSeq,omitempty"`
+	CollectionStartedAt *string             `json:"collectionStartedAt,omitempty"`
+	StorageStatus       string              `json:"storageStatus,omitempty"`
+	StatusCounts        *UsageStatusCounts  `json:"statusCounts,omitempty"`
+	QueryKey            string              `json:"queryKey"`
+	EffectiveRange      UsageEffectiveRange `json:"effectiveRange"`
+	DataAsOf            string              `json:"dataAsOf"`
+	Summary             UsageTotals         `json:"summary"`
+	Trend               []UsageBucket       `json:"trend"`
+	Capabilities        UsageCapabilities   `json:"capabilities"`
+	Empty               bool                `json:"empty"`
+	CoverageStart       *string             `json:"coverageStart"`
+	CoverageGaps        []UsageCoverageGap  `json:"coverageGaps"`
+	CoverageStatus      string              `json:"coverageStatus"`
+	CoverageMessage     string              `json:"coverageMessage,omitempty"`
 	// SourceKind 首期固定为 local_platform；兼容字段仍允许其他只读来源。
 	SourceKind        string `json:"sourceKind,omitempty"`
 	ReplicaLagSeconds *int64 `json:"replicaLagSeconds"`
@@ -173,6 +194,7 @@ type UsageRowQuality struct {
 // meterKind 不是 tokens 时 Token 各列为 null，用量见 usageQuantity + usageUnit。
 type UsageRequestRow struct {
 	ID              string          `json:"id"`
+	Status          string          `json:"status,omitempty"`
 	RecordedAt      string          `json:"recordedAt"`
 	StartedAt       *string         `json:"startedAt"`
 	Model           string          `json:"model"`

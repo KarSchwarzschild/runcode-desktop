@@ -2,9 +2,9 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/wt68/runcode/internal/localusage"
@@ -35,7 +35,7 @@ func (a *App) localUsageIdentity() (string, error) {
 	}
 	issuer, sub := a.tokens.identityParts()
 	if issuer == "" || sub == "" {
-		return "", usageUnavailable("")
+		return "", usageError(protocol.ErrCodeUsageUnavailable, "当前登录凭据缺少可验证的账号身份，无法归属本机用量；请重新登录通行证")
 	}
 	return digestPair(issuer, sub), nil
 }
@@ -79,13 +79,14 @@ func localUsageRange(q protocol.UsageQuery, now time.Time) (protocol.UsageEffect
 	case "last24h":
 		start = n.Add(-24 * time.Hour)
 	case "last7d":
-		start = n.AddDate(0, 0, -7)
+		start = time.Date(n.Year(), n.Month(), n.Day()-6, 0, 0, 0, 0, loc)
 	case "last14d":
-		start = n.AddDate(0, 0, -14)
+		start = time.Date(n.Year(), n.Month(), n.Day()-13, 0, 0, 0, 0, loc)
 	case "last30d":
-		start = n.AddDate(0, 0, -30)
+		start = time.Date(n.Year(), n.Month(), n.Day()-29, 0, 0, 0, 0, loc)
 	case "all":
-		start = time.Unix(0, 0).In(loc)
+		// 未开始采集时使用当天范围；已有 scope 的起点在读取元数据后固定。
+		start = time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, loc)
 	case "custom":
 		var ok bool
 		if start, ok = localUsageTime(q.StartAt); !ok {
@@ -134,101 +135,43 @@ func (a *App) localUsageFilter(tenant, model string, r usageInstantRange) (local
 	return localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: r.start, EndAt: r.end, Model: model}, nil
 }
 
-func localUsageTotals(calls []localusage.CallRecord) protocol.UsageTotals {
-	var input, output, total, cacheHit, cacheMiss, cacheEligible int64
-	var inputN, outputN, totalN, tokenRequests, tokenCalls, cacheKnown, cacheEligibleRequests, durations, requestCount int64
-	var durationSum int64
-	for _, c := range calls {
-		// 在途 start（尚无 finish）不进请求数：常见于回合末自动标题未完成时刷新用量页，
-		// 否则会把一条用户消息显示成两次，并挡住消耗 Token。
-		if c.Status == localusage.StatusPending {
-			continue
+// localUsageTotals maps SQL aggregates without dropping partially known tokens.
+func localUsageTotals(a localusage.AggregateTotals) protocol.UsageTotals {
+	value := func(sum, samples int64) *string {
+		if samples == 0 {
+			return nil
 		}
-		requestCount++
-		isTokenCall := c.CallKind == localusage.CallKindLLM || c.CallKind == localusage.CallKindVision
-		if isTokenCall {
-			tokenCalls++
-		}
-		if c.InputTokensKnown && c.InputTokens != nil {
-			input += *c.InputTokens
-			inputN++
-		}
-		if c.OutputTokensKnown && c.OutputTokens != nil {
-			output += *c.OutputTokens
-			outputN++
-		}
-		if isTokenCall && c.InputTokensKnown && c.OutputTokensKnown && c.InputTokens != nil && c.OutputTokens != nil {
-			total += *c.InputTokens + *c.OutputTokens
-			totalN++
-			tokenRequests++
-		}
-		if isTokenCall && (c.InputTokensKnown || c.OutputTokensKnown) {
-			// tokenRequestCount 表示至少有一项可信 Token 的调用；totalTokens
-			// 仍要求同一调用的输入、输出都可信，避免把未知当成 0。
-			if !c.InputTokensKnown || !c.OutputTokensKnown {
-				tokenRequests++
-			}
-		}
-		if isTokenCall && c.CacheHitTokensKnown && c.CacheMissTokensKnown && c.CacheHitTokens != nil && c.CacheMissTokens != nil {
-			cacheHit += *c.CacheHitTokens
-			cacheMiss += *c.CacheMissTokens
-			cacheEligible += *c.CacheHitTokens + *c.CacheMissTokens
-			cacheKnown++
-			cacheEligibleRequests++
-		}
-		if c.DurationMs != nil {
-			durations++
-			durationSum += *c.DurationMs
-		}
+		v := strconv.FormatInt(sum, 10)
+		return &v
 	}
 	coverage := "none"
-	if totalN == tokenCalls && tokenCalls > 0 {
+	if a.TokenCallCount > 0 && a.CompleteTokenSampleCount == a.TokenCallCount {
 		coverage = "complete"
-	} else if totalN > 0 {
+	} else if a.TokenSampleCount > 0 {
 		coverage = "partial"
 	}
-	var inPtr, outPtr, totalPtr *string
-	if inputN > 0 {
-		v := strconv.FormatInt(input, 10)
-		inPtr = &v
-	}
-	if outputN > 0 {
-		v := strconv.FormatInt(output, 10)
-		outPtr = &v
-	}
-	// 有完整 I+O 的调用就展示其合计；未计量的终态调用只把覆盖标成 partial，
-	// 不再因为「还有一行未知」把整卡抹成 —。
-	if totalN > 0 {
-		v := strconv.FormatInt(total, 10)
-		totalPtr = &v
-	}
-	var avg *float64
-	if durations > 0 {
-		v := float64(durationSum) / float64(durations)
-		avg = &v
-	}
-	var cacheHitPtr, cacheMissPtr, cacheEligiblePtr *string
-	var cacheRate *float64
-	if cacheKnown > 0 {
-		h, m, e := strconv.FormatInt(cacheHit, 10), strconv.FormatInt(cacheMiss, 10), strconv.FormatInt(cacheEligible, 10)
-		cacheHitPtr, cacheMissPtr, cacheEligiblePtr = &h, &m, &e
-		if cacheEligible > 0 {
-			v := float64(cacheHit) / float64(cacheEligible)
-			cacheRate = &v
-		}
-	}
 	cacheCoverage := "none"
-	if cacheKnown > 0 && cacheKnown == tokenCalls {
+	if a.TokenCallCount > 0 && a.CacheSampleCount == a.TokenCallCount {
 		cacheCoverage = "complete"
-	} else if cacheKnown > 0 {
+	} else if a.CacheSampleCount > 0 {
 		cacheCoverage = "partial"
 	}
+	var avg, rate *float64
+	if a.DurationSampleCount > 0 {
+		v := float64(a.DurationSumMs) / float64(a.DurationSampleCount)
+		avg = &v
+	}
+	if a.CacheSampleCount > 0 && a.CacheEligibleInputTokens > 0 {
+		v := float64(a.CacheHitTokens) / float64(a.CacheEligibleInputTokens)
+		rate = &v
+	}
 	return protocol.UsageTotals{
-		RequestCount: strconv.FormatInt(requestCount, 10), TokenRequestCount: strconv.FormatInt(tokenRequests, 10),
-		InputTokens: inPtr, OutputTokens: outPtr, TotalTokens: totalPtr,
-		CacheHitTokens: cacheHitPtr, CacheMissTokens: cacheMissPtr, CacheEligibleInputTokens: cacheEligiblePtr,
-		CacheHitRate: cacheRate, CacheKnownRequestCount: strconv.FormatInt(cacheKnown, 10), CacheEligibleRequestCount: strconv.FormatInt(cacheEligibleRequests, 10),
-		ReasoningTokens: nil, DurationSampleCount: strconv.FormatInt(durations, 10), AverageDurationMs: avg,
+		RequestCount: strconv.FormatInt(a.RequestCount, 10), TokenRequestCount: strconv.FormatInt(a.TokenCallCount, 10),
+		InputTokenSampleCount: strconv.FormatInt(a.InputSampleCount, 10), OutputTokenSampleCount: strconv.FormatInt(a.OutputSampleCount, 10), TotalTokenSampleCount: strconv.FormatInt(a.TokenSampleCount, 10),
+		InputTokens: value(a.InputTokens, a.InputSampleCount), OutputTokens: value(a.OutputTokens, a.OutputSampleCount), TotalTokens: value(a.TotalTokens, a.TokenSampleCount),
+		CacheHitTokens: value(a.CacheHitTokens, a.CacheSampleCount), CacheMissTokens: value(a.CacheMissTokens, a.CacheSampleCount), CacheEligibleInputTokens: value(a.CacheEligibleInputTokens, a.CacheSampleCount),
+		CacheHitRate: rate, CacheKnownRequestCount: strconv.FormatInt(a.CacheSampleCount, 10), CacheEligibleRequestCount: strconv.FormatInt(a.TokenCallCount, 10),
+		DurationSampleCount: strconv.FormatInt(a.DurationSampleCount, 10), AverageDurationMs: avg,
 		Quality: protocol.UsageQuality{TokenCoverage: coverage, CacheCoverage: cacheCoverage, InvalidRecordCount: "0"},
 	}
 }
@@ -272,114 +215,162 @@ func localUsageNextBoundary(aligned time.Time, g string) time.Time {
 	}
 }
 
-func localUsageBucketFromCalls(start, end time.Time, calls []localusage.CallRecord) protocol.UsageBucket {
-	totals := localUsageTotals(calls)
-	b := protocol.UsageBucket{
-		StartAt: start.UTC().Format(time.RFC3339Nano), EndAt: end.UTC().Format(time.RFC3339Nano),
-		RequestCount: totals.RequestCount, InputTokens: totals.InputTokens, OutputTokens: totals.OutputTokens,
-		TotalTokens: totals.TotalTokens, CacheHitTokens: totals.CacheHitTokens,
-		CacheEligibleInputTokens: totals.CacheEligibleInputTokens, Coverage: "known",
-	}
-	if len(calls) == 0 {
-		// 本机覆盖已知：空桶是真 0 请求；Token 无样本保持 null，不当成 "0"。
-		b.RequestCount = "0"
-	}
-	return b
-}
-
-// localUsageTrend 按 startedAt 归入半开区间 [bucketStart, bucketEnd)；首尾可被查询范围裁剪。
-func localUsageTrend(start, end time.Time, calls []localusage.CallRecord) ([]protocol.UsageBucket, error) {
+// localUsageBoundaries fixes calendar buckets before SQLite aggregates them.
+func localUsageBoundaries(start, end time.Time) ([]time.Time, error) {
 	if !start.Before(end) {
 		return nil, usageError(protocol.ErrCodeUsageInvalidRange, "开始时间必须早于结束时间")
 	}
 	g := localUsageGranularity(start, end)
-	cur := localUsageAlignFloor(start, g)
-	out := make([]protocol.UsageBucket, 0, 32)
-	for cur.Before(end) {
+	out := []time.Time{start}
+	for cur := localUsageAlignFloor(start, g); cur.Before(end); {
 		next := localUsageNextBoundary(cur, g)
-		bStart, bEnd := cur, next
-		if bStart.Before(start) {
-			bStart = start
+		if next.After(end) {
+			next = end
 		}
-		if bEnd.After(end) {
-			bEnd = end
-		}
-		if bStart.Before(bEnd) {
-			var group []localusage.CallRecord
-			for _, c := range calls {
-				at := c.StartedAt
-				if !at.Before(bStart) && at.Before(bEnd) {
-					group = append(group, c)
-				}
-			}
-			out = append(out, localUsageBucketFromCalls(bStart, bEnd, group))
-			if len(out) > usageMaxTrendBuckets {
-				return nil, usageError(protocol.ErrCodeUsageInvalidRange, "趋势分桶超过 600 个，请缩小时间范围")
-			}
+		out = append(out, next)
+		if len(out) > usageMaxTrendBuckets+1 {
+			return nil, usageError(protocol.ErrCodeUsageInvalidRange, "趋势分桶超过 600 个，请缩小时间范围")
 		}
 		cur = next
 	}
 	return out, nil
 }
 
-func localUsageEarliestStart(calls []localusage.CallRecord) (time.Time, bool) {
-	var earliest time.Time
-	ok := false
-	for _, c := range calls {
-		if !ok || c.StartedAt.Before(earliest) {
-			earliest = c.StartedAt
-			ok = true
-		}
+func localUsageStatusCounts(s localusage.StatusTotals) *protocol.UsageStatusCounts {
+	return &protocol.UsageStatusCounts{
+		Pending: strconv.FormatInt(s.Pending, 10), Succeeded: strconv.FormatInt(s.Succeeded, 10),
+		Failed: strconv.FormatInt(s.Failed, 10), Cancelled: strconv.FormatInt(s.Cancelled, 10),
+		Unknown: strconv.FormatInt(s.Unknown, 10), SaveFailed: strconv.FormatInt(s.SaveFailed, 10),
 	}
-	return earliest, ok
+}
+
+func localUsageQueryError(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return usageError(protocol.ErrCodeUsageTimeout, "本机用量查询超时，请缩小时间范围后重试")
+	}
+	if errors.Is(err, localusage.ErrInvalidCursor) || errors.Is(err, localusage.ErrInvalidSnapshot) {
+		return usageError(protocol.ErrCodeUsageInvalidCursor, "分页已失效，请回到第一页重新查看")
+	}
+	return usageUnavailable("")
+}
+
+func pinLocalUsageSnapshot(f *localusage.QueryFilter, raw string) error {
+	if raw == "" {
+		return nil
+	}
+	seq, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || seq < 0 || strconv.FormatInt(seq, 10) != raw {
+		return usageError(protocol.ErrCodeUsageInvalidCursor, "查询快照无效，请刷新总览后重试")
+	}
+	f.SnapshotSeq, f.SnapshotPinned = seq, true
+	return nil
 }
 
 func (a *App) localUsageOverview(q protocol.UsageQuery) (protocol.UsageOverview, error) {
 	if q.ProviderID != "" {
 		return protocol.UsageOverview{}, usageError(protocol.ErrCodeUsageUnsupported, "本机记录暂不提供供应商筛选")
 	}
-	r, ir, err := localUsageRange(q, usageNow())
+	now := usageNow()
+	r, ir, err := localUsageRange(q, now)
 	if err != nil {
 		return protocol.UsageOverview{}, err
 	}
-	f, err := a.localUsageFilter(q.TenantID, q.Model, ir)
+	if q.Model != "" && !validUsageText(q.Model, usageMaxTextLen) {
+		return protocol.UsageOverview{}, usageInvalidArgument("模型筛选条件无效")
+	}
+	scope, err := a.localUsageScope(q.TenantID)
 	if err != nil {
 		return protocol.UsageOverview{}, err
 	}
-	snap, err := a.usageStore.QuerySnapshot(context.Background(), f)
-	if err != nil {
-		return protocol.UsageOverview{}, usageUnavailable("")
-	}
-	// 「全部」从最早调用起算，避免自 Unix 0 按月分桶超过 600。
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	coverageStart := ir.start
 	if q.Range == "all" {
-		if earliest, ok := localUsageEarliestStart(snap.Calls); ok && earliest.After(ir.start) {
-			ir.start = earliest.UTC()
-			r.StartAt = ir.start.Format(time.RFC3339Nano)
-		} else if len(snap.Calls) == 0 {
-			return protocol.UsageOverview{
-				ScopeID: f.ScopeID, QueryKey: fmt.Sprintf("local:%d", snap.Seq), EffectiveRange: r,
-				DataAsOf: usageNow().UTC().Format(time.RFC3339Nano), Summary: localUsageTotals(nil),
-				Trend: []protocol.UsageBucket{}, Capabilities: protocol.UsageCapabilities{},
-				Empty: true, CoverageStatus: "known", SourceKind: localusage.SourceKindLocalPlatform,
-				Consistency: "local_snapshot", MappingVersion: localUsageMappingVersion,
-			}, nil
-		}
+		coverageStart = time.Time{}
 	}
-	totals := localUsageTotals(snap.Calls)
-	trend, err := localUsageTrend(ir.start, ir.end, snap.Calls)
+	coverage, err := a.usageStore.QueryCoverage(ctx, scope, coverageStart, ir.end)
+	if err != nil {
+		return protocol.UsageOverview{}, localUsageQueryError(err)
+	}
+	if q.Range == "all" && coverage.CollectionStartedAt != nil && coverage.CollectionStartedAt.Before(ir.end) {
+		ir.start = coverage.CollectionStartedAt.UTC()
+		r.StartAt = ir.start.Format(time.RFC3339Nano)
+	}
+	boundaries, err := localUsageBoundaries(ir.start, ir.end)
 	if err != nil {
 		return protocol.UsageOverview{}, err
 	}
+	f := localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: ir.start, EndAt: ir.end, Model: q.Model}
+	snap, err := a.usageStore.QueryOverview(ctx, f, boundaries)
+	if err != nil {
+		return protocol.UsageOverview{}, localUsageQueryError(err)
+	}
+	status := "known"
+	var collection *string
+	if coverage.CollectionStartedAt != nil {
+		s := coverage.CollectionStartedAt.UTC().Format(time.RFC3339Nano)
+		collection = &s
+	}
+	if coverage.CollectionStartedAt == nil || ir.start.Before(*coverage.CollectionStartedAt) {
+		status = "unknown"
+	}
+	gaps := make([]protocol.UsageCoverageGap, 0, len(coverage.Gaps))
+	for _, gap := range coverage.Gaps {
+		if !gap.StartAt.Before(ir.end) || !gap.EndAt.After(ir.start) {
+			continue
+		}
+		start, end := gap.StartAt, gap.EndAt
+		if start.Before(ir.start) {
+			start = ir.start
+		}
+		if end.After(ir.end) {
+			end = ir.end
+		}
+		gaps = append(gaps, protocol.UsageCoverageGap{StartAt: start.UTC().Format(time.RFC3339Nano), EndAt: end.UTC().Format(time.RFC3339Nano), Reason: gap.Reason})
+	}
+	if len(gaps) > 0 {
+		status = "gap"
+	}
+	message := ""
+	if !localUsageEnvEnabled() {
+		coverage.StorageStatus, status = "degraded", "unknown"
+		message = "本机采集已关闭，历史记录仍可查询"
+	}
+	trend := make([]protocol.UsageBucket, 0, len(snap.Buckets))
+	for _, group := range snap.Buckets {
+		totals := localUsageTotals(group.Totals)
+		bucketStatus := "known"
+		// A bucket with observed calls can show known samples even when its
+		// earlier portion predates collection; empty earlier buckets stay unknown.
+		if (coverage.CollectionStartedAt == nil || group.StartAt.Before(*coverage.CollectionStartedAt)) && group.Totals.RequestCount == 0 {
+			bucketStatus = "unknown"
+		}
+		if !localUsageEnvEnabled() {
+			bucketStatus = "unknown"
+		}
+		for _, gap := range coverage.Gaps {
+			if gap.StartAt.Before(group.EndAt) && gap.EndAt.After(group.StartAt) {
+				bucketStatus = "gap"
+				break
+			}
+		}
+		trend = append(trend, protocol.UsageBucket{
+			StartAt: group.StartAt.UTC().Format(time.RFC3339Nano), EndAt: group.EndAt.UTC().Format(time.RFC3339Nano),
+			RequestCount: totals.RequestCount, InputTokens: totals.InputTokens, OutputTokens: totals.OutputTokens, TotalTokens: totals.TotalTokens,
+			CacheHitTokens: totals.CacheHitTokens, CacheEligibleInputTokens: totals.CacheEligibleInputTokens, Coverage: bucketStatus,
+		})
+	}
+	totals := localUsageTotals(snap.Totals)
 	return protocol.UsageOverview{
-		ScopeID: f.ScopeID, QueryKey: fmt.Sprintf("local:%d", snap.Seq), EffectiveRange: r,
-		DataAsOf: usageNow().UTC().Format(time.RFC3339Nano), Summary: totals,
-		Trend:        trend,
-		Capabilities: protocol.UsageCapabilities{ProviderBreakdown: false, CacheMetrics: totals.CacheKnownRequestCount != "0", RequestStatus: false, TTFT: false},
-		Empty:        len(snap.Calls) == 0, CoverageStatus: "known", SourceKind: localusage.SourceKindLocalPlatform,
+		ScopeID: f.ScopeID, SnapshotSeq: strconv.FormatInt(snap.Seq, 10), QueryKey: fmt.Sprintf("local:%d", snap.Seq), EffectiveRange: r,
+		CollectionStartedAt: collection, CoverageStart: collection, CoverageGaps: gaps, CoverageStatus: status, CoverageMessage: message, StorageStatus: coverage.StorageStatus,
+		StatusCounts: localUsageStatusCounts(snap.Totals.Statuses),
+		DataAsOf:     now.UTC().Format(time.RFC3339Nano), Summary: totals, Trend: trend,
+		Capabilities: protocol.UsageCapabilities{CacheMetrics: totals.CacheKnownRequestCount != "0", RequestStatus: true},
+		Empty:        snap.Totals.RequestCount == 0, SourceKind: localusage.SourceKindLocalPlatform,
 		Consistency: "local_snapshot", MappingVersion: localUsageMappingVersion,
 	}, nil
 }
-
 func localUsageRow(c localusage.CallRecord) protocol.UsageRequestRow {
 	started := c.StartedAt.UTC().Format(time.RFC3339Nano)
 	recorded := started
@@ -389,10 +380,18 @@ func localUsageRow(c localusage.CallRecord) protocol.UsageRequestRow {
 	row := protocol.UsageRequestRow{ID: c.CallID, RecordedAt: recorded, StartedAt: &started, Model: c.Model,
 		MeterKind: "calls", DurationMs: c.DurationMs,
 		Quality: protocol.UsageRowQuality{TokenSource: "unavailable", CacheSource: "unavailable", ReasoningSource: "unavailable"}}
+	switch c.Status {
+	case localusage.StatusPending, localusage.StatusSucceeded, localusage.StatusFailed, localusage.StatusCancelled, localusage.StatusSaveFailed:
+		row.Status = c.Status
+	default:
+		row.Status = localusage.StatusUnknown
+	}
 	switch c.CallKind {
 	case localusage.CallKindLLM, localusage.CallKindVision:
 		row.MeterKind = "tokens"
-		row.Quality.TokenSource = "reported"
+		if (c.InputTokensKnown && c.InputTokens != nil) || (c.OutputTokensKnown && c.OutputTokens != nil) {
+			row.Quality.TokenSource = "reported"
+		}
 		if c.CacheHitTokensKnown && c.CacheHitTokens != nil && c.CacheMissTokensKnown && c.CacheMissTokens != nil {
 			h, m := strconv.FormatInt(*c.CacheHitTokens, 10), strconv.FormatInt(*c.CacheMissTokens, 10)
 			row.CacheHitTokens, row.CacheMissTokens = &h, &m
@@ -433,12 +432,12 @@ func (a *App) localUsageRequests(q protocol.UsageRequestsQuery) (protocol.UsageR
 	if q.PageSize != 20 && q.PageSize != 50 && q.PageSize != 100 {
 		return protocol.UsageRequestsPage{}, usageInvalidArgument("每页条数只能是 20、50 或 100")
 	}
+	if err := pinLocalUsageSnapshot(&f, q.Query.SnapshotSeq); err != nil {
+		return protocol.UsageRequestsPage{}, err
+	}
 	page, err := a.usageStore.QueryPage(context.Background(), f, q.Cursor, q.PageSize)
 	if err != nil {
-		if q.Cursor != "" {
-			return protocol.UsageRequestsPage{}, usageError(protocol.ErrCodeUsageInvalidCursor, "分页已失效，请回到第一页重新查看")
-		}
-		return protocol.UsageRequestsPage{}, usageUnavailable("")
+		return protocol.UsageRequestsPage{}, localUsageQueryError(err)
 	}
 	items := make([]protocol.UsageRequestRow, 0, len(page.Calls))
 	for _, c := range page.Calls {
@@ -469,39 +468,17 @@ func (a *App) localUsageDimensions(q protocol.UsageDimensionsQuery) (protocol.Us
 	if q.Page < 1 || q.Page > usageMaxDimPage || (q.PageSize != 50 && q.PageSize != 100) || !validUsageText(q.Search, usageMaxSearchLen) {
 		return protocol.UsageDimensionsPage{}, usageInvalidArgument("分组分页参数无效")
 	}
-	snap, err := a.usageStore.QuerySnapshot(context.Background(), f)
+	if err := pinLocalUsageSnapshot(&f, q.Query.SnapshotSeq); err != nil {
+		return protocol.UsageDimensionsPage{}, err
+	}
+	page, err := a.usageStore.QueryDimensions(context.Background(), f, q.Search, q.Page, q.PageSize)
 	if err != nil {
-		return protocol.UsageDimensionsPage{}, usageUnavailable("")
+		return protocol.UsageDimensionsPage{}, localUsageQueryError(err)
 	}
-	groups := map[string][]localusage.CallRecord{}
-	for _, c := range snap.Calls {
-		if q.Search == "" || strings.Contains(strings.ToLower(c.Model), strings.ToLower(q.Search)) {
-			groups[c.Model] = append(groups[c.Model], c)
-		}
-	}
-	keys := make([]string, 0, len(groups))
-	for k := range groups {
-		keys = append(keys, k)
-	}
-	for i := 0; i < len(keys); i++ {
-		for j := i + 1; j < len(keys); j++ {
-			if len(groups[keys[j]]) > len(groups[keys[i]]) || (len(groups[keys[j]]) == len(groups[keys[i]]) && keys[j] < keys[i]) {
-				keys[i], keys[j] = keys[j], keys[i]
-			}
-		}
-	}
-	start := (q.Page - 1) * q.PageSize
-	if start > len(keys) {
-		start = len(keys)
-	}
-	end := start + q.PageSize
-	if end > len(keys) {
-		end = len(keys)
-	}
-	items := make([]protocol.UsageDimensionRow, 0, end-start)
-	for _, k := range keys[start:end] {
-		items = append(items, protocol.UsageDimensionRow{ID: k, Name: k, Totals: localUsageTotals(groups[k])})
+	items := make([]protocol.UsageDimensionRow, 0, len(page.Groups))
+	for _, group := range page.Groups {
+		items = append(items, protocol.UsageDimensionRow{ID: group.Model, Name: group.Model, Totals: localUsageTotals(group.Totals)})
 	}
 	return protocol.UsageDimensionsPage{Items: items, GroupBy: q.GroupBy, Page: q.Page, PageSize: q.PageSize,
-		TotalCount: strconv.Itoa(len(keys)), HasMore: end < len(keys), EffectiveRange: r, QueryKey: fmt.Sprintf("local:%d", snap.Seq)}, nil
+		TotalCount: strconv.Itoa(page.TotalCount), HasMore: page.HasMore, EffectiveRange: r, QueryKey: fmt.Sprintf("local:%d", page.Seq)}, nil
 }
