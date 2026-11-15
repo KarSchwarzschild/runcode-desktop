@@ -3,13 +3,141 @@ package desktop
 import (
 	"context"
 	"encoding/base64"
+	"errors"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/wt68/runcode/internal/localusage"
 	"github.com/wt68/runcode/internal/protocol"
+	hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 )
+
+func TestUsageShutdownWaitsForInFlightQuery(t *testing.T) {
+	now := time.Date(2026, 11, 13, 4, 0, 0, 0, time.UTC)
+	app, _ := newLocalUsageTestApp(t, now)
+	queryEntered := make(chan struct{})
+	queryResume := make(chan struct{})
+	var entered sync.Once
+	usageNow = func() time.Time {
+		entered.Do(func() {
+			close(queryEntered)
+			<-queryResume
+		})
+		return now
+	}
+	queryDone := make(chan error, 1)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				queryDone <- fmt.Errorf("query panicked: %v", r)
+			}
+		}()
+		_, err := app.GetUsageOverview(protocol.UsageQuery{TenantID: "tenant-a", Range: "last24h", Timezone: usageTimezone})
+		queryDone <- err
+	}()
+	<-queryEntered
+	closed := make(chan struct{})
+	go func() {
+		app.closeLocalUsage()
+		close(closed)
+	}()
+	select {
+	case <-closed:
+		t.Error("shutdown completed while an in-flight usage query was blocked")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(queryResume)
+	if err := <-queryDone; err != nil {
+		t.Errorf("in-flight query failed: %v", err)
+	}
+	<-closed
+	if _, err := app.GetUsageOverview(protocol.UsageQuery{TenantID: "tenant-a", Range: "last24h", Timezone: usageTimezone}); err == nil {
+		t.Error("query after shutdown should report unavailable")
+	}
+}
+
+func TestUsageQueriesRaceWithShutdown(t *testing.T) {
+	now := time.Date(2026, 11, 13, 4, 0, 0, 0, time.UTC)
+	app, store := newLocalUsageTestApp(t, now)
+	scope, err := app.freezeUsageScopeParts("https://bridge.test", "tenant-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := localusage.StartRecord{CallID: "shutdown-race", Scope: scope, Model: "qwen-max", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-time.Minute), RunID: "test"}
+	if err := store.Begin(context.Background(), start); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Finish(context.Background(), localusage.FinishRecord{CallID: start.CallID, Status: localusage.StatusSucceeded, FinishedAt: now, FrozenStart: start}); err != nil {
+		t.Fatal(err)
+	}
+	resolved := protocol.ResolvedUsageQuery{TenantID: "tenant-a", EffectiveRange: protocol.UsageEffectiveRange{
+		StartAt: now.Add(-time.Hour).Format(time.RFC3339Nano), EndAt: now.Format(time.RFC3339Nano), Timezone: usageTimezone,
+	}}
+	queries := []func() error{
+		func() error {
+			out, err := app.GetUsageOverview(protocol.UsageQuery{TenantID: "tenant-a", Range: "last24h", Timezone: usageTimezone})
+			if err == nil && out.Summary.RequestCount != "1" {
+				return fmt.Errorf("incomplete overview: %+v", out.Summary)
+			}
+			return err
+		},
+		func() error {
+			out, err := app.GetUsageRequests(protocol.UsageRequestsQuery{Query: resolved, PageSize: 20})
+			if err == nil && (out.TotalCount != "1" || len(out.Items) != 1 || out.Items[0].ID != start.CallID) {
+				return fmt.Errorf("incomplete requests page: %+v", out)
+			}
+			return err
+		},
+		func() error {
+			out, err := app.GetUsageDimensions(protocol.UsageDimensionsQuery{Query: resolved, GroupBy: "model", Page: 1, PageSize: 50})
+			if err == nil && (out.TotalCount != "1" || len(out.Items) != 1 || out.Items[0].ID != start.Model) {
+				return fmt.Errorf("incomplete dimensions page: %+v", out)
+			}
+			return err
+		},
+		func() error {
+			out, err := app.GetLocalUsageTenants()
+			if err == nil && (len(out) != 1 || out[0].ID != "tenant-a") {
+				return fmt.Errorf("incomplete tenant list: %+v", out)
+			}
+			return err
+		},
+	}
+	for i, query := range queries {
+		if err := query(); err != nil {
+			t.Fatalf("query %d before shutdown: %v", i, err)
+		}
+	}
+	var wg sync.WaitGroup
+	startGate := make(chan struct{})
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-startGate
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("usage query panicked during shutdown: %v", r)
+				}
+			}()
+			for j := 0; j < 100; j++ {
+				if err := queries[j%len(queries)](); err != nil {
+					var wire *hostproto.Error
+					if !errors.As(err, &wire) || wire.Code != protocol.ErrCodeUsageUnavailable {
+						t.Errorf("query during shutdown returned unexpected error: %v", err)
+						return
+					}
+				}
+			}
+		}()
+	}
+	close(startGate)
+	app.closeLocalUsage()
+	wg.Wait()
+}
 
 func localUsageJWT() string {
 	enc := base64.RawURLEncoding.EncodeToString([]byte(`{"iss":"https://issuer.test","sub":"user-1"}`))

@@ -46,6 +46,8 @@ func usageUnavailable(_ string) error {
 
 // GetUsageOverview 返回当前登录账号与租户的本机汇总。
 func (a *App) GetUsageOverview(req protocol.UsageQuery) (protocol.UsageOverview, error) {
+	a.usageMu.RLock()
+	defer a.usageMu.RUnlock()
 	if a.usageStore == nil {
 		return protocol.UsageOverview{}, wireError(usageUnavailable(""))
 	}
@@ -55,6 +57,8 @@ func (a *App) GetUsageOverview(req protocol.UsageQuery) (protocol.UsageOverview,
 
 // GetUsageRequests 返回固定本机快照中的一页调用记录。
 func (a *App) GetUsageRequests(req protocol.UsageRequestsQuery) (protocol.UsageRequestsPage, error) {
+	a.usageMu.RLock()
+	defer a.usageMu.RUnlock()
 	if a.usageStore == nil {
 		return protocol.UsageRequestsPage{}, wireError(usageUnavailable(""))
 	}
@@ -64,6 +68,8 @@ func (a *App) GetUsageRequests(req protocol.UsageRequestsQuery) (protocol.UsageR
 
 // GetUsageDimensions 返回本机已采集的平台模型维度；供应商维度首期不提供。
 func (a *App) GetUsageDimensions(req protocol.UsageDimensionsQuery) (protocol.UsageDimensionsPage, error) {
+	a.usageMu.RLock()
+	defer a.usageMu.RUnlock()
 	if a.usageStore == nil {
 		return protocol.UsageDimensionsPage{}, wireError(usageUnavailable(""))
 	}
@@ -75,6 +81,8 @@ func (a *App) GetUsageDimensions(req protocol.UsageDimensionsQuery) (protocol.Us
 // 并补上当前活动／会话租户（即使尚无采集记录），方便直接查看本机空统计。
 // 它不访问 Bridge，也不切换聊天会话当前租户。
 func (a *App) GetLocalUsageTenants() ([]protocol.PassportTenant, error) {
+	a.usageMu.RLock()
+	defer a.usageMu.RUnlock()
 	if a.usageStore == nil {
 		return nil, wireError(usageUnavailable(""))
 	}

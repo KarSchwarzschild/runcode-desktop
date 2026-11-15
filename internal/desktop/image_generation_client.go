@@ -122,9 +122,6 @@ type imageGenerationSendSnapshot struct {
 	Token string
 	Epoch string
 	Scope localusage.Scope
-	// unlock 只保护“冻结后到发送边界”的短窗口；HTTP 响应阶段不持身份锁，
-	// 允许用户正常切换账号，而 Finish 仍使用 Scope 的不可变副本。
-	unlock func()
 }
 
 func imageGenerationTokenClaims(token string) (issuer, subject string) {
@@ -157,18 +154,17 @@ func (a *App) prepareImageGenerationSend(snap imageGenerationSnapshot) (imageGen
 		return imageGenerationSendSnapshot{}, notSent("auth", "请先登录通行证；本次未生成图片")
 	}
 	a.tokens.mu.Lock()
+	defer a.tokens.mu.Unlock()
 	currentToken, epoch := a.tokens.ts.AccessToken, a.tokens.identity
 	if token == "" || currentToken != token || tokenIdentity(token) != snap.Account || epoch != snap.Epoch {
-		a.tokens.mu.Unlock()
 		return imageGenerationSendSnapshot{}, notSent("auth", "会话账号已变化，本次未生成图片；请重新打开会话")
 	}
 	issuer, subject := imageGenerationTokenClaims(token)
 	if issuer == "" || subject == "" {
-		a.tokens.mu.Unlock()
 		return imageGenerationSendSnapshot{}, notSent("auth", "调用身份信息缺失，本次未提交生成请求")
 	}
 	scope := (ScopeFreeze{AccountIssuer: issuer, AccountSub: subject, BridgeBase: snap.Bridge, TenantID: snap.Tenant}).toScope()
-	return imageGenerationSendSnapshot{Token: token, Epoch: epoch, Scope: scope, unlock: func() { a.tokens.mu.Unlock() }}, nil
+	return imageGenerationSendSnapshot{Token: token, Epoch: epoch, Scope: scope}, nil
 }
 
 // postImageGeneration 为冻结快照发送恰好一次生图请求。调用方必须先持久化 submitted 账本。
@@ -184,18 +180,13 @@ func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnaps
 	if err != nil {
 		return imageGenerationWireResponse{}, err
 	}
-	defer func() {
-		if prepared.unlock != nil {
-			prepared.unlock()
-		}
-	}()
 	token := prepared.Token
 	body, _ := json.Marshal(imageGenerationWireRequest{Model: snap.Model, Prompt: in.Prompt, N: 1, Size: in.Size, ResponseFormat: snap.ResponseFormat})
 	postCtx, cancel := context.WithTimeout(ctx, imageGenerationPostTimeout)
 	defer cancel()
 	endpoint := snap.Bridge + tenantPathPrefix(snap.Tenant) + "/v1/Images/Generations"
 	req, err := http.NewRequestWithContext(postCtx, http.MethodPost, endpoint, bytes.NewReader(body))
-	if err != nil {
+	if err != nil || req.URL.Hostname() == "" || (req.URL.Scheme != "http" && req.URL.Scheme != "https") {
 		return imageGenerationWireResponse{}, notSent("not_configured", "生图服务地址无效，本次未生成图片")
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -204,14 +195,12 @@ func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnaps
 	if err := postCtx.Err(); err != nil {
 		return imageGenerationWireResponse{}, notSent("cancelled", "已停止等待，本次未提交生成请求")
 	}
-	// 这是唯一的提交边界：回调返回后立即进入一次 Do，任何 Do 错误都保持 attempted。
+	// 这是唯一的提交边界：回调只接收冻结 Scope，且不持 token 锁，避免账本／
+	// SQLite 写入与账号操作互锁。之后不再重读身份或中止提交，立即进入一次 Do；
+	// 即使回调期间取消或切换账号，仍按本次冻结身份记 attempted。
 	if len(beforeSend) > 0 && beforeSend[0] != nil {
 		beforeSend[0](prepared.Scope)
 	}
-	// attempted 已经在回调中持久化；从这里起允许账号切换，结束记账使用冻结 Scope。
-	prepared.unlock()
-	prepared.unlock = nil
-
 	resp, err := imageGenerationHTTPClient().Do(req)
 	if err != nil {
 		return imageGenerationWireResponse{}, interruptedOutcome(ctx, "")

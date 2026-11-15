@@ -1,8 +1,10 @@
 package localusage
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -25,6 +27,170 @@ type memStream struct {
 	ch   chan llm.StreamEvent
 	err  error
 	once sync.Once
+}
+
+// nonClosingStream models a provider whose Close stops production but leaves
+// its Events channel open. The wrapper must still stop its pump through done.
+type nonClosingStream struct {
+	ch     chan llm.StreamEvent
+	closed chan struct{}
+	once   sync.Once
+}
+
+func (s *nonClosingStream) Events() <-chan llm.StreamEvent { return s.ch }
+func (s *nonClosingStream) Err() error                     { return nil }
+func (s *nonClosingStream) Close() error {
+	s.once.Do(func() { close(s.closed) })
+	return nil
+}
+
+func TestLocalUsageCloseStopsPumpWhenInnerEventsRemainOpen(t *testing.T) {
+	// The consumer reads one event and then closes. The inner stream's channel
+	// stays open, so only the wrapper's done signal can release the pump.
+	dir := t.TempDir()
+	store, err := Open(filepath.Join(dir, "u.sqlite3"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	scope := sampleScope("close-open-events")
+	inner := &nonClosingStream{ch: make(chan llm.StreamEvent), closed: make(chan struct{})}
+	base := fakeProvider{name: "openai", stream: func(context.Context, llm.Request) (llm.Stream, error) {
+		return inner, nil
+	}}
+	p := WrapPlatformProvider(base, func(context.Context) (Scope, error) { return scope, nil }, store)
+	st, err := p.Stream(context.Background(), llm.Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out := st.Events()
+	inner.ch <- llm.StreamEvent{Type: llm.StreamEventTypeMessageStart}
+	select {
+	case <-out:
+	case <-time.After(time.Second):
+		t.Fatal("wrapper did not forward the first event")
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case _, ok := <-out:
+		if ok {
+			t.Fatal("wrapper emitted an event after Close")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("wrapper pump did not stop after Close")
+	}
+	select {
+	case <-inner.closed:
+	case <-time.After(time.Second):
+		t.Fatal("Close did not stop the inner stream")
+	}
+}
+
+func TestLocalUsageCloseBeforeEvents(t *testing.T) {
+	store, err := Open(filepath.Join(t.TempDir(), "u.sqlite3"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	scope := sampleScope("close-before-events")
+	inner := &nonClosingStream{ch: make(chan llm.StreamEvent), closed: make(chan struct{})}
+	base := fakeProvider{name: "openai", stream: func(context.Context, llm.Request) (llm.Stream, error) { return inner, nil }}
+	p := WrapPlatformProvider(base, func(context.Context) (Scope, error) { return scope, nil }, store)
+	st, err := p.Stream(context.Background(), llm.Request{Model: "m"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case _, ok := <-st.Events():
+		if ok {
+			t.Fatal("closed stream returned an event")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Events after Close left the pump running")
+	}
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+	var finishes int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM events WHERE phase='finish'`).Scan(&finishes); err != nil {
+		t.Fatal(err)
+	}
+	if finishes != 1 {
+		t.Fatalf("finishes=%d want 1", finishes)
+	}
+}
+
+func TestLocalUsageCloseAfterOneEventDoesNotLeakPumps(t *testing.T) {
+	// Count only wrapper pumps: unrelated runtime goroutines can legitimately
+	// change, but every pump started here must exit without draining its output.
+	pumpCount := func() int {
+		buf := make([]byte, 1<<20)
+		n := runtime.Stack(buf, true)
+		return bytes.Count(buf[:n], []byte("localusage.(*countingStream).pump("))
+	}
+	baseline := pumpCount()
+	store, err := Open(filepath.Join(t.TempDir(), "u.sqlite3"), time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	scope := sampleScope("early-close-many-events")
+	const streams = 32
+	var outputs []<-chan llm.StreamEvent
+	t.Cleanup(func() {
+		// Release a broken implementation's blocked pumps after reporting the
+		// failure, so the regression test itself does not leak goroutines.
+		for _, out := range outputs {
+			for range out {
+			}
+		}
+	})
+	base := fakeProvider{name: "openai", stream: func(context.Context, llm.Request) (llm.Stream, error) {
+		inner := &memStream{ch: make(chan llm.StreamEvent, 1024)}
+		for i := 0; i < cap(inner.ch); i++ {
+			inner.ch <- llm.StreamEvent{Type: llm.StreamEventTypeMessageStart}
+		}
+		return inner, nil
+	}}
+	p := WrapPlatformProvider(base, func(context.Context) (Scope, error) { return scope, nil }, store)
+	for i := 0; i < streams; i++ {
+		st, err := p.Stream(context.Background(), llm.Request{Model: "m"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := st.Events()
+		outputs = append(outputs, out)
+		select {
+		case <-out:
+		case <-time.After(time.Second):
+			t.Fatal("wrapper did not forward the first event")
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if err := st.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(time.Second)
+	for pumpCount() > baseline && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := pumpCount(); got > baseline {
+		t.Fatalf("wrapper pumps after closing %d streams=%d, initial=%d", streams, got, baseline)
+	}
+	var finishes int
+	if err := store.db.QueryRow(`SELECT COUNT(*) FROM events WHERE phase='finish'`).Scan(&finishes); err != nil {
+		t.Fatal(err)
+	}
+	if finishes != streams {
+		t.Fatalf("finishes=%d want %d", finishes, streams)
+	}
 }
 
 func (m *memStream) Events() <-chan llm.StreamEvent { return m.ch }

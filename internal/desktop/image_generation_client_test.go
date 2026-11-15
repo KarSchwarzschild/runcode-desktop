@@ -176,6 +176,97 @@ func TestImageGenerationClientCancellationBeforeDoDoesNotInvokeCallback(t *testi
 	}
 }
 
+func TestImageGenerationClientBeforeSendDoesNotHoldTokenLock(t *testing.T) {
+	var posts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		posts.Add(1)
+		_, _ = io.WriteString(w, `{"created":1,"data":[{"url":"https://images.example.invalid/x.png"}]}`)
+	}))
+	defer srv.Close()
+	app, _ := imageGenClientApp(t, srv)
+	snap := clientSnapshot(app)
+	want, err := app.freezeUsageScopeParts(snap.Bridge, snap.Tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = app.postImageGeneration(context.Background(), snap, imagegentool.Input{Prompt: "海报", Size: snap.Size}, func(scope localusage.Scope) {
+		// SQLite/ledger writes may call code that needs tokenManager. Holding the
+		// identity lock across this callback would deadlock such a recorder.
+		if !app.tokens.mu.TryLock() {
+			t.Error("before-send bookkeeping ran while token lock was held")
+			return
+		}
+		app.tokens.mu.Unlock()
+		if scope != want {
+			t.Errorf("callback scope = %+v, want frozen %+v", scope, want)
+		}
+	})
+	if err != nil || posts.Load() != 1 {
+		t.Fatalf("err=%v posts=%d", err, posts.Load())
+	}
+}
+
+func TestImageGenerationClientCancellationAtSendBoundaryStaysAttempted(t *testing.T) {
+	var posts, captures atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { posts.Add(1) }))
+	defer srv.Close()
+	app, _ := imageGenClientApp(t, srv)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	_, err := app.postImageGeneration(ctx, clientSnapshot(app), imagegentool.Input{Prompt: "海报", Size: "2048x2048"}, func(localusage.Scope) {
+		captures.Add(1)
+		cancel()
+	})
+	if outcome := imageGenerationFailureOf(err); outcome.SubmissionStatus != "attempted" || outcome.Status != "cancelled" {
+		t.Fatalf("send boundary cancellation = %+v", outcome)
+	}
+	if captures.Load() != 1 || posts.Load() != 0 {
+		t.Fatalf("captures=%d posts=%d, want one Do attempt rejected by its cancelled context", captures.Load(), posts.Load())
+	}
+}
+
+func TestImageGenerationClientLocalFailuresNeverStartUsage(t *testing.T) {
+	cases := []struct {
+		name    string
+		prepare func(*testing.T, *App, *imageGenerationSnapshot)
+	}{
+		{"missing model", func(_ *testing.T, _ *App, s *imageGenerationSnapshot) { s.Model = "" }},
+		{"missing format", func(_ *testing.T, _ *App, s *imageGenerationSnapshot) { s.ResponseFormat = "" }},
+		{"changed bridge", func(_ *testing.T, _ *App, s *imageGenerationSnapshot) { s.Bridge += "/changed" }},
+		{"changed epoch", func(_ *testing.T, _ *App, s *imageGenerationSnapshot) { s.Epoch += "-stale" }},
+		{"logged out", func(_ *testing.T, a *App, _ *imageGenerationSnapshot) { a.tokens.Clear() }},
+		{"invalid endpoint", func(t *testing.T, _ *App, s *imageGenerationSnapshot) {
+			s.Bridge = ":invalid"
+			t.Setenv("RUNCODE_BRIDGE_BASE_URL", s.Bridge)
+		}},
+		{"relative endpoint", func(t *testing.T, _ *App, s *imageGenerationSnapshot) {
+			s.Bridge = "bridge.invalid"
+			t.Setenv("RUNCODE_BRIDGE_BASE_URL", s.Bridge)
+		}},
+		{"unsupported scheme", func(t *testing.T, _ *App, s *imageGenerationSnapshot) {
+			s.Bridge = "file://bridge.invalid"
+			t.Setenv("RUNCODE_BRIDGE_BASE_URL", s.Bridge)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var posts, captures atomic.Int32
+			srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { posts.Add(1) }))
+			defer srv.Close()
+			app, _ := imageGenClientApp(t, srv)
+			snap := clientSnapshot(app)
+			tc.prepare(t, app, &snap)
+			_, err := app.postImageGeneration(context.Background(), snap, imagegentool.Input{Prompt: "海报", Size: snap.Size}, func(localusage.Scope) { captures.Add(1) })
+			if outcome := imageGenerationFailureOf(err); outcome.SubmissionStatus != "not_submitted" {
+				t.Fatalf("local failure = %+v", outcome)
+			}
+			if captures.Load() != 0 || posts.Load() != 0 {
+				t.Fatalf("local failure recorded or submitted: captures=%d posts=%d", captures.Load(), posts.Load())
+			}
+		})
+	}
+}
+
 func TestImageGenerationClientNoRetry(t *testing.T) {
 	for _, status := range []int{401, 403, 429, 500, 502, 503, 504} {
 		t.Run(http.StatusText(status), func(t *testing.T) {
@@ -208,7 +299,7 @@ func TestImageGenerationClientNoRetry(t *testing.T) {
 		}{Transport: "timeout"}}, &posts)
 		app, _ := imageGenClientApp(t, srv)
 		_, err := app.postImageGeneration(context.Background(), clientSnapshot(app), imagegentool.Input{Prompt: "海报", Size: "2048x2048"})
-		if outcome := imageGenerationFailureOf(err); outcome.Status != "unknown" || outcome.Code != "unknown_outcome" || posts.Load() != 1 {
+		if outcome := imageGenerationFailureOf(err); outcome.Status != "unknown" || outcome.Code != "unknown_outcome" || outcome.SubmissionStatus != "attempted" || posts.Load() != 1 {
 			t.Fatalf("timeout = %+v posts=%d", outcome, posts.Load())
 		}
 	})

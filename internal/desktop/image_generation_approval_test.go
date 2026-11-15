@@ -222,6 +222,8 @@ type imageGenHostQuestionSession struct {
 	id           string
 	hostCalls    *atomic.Int32
 	modelCalls   *atomic.Int32
+	chatCalls    *atomic.Int32
+	modelBridge  string
 	usageStore   *localusage.Store
 	modelEntered chan struct{}
 	modelRelease chan struct{}
@@ -245,14 +247,24 @@ func startImageGenHostQuestionSessionOpts(t *testing.T, captureUsage, holdFirstM
 	t.Setenv("RUNCODE_LOCAL_USAGE_ENABLED", "true")
 	bridge := newImageGenBridge(t)
 	sink := &recordingSink{}
-	hostCalls, modelCalls := &atomic.Int32{}, &atomic.Int32{}
+	hostCalls, modelCalls, chatCalls := &atomic.Int32{}, &atomic.Int32{}, &atomic.Int32{}
 	var modelEntered, modelRelease chan struct{}
 	if holdFirstModel {
 		modelEntered, modelRelease = make(chan struct{}), make(chan struct{})
 	}
 	input, _ := json.Marshal(map[string]string{"prompt": "校园开放日海报背景", "size": "1024x1024"})
-	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls := modelCalls.Add(1)
+		var request struct {
+			Tools []json.RawMessage `json:"tools"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			t.Errorf("model request: %v", err)
+		}
+		// 标题等辅助请求不携带工具，不计为用户聊天调用。
+		if len(request.Tools) > 0 {
+			chatCalls.Add(1)
+		}
 		if holdFirstModel && calls == 1 {
 			close(modelEntered)
 			<-modelRelease
@@ -304,7 +316,7 @@ func startImageGenHostQuestionSessionOpts(t *testing.T, captureUsage, holdFirstM
 	if captureUsage {
 		// 让模型请求走 S09 平台采集器；Bridge 地址随后仍由生图快照使用。
 		cfg = app.applyPassport(cfg, StartSessionRequest{Provider: "passport", TenantID: "tenant-a", Model: cfg.Model})
-		cfg.BaseURL = model.URL + "/v1"
+		cfg.BaseURL = model.URL + "/t/tenant-a/v1"
 	}
 	id, _, err := app.mgr.Create(context.Background(), cfg)
 	if err != nil {
@@ -328,7 +340,7 @@ func startImageGenHostQuestionSessionOpts(t *testing.T, captureUsage, holdFirstM
 	setImageGen(t, app, id, true)
 	return &imageGenHostQuestionSession{
 		app: app, sink: sink, bridge: bridge, cwd: cwd, id: id,
-		hostCalls: hostCalls, modelCalls: modelCalls, usageStore: usageStore,
+		hostCalls: hostCalls, modelCalls: modelCalls, chatCalls: chatCalls, modelBridge: model.URL, usageStore: usageStore,
 		modelEntered: modelEntered, modelRelease: modelRelease,
 	}
 }
@@ -429,6 +441,14 @@ func TestImageGenerationApprovedHostUsage(t *testing.T) {
 	if receipt.QuestionID == "" || f.bridge.posts.Load() != 1 || f.hostCalls.Load() != 1 || f.modelCalls.Load() < 2 {
 		t.Fatalf("receipt=%+v host=%d bridge=%d model=%d", receipt, f.hostCalls.Load(), f.bridge.posts.Load(), f.modelCalls.Load())
 	}
+	// 等自动标题请求到达 HTTP 边界，证明它确实发出但不会新增聊天记录。
+	deadline := time.Now().Add(5 * time.Second)
+	for f.modelCalls.Load() == f.chatCalls.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if f.modelCalls.Load() <= f.chatCalls.Load() {
+		t.Fatal("automatic title request did not reach the model fixture")
+	}
 	scope, err := f.app.freezeUsageScopeParts(imageGenerationBridge(), "tenant-a")
 	if err != nil {
 		t.Fatal(err)
@@ -437,11 +457,9 @@ func TestImageGenerationApprovedHostUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var llmCalls, imageCalls int
+	var imageCalls int
 	for _, call := range snapshot.Calls {
 		switch call.CallKind {
-		case localusage.CallKindLLM:
-			llmCalls++
 		case localusage.CallKindImage:
 			imageCalls++
 			if call.GeneratedImages == nil || *call.GeneratedImages != 1 || call.InputTokensKnown || call.OutputTokensKnown {
@@ -449,7 +467,21 @@ func TestImageGenerationApprovedHostUsage(t *testing.T) {
 			}
 		}
 	}
-	if llmCalls != int(f.modelCalls.Load()) || llmCalls < 2 || imageCalls != 1 {
-		t.Fatalf("usage calls llm=%d (model requests=%d) image=%d, want independent chat count and one image", llmCalls, f.modelCalls.Load(), imageCalls)
+	chatScope, err := f.app.freezeUsageScopeParts(f.modelBridge, "tenant-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chatSnapshot, err := f.usageStore.QuerySnapshot(context.Background(), localusage.QueryFilter{ScopeID: chatScope.ScopeID, StartAt: time.Now().Add(-time.Minute), EndAt: time.Now().Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var llmCalls int
+	for _, call := range chatSnapshot.Calls {
+		if call.CallKind == localusage.CallKindLLM {
+			llmCalls++
+		}
+	}
+	if llmCalls != int(f.chatCalls.Load()) || llmCalls != 2 || imageCalls != 1 {
+		t.Fatalf("usage calls llm=%d (chat requests=%d, all model requests=%d) image=%d, want two chat calls excluding title and one image", llmCalls, f.chatCalls.Load(), f.modelCalls.Load(), imageCalls)
 	}
 }

@@ -18,12 +18,12 @@ import (
 // 但不该算作用户可见的「一次请求」。引擎把 purpose 只写进遥测，不改 Core 时只能
 // 用请求正文里的稳定锚点识别；匹配到的调用跳过 Begin／Finish。
 var auxiliaryLLMMarkers = []string{
-	"Title this request:",                          // session_title 用户句
-	"You name a coding-assistant conversation.",    // session_title 系统句
+	"Title this request:",                                                 // session_title 用户句
+	"You name a coding-assistant conversation.",                           // session_title 系统句
 	"You are condensing a coding-assistant conversation to save context.", // compaction
-	"Conversation to summarize:",                   // compaction 用户句
-	"You are a safety gate for a coding agent.",    // harm_check
-	"You are an authorization gate, not the executing agent.", // action_assessment
+	"Conversation to summarize:",                                          // compaction 用户句
+	"You are a safety gate for a coding agent.",                           // harm_check
+	"You are an authorization gate, not the executing agent.",             // action_assessment
 }
 
 // PlatformProviderName 是桌面注册的固定平台适配器名；用户设置里仍写 openai／passport 语义，
@@ -116,6 +116,7 @@ func (p *platformProvider) Stream(ctx context.Context, req llm.Request) (llm.Str
 		kind:      kind,
 		started:   started.UTC(),
 		monoStart: monoStart,
+		done:      make(chan struct{}),
 	}, nil
 }
 
@@ -148,7 +149,20 @@ func (s *countingStream) Events() <-chan llm.StreamEvent {
 
 func (s *countingStream) pump() {
 	defer close(s.out)
-	for ev := range s.inner.Events() {
+	events := s.inner.Events()
+	for {
+		var ev llm.StreamEvent
+		var ok bool
+		select {
+		case <-s.done:
+			return
+		case ev, ok = <-events:
+			if !ok {
+				status, code := streamEndStatus(s.inner.Err())
+				s.finish(status, code)
+				return
+			}
+		}
 		if ev.Usage != nil {
 			s.mu.Lock()
 			cp := *ev.Usage
@@ -162,8 +176,6 @@ func (s *countingStream) pump() {
 			return
 		}
 	}
-	status, code := streamEndStatus(s.inner.Err())
-	s.finish(status, code)
 }
 
 func (s *countingStream) Err() error { return s.inner.Err() }

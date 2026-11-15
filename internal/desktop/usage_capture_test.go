@@ -42,7 +42,7 @@ func enableUsageCapture(t *testing.T, app *App, store localusage.Recorder) {
 	app.livePassportTenant = "tenant-a"
 	app.passportTenant = "tenant-a"
 	app.mu.Unlock()
-	setPlatformCapture(store, app.freezeUsageScope)
+	setPlatformCapture(store, app.freezeUsageIdentity)
 	t.Cleanup(func() { setPlatformCapture(nil, nil) })
 }
 
@@ -102,13 +102,7 @@ func TestLocalUsagePlatformWiring(t *testing.T) {
 		}()
 		return s, nil
 	}}
-	p := localusage.WrapPlatformProvider(base, func(ctx context.Context) (localusage.Scope, error) {
-		sf, err := app.freezeUsageScope(ctx)
-		if err != nil {
-			return localusage.Scope{}, err
-		}
-		return sf.toScope(), nil
-	}, store)
+	p := localusage.WrapPlatformProvider(base, platformUsageFreezer(cfg.BaseURL, app.freezeUsageIdentity), store)
 	st, err := p.Stream(context.Background(), llm.Request{Model: "m1"})
 	if err != nil {
 		t.Fatal(err)
@@ -118,17 +112,17 @@ func TestLocalUsagePlatformWiring(t *testing.T) {
 	_ = st.Close()
 	time.Sleep(30 * time.Millisecond)
 
-	sf, err := app.freezeUsageScope(context.Background())
+	scope, err := app.freezeUsageScopeParts(passportConfig().BridgeBaseURL, "tenant-a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := store.CountCalls(context.Background(), sf.toScope().ScopeID)
+	n, err := store.CountCalls(context.Background(), scope.ScopeID)
 	if err != nil || n != 1 {
 		t.Fatalf("calls=%d err=%v want 1 via provider wrap (observer-only would be 0)", n, err)
 	}
 
 	// 识图包装入口
-	vision := wrapVisionForCapture(base, true)
+	vision := wrapVisionForCapture(base, true, cfg.BaseURL)
 	if vision == nil || vision.Name() != "openai" {
 		t.Fatalf("vision wrap name = %v", vision)
 	}
@@ -137,7 +131,7 @@ func TestLocalUsagePlatformWiring(t *testing.T) {
 	}
 	_ = vst.Close()
 	time.Sleep(30 * time.Millisecond)
-	n2, _ := store.CountCalls(context.Background(), sf.toScope().ScopeID)
+	n2, _ := store.CountCalls(context.Background(), scope.ScopeID)
 	if n2 != 2 {
 		t.Fatalf("after vision calls=%d want 2", n2)
 	}
@@ -309,7 +303,7 @@ func TestLocalUsageCaptureDisabled(t *testing.T) {
 	store := usageTestStore(t)
 	app := New(&recordingSink{})
 	app.tokens.setInMemory(tokenSet{AccessToken: imageGenJWT("off-user"), Expiry: time.Now().Add(time.Hour)})
-	setPlatformCapture(store, app.freezeUsageScope)
+	setPlatformCapture(store, app.freezeUsageIdentity)
 	t.Cleanup(func() {
 		_ = os.Unsetenv(envLocalUsageEnabled)
 		setPlatformCapture(nil, nil)

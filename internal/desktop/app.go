@@ -273,6 +273,7 @@ type App struct {
 	oaBindings map[string]oaBindingEntry
 	// usageStore 是本机平台用量 SQLite（见 usage_capture.go／internal/localusage）。
 	// Startup 打开；Shutdown 在回合收尾后关闭。nil 表示未启用或打开失败。
+	usageMu    sync.RWMutex
 	usageStore *localusage.Store
 }
 

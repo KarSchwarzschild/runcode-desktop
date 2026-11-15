@@ -83,16 +83,7 @@ func ensurePlatformCaptureRegistered() {
 			if !platformEnabled.Load() || rec == nil || freeze == nil {
 				return base, nil
 			}
-			return localusage.WrapPlatformProvider(base, func(ctx context.Context) (localusage.Scope, error) {
-				sf, err := freeze(ctx)
-				if err != nil {
-					return localusage.Scope{}, err
-				}
-				if sf.TenantID == "" || sf.AccountSub == "" {
-					return localusage.Scope{}, fmt.Errorf("采集身份不足")
-				}
-				return sf.toScope(), nil
-			}, rec), nil
+			return localusage.WrapPlatformProvider(base, platformUsageFreezer(cfg.BaseURL, freeze), rec), nil
 		})
 	})
 }
@@ -132,42 +123,79 @@ func (a *App) initLocalUsage() error {
 		debugLog("local usage open failed: %v", err)
 		return err
 	}
+	a.usageMu.Lock()
 	a.usageStore = store
-	setPlatformCapture(store, a.freezeUsageScope)
+	a.usageMu.Unlock()
+	setPlatformCapture(store, a.freezeUsageIdentity)
 	return nil
 }
 
 func (a *App) closeLocalUsage() {
 	setPlatformCapture(nil, nil)
-	if a.usageStore != nil {
-		_ = a.usageStore.Close()
-		a.usageStore = nil
+	// Hold the read/write lock through Close so a query that has acquired a
+	// stable pointer can finish before the database is closed. New queries see
+	// the nil marker only after the close has completed.
+	a.usageMu.Lock()
+	defer a.usageMu.Unlock()
+	store := a.usageStore
+	a.usageStore = nil
+	if store != nil {
+		_ = store.Close()
 	}
 }
 
-func (a *App) freezeUsageScope(ctx context.Context) (ScopeFreeze, error) {
+// freezeUsageIdentity 只读取稳定账号；平台连接和租户归属由调用方配置证明，
+// 不读取当前前台会话，否则后台会话和平台识图会跟随焦点串租。
+func (a *App) freezeUsageIdentity(ctx context.Context) (ScopeFreeze, error) {
 	_ = ctx
-	a.mu.Lock()
-	passport := a.livePassport || a.configPassport
-	tenant := a.livePassportTenant
-	if tenant == "" {
-		tenant = a.passportTenant
-	}
-	a.mu.Unlock()
-	// 身份冻结：只认通行证装配路径，不凭 BaseURL／模型名猜测。
-	if !passport || !a.tokens.LoggedIn() {
-		return ScopeFreeze{}, fmt.Errorf("非平台连接")
-	}
 	iss, sub := a.tokens.identityParts()
-	if iss == "" || sub == "" {
+	if strings.TrimSpace(iss) == "" || strings.TrimSpace(sub) == "" {
 		return ScopeFreeze{}, fmt.Errorf("登录身份不足")
 	}
 	return ScopeFreeze{
 		AccountIssuer: iss,
 		AccountSub:    sub,
-		BridgeBase:    passportConfig().BridgeBaseURL,
-		TenantID:      tenant,
 	}, nil
+}
+
+// platformUsageBaseURLScope 仅接受平台 API 的明确 /t/<tenant>/v1 形状。
+// Bridge 与租户来自同一份不可变配置；缺失或歧义时不回落到全局设置。
+func platformUsageBaseURLScope(raw string) (bridge, tenant string, ok bool) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.Fragment != "" || u.RawPath != "" {
+		return "", "", false
+	}
+	parts := strings.Split(strings.TrimSuffix(u.Path, "/"), "/")
+	if len(parts) < 4 || parts[len(parts)-3] != "t" || parts[len(parts)-1] != "v1" {
+		return "", "", false
+	}
+	tenant = parts[len(parts)-2]
+	if !validLocalTenant(tenant) || tenant == "." || tenant == ".." {
+		return "", "", false
+	}
+	u.Path = strings.Join(parts[:len(parts)-3], "/")
+	return strings.TrimRight(u.String(), "/"), tenant, true
+}
+
+func platformUsageFreezer(baseURL string, identity func(context.Context) (ScopeFreeze, error)) func(context.Context) (localusage.Scope, error) {
+	bridge, tenant, ok := platformUsageBaseURLScope(baseURL)
+	var diagnostic sync.Once
+	gap := func(code string) (localusage.Scope, error) {
+		// 只记录安全短码，且每个 provider 最多一次；不泄露 token、URL 或账号。
+		diagnostic.Do(func() { debugLog("local usage coverage gap: %s", code) })
+		return localusage.Scope{}, fmt.Errorf("采集身份不足: %s", code)
+	}
+	return func(ctx context.Context) (localusage.Scope, error) {
+		if !ok {
+			return gap("invalid_platform_scope")
+		}
+		sf, err := identity(ctx)
+		if err != nil || strings.TrimSpace(sf.AccountIssuer) == "" || strings.TrimSpace(sf.AccountSub) == "" {
+			return gap("missing_stable_identity")
+		}
+		sf.BridgeBase, sf.TenantID = bridge, tenant
+		return sf.toScope(), nil
+	}
 }
 
 // freezeUsageScopeParts 用调用方已冻结的 Bridge／租户构造 scope（生图／搜索）。
@@ -209,7 +237,7 @@ func usePlatformCaptureProvider(cfg engine.Config, passport bool) engine.Config 
 }
 
 // wrapVisionForCapture 包装识图 provider（平台路径）；自定义识图不包装。
-func wrapVisionForCapture(p llm.Provider, platform bool) llm.Provider {
+func wrapVisionForCapture(p llm.Provider, platform bool, baseURL string) llm.Provider {
 	if !platform || !platformEnabled.Load() || p == nil {
 		return p
 	}
@@ -220,13 +248,7 @@ func wrapVisionForCapture(p llm.Provider, platform bool) llm.Provider {
 	if rec == nil || freeze == nil {
 		return p
 	}
-	return localusage.WrapPlatformProviderKind(p, func(ctx context.Context) (localusage.Scope, error) {
-		sf, err := freeze(ctx)
-		if err != nil {
-			return localusage.Scope{}, err
-		}
-		return sf.toScope(), nil
-	}, rec, localusage.CallKindVision)
+	return localusage.WrapPlatformProviderKind(p, platformUsageFreezer(baseURL, freeze), rec, localusage.CallKindVision)
 }
 
 // beginNonLLMCapture 在平台生图／搜索真正发出前开始记账；失败则跳过，不阻断业务。
