@@ -359,6 +359,25 @@ func readImageGenerationLedger(workspace, sessionID, generationID string) (image
 
 // listImageGenerationLedgers 返回会话全部账本记录。损坏是错误，不能悄悄跳过。
 func listImageGenerationLedgers(workspace, sessionID string) ([]imageGenerationLedger, error) {
+	ids, err := imageGenerationLedgerIDs(workspace, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	out := []imageGenerationLedger{}
+	for _, generationID := range ids {
+		rec, err := readImageGenerationLedger(workspace, sessionID, generationID)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, rec)
+	}
+	return out, nil
+}
+
+// imageGenerationLedgerIDs enumerates only valid names inside the workspace
+// root. Callers choose their own read-error policy; the strict loader above
+// continues to reject an incomplete ledger set.
+func imageGenerationLedgerIDs(workspace, sessionID string) ([]string, error) {
 	dir, err := imageGenerationLedgerDir(sessionID)
 	if err != nil {
 		return nil, err
@@ -370,7 +389,7 @@ func listImageGenerationLedgers(workspace, sessionID string) ([]imageGenerationL
 	defer func() { _ = root.Close() }()
 	d, err := root.Open(dir)
 	if errors.Is(err, os.ErrNotExist) {
-		return []imageGenerationLedger{}, nil
+		return []string{}, nil
 	}
 	if err != nil {
 		return nil, errImageGenerationStorage
@@ -380,7 +399,7 @@ func listImageGenerationLedgers(workspace, sessionID string) ([]imageGenerationL
 	if err != nil {
 		return nil, errImageGenerationStorage
 	}
-	out := []imageGenerationLedger{}
+	out := []string{}
 	for _, entry := range entries {
 		name := entry.Name()
 		if entry.IsDir() || !strings.HasSuffix(name, ".json") {
@@ -390,11 +409,7 @@ func listImageGenerationLedgers(workspace, sessionID string) ([]imageGenerationL
 		if !validImageGenerationID(generationID) {
 			continue // atomic-write temporaries carry extra dots
 		}
-		rec, err := readImageGenerationLedger(workspace, sessionID, generationID)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, rec)
+		out = append(out, generationID)
 	}
 	return out, nil
 }

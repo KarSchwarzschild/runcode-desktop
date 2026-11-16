@@ -12,7 +12,7 @@ import (
 // 自己的账本。账本有记录、工具结果却从未写入历史（进程在保存后中断）时，按原
 // 提问补一条。回放绝不重新提交：中断的提交显示为 unknown。
 func imageGenerationBlocks(workspace, sessionID string, blocks []ResumedBlock) []ResumedBlock {
-	records, err := listImageGenerationLedgers(workspace, sessionID)
+	records, err := imageGenerationReplayLedgers(workspace, sessionID)
 	if err != nil {
 		debugLog("image generation ledger for %s unreadable: %v", sessionID, err)
 		records = nil
@@ -80,6 +80,27 @@ func imageGenerationBlocks(workspace, sessionID string, blocks []ResumedBlock) [
 	}
 	out = append(out, recovered[question]...)
 	return append(out, orphans...)
+}
+
+// imageGenerationReplayLedgers is read-only and preserves every readable
+// authoritative record when a different file is damaged. Only that record
+// falls back to persisted tool content. Submission and budget paths retain the
+// strict listImageGenerationLedgers contract.
+func imageGenerationReplayLedgers(workspace, sessionID string) ([]imageGenerationLedger, error) {
+	ids, err := imageGenerationLedgerIDs(workspace, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	records := make([]imageGenerationLedger, 0, len(ids))
+	for _, generationID := range ids {
+		record, err := readImageGenerationLedger(workspace, sessionID, generationID)
+		if err != nil {
+			debugLog("image generation replay ledger %s/%s unreadable: %v", sessionID, generationID, err)
+			continue
+		}
+		records = append(records, record)
+	}
+	return records, nil
 }
 
 // imageGenerationResultFromContent 读取工具回给模型的有界结果 JSON（与现场卡片同源）。
