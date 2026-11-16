@@ -1,7 +1,7 @@
 package protocol
 
-// ConversationInfo 是桌面会话显示契约，Kind 区分普通引擎和宿主知识库问答。
-// 保留既有引擎 SessionInfo 的显示字段，新增桌面模式无需修改引擎协议。
+// ConversationInfo 是桌面会话显示契约，保留既有引擎 SessionInfo 的显示字段。
+// Kind 保留旧历史的模式标记；当前产品仅创建普通引擎会话。
 type ConversationInfo struct {
 	Kind string `json:"kind,omitempty"`
 	// ReadOnlyReason 仅展示安全的不可继续原因，不能用于绕过后端权限检查。

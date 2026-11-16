@@ -311,7 +311,7 @@ export interface ContextUsage {
   iteration: number;
 }
 
-// Mirrors protocol.ConversationInfo. ConversationInfo 是桌面会话显示契约，Kind 区分普通引擎和宿主知识库问答。 保留既有引擎 SessionInfo 的显示字段，新增桌面模式无需修改引擎协议。
+// Mirrors protocol.ConversationInfo. ConversationInfo 是桌面会话显示契约，保留既有引擎 SessionInfo 的显示字段。 Kind 保留旧历史的模式标记；当前产品仅创建普通引擎会话。
 export interface ConversationInfo {
   kind?: string;
   readOnlyReason?: string;

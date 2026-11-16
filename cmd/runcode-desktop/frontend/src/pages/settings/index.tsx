@@ -61,7 +61,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   // 从会话工具条等入口直达某一节（如「图片生成」），不从目录顶开始。
   initialSection?: SettingsSectionId
 }) {
-  // 选库不锁设置页；仅真实只读历史限制改写。
+  // 只读历史限制改写会话设置。
   const sessionRestriction = info?.readOnlyReason || ''
   // The session's model is now switched live (see 模型 field below), so it is read
   // straight from the running session, not a form field. Permission mode still prefers

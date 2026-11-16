@@ -94,9 +94,6 @@ export function Composer({  attachments, setAttachments, retry, retryDisabled, s
   const sendingRef = useRef(false)
   const originalImages = (retry?.original.images ?? []).filter((i) => retry?.images.includes(i.index))
   const locked = submitting || sending || (!!retry && retryDisabled) || !!readOnlyReason
-  // 勾选与落盘／回合解耦：saving 只更新 pendingIds，不锁面板（锁了会 opacity 发灰挡连选）；
-  // busy/submitting 也不锁——生成中改库只影响下一题，禁止的是第二次发送（sendBlock）。
-  // 仅「修改原提问」且该入口被禁用、或只读历史时才锁知识库。
   // dropping = 正有文件悬在输入区上方，用来显示"松开以添加附件"。
   const [dropping, setDropping] = useState(false)
   // 展开着的场景分类 id；'' = 没展开。与 mention 一样是纯界面状态，留在本组件。

@@ -1,6 +1,6 @@
 // AssistantMarkdown 是主助手正文的 Markdown 渲染器：在通用 Markdown 插槽上叠加
 // 静态预览识别（围栏完整性、类型、去重与单消息上限）。流式输出期间一律显示源码；
-// textOnly（知识库）不启用预览。不处理生图工具卡片——那是 GeneratedImageCard 的事。
+// textOnly 纯文本渲染不启用预览。不处理生图工具卡片——那是 GeneratedImageCard 的事。
 import { useMemo, type ReactNode } from 'react'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'

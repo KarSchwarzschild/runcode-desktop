@@ -380,7 +380,7 @@ describe('SettingsPage disable matrix', () => {
     await go('图片生成')
     await go('出网代理')
     expect(host.querySelector('#settings-proxy')).not.toBeNull()
-    // Knowledge selection is absent from SessionInfo here; the page must remain editable aside from the session fieldset.
+    // The rest of the page remains editable when the session fieldset is read-only.
     expect(host.querySelector('fieldset')?.disabled).toBe(true)
     expect(skipToggle().disabled).toBe(false)
     await act(async () => { releaseStatus({ loggedIn: false }) })
