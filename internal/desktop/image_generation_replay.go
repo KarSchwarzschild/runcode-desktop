@@ -40,6 +40,9 @@ func imageGenerationBlocks(workspace, sessionID string, blocks []ResumedBlock) [
 		} else if result, ok := imageGenerationResultFromContent(t.Output); ok {
 			t.ImageGeneration = &result
 		}
+		if t.ImageGeneration != nil {
+			t.IsError = t.ImageGeneration.Status != "succeeded"
+		}
 	}
 
 	recovered := map[string][]ResumedBlock{}
