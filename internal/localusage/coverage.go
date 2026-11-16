@@ -61,6 +61,18 @@ const (
 	coverageWriteBudget = 10 * time.Millisecond
 )
 
+// Select the effective deadline explicitly. WithTimeout can inherit an earlier
+// parent's cancellation signal even after that deadline has passed, while its
+// timer callback is still waiting to run. WithDeadline at that exact deadline
+// synchronously cancels an already expired budget before any SQL work starts.
+func boundedCoverageWriteContext(ctx context.Context, budget time.Duration) (context.Context, context.CancelFunc) {
+	deadline := time.Now().Add(budget)
+	if parent, ok := ctx.Deadline(); ok && parent.Before(deadline) {
+		deadline = parent
+	}
+	return context.WithDeadline(ctx, deadline)
+}
+
 func validCoverageReason(reason string) bool {
 	switch reason {
 	case "invalid_platform_scope", "missing_stable_identity", "begin_failed", "finish_failed", "coverage_history_compacted", "unclean_exit", "collection_gap", "capture_disabled":
@@ -173,7 +185,7 @@ func (s *Store) RecordCoverageGap(ctx context.Context, diagnostic CoverageDiagno
 	}
 	entry = s.coverage.add(entry)
 	pendingEntry := entry
-	ctx, cancel := context.WithTimeout(ctx, coverageWriteBudget)
+	ctx, cancel := boundedCoverageWriteContext(ctx, coverageWriteBudget)
 	defer cancel()
 	release, err := s.acquire(ctx)
 	if err != nil {
@@ -434,7 +446,7 @@ func (rec *coverageRecorder) recordFailure(ctx context.Context, scope Scope, at 
 }
 
 func (rec *coverageRecorder) Begin(ctx context.Context, start StartRecord) error {
-	ctx, cancel := context.WithTimeout(ctx, writeBudget)
+	ctx, cancel := boundedCoverageWriteContext(ctx, writeBudget)
 	defer cancel()
 	err := rec.Recorder.Begin(ctx, start)
 	if err != nil {
@@ -444,7 +456,7 @@ func (rec *coverageRecorder) Begin(ctx context.Context, start StartRecord) error
 }
 
 func (rec *coverageRecorder) Finish(ctx context.Context, finish FinishRecord) error {
-	ctx, cancel := context.WithTimeout(ctx, writeBudget)
+	ctx, cancel := boundedCoverageWriteContext(ctx, writeBudget)
 	defer cancel()
 	err := rec.Recorder.Finish(ctx, finish)
 	if err != nil {

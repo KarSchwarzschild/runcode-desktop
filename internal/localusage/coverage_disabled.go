@@ -14,7 +14,7 @@ const captureDisabledSinceKey = "capture_disabled_since_ms"
 // records only a time interval that conservatively applies to every scope.
 // The marker survives Close and abnormal exits until a later enabled startup.
 func (s *Store) SetCaptureEnabled(ctx context.Context, enabled bool) error {
-	ctx, cancel := context.WithTimeout(ctx, writeBudget)
+	ctx, cancel := boundedCoverageWriteContext(ctx, writeBudget)
 	defer cancel()
 	release, err := s.acquire(ctx)
 	if err != nil {

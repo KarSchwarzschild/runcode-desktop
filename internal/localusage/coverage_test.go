@@ -184,10 +184,23 @@ func TestCoverageRejectsSensitiveDiagnosticPayloads(t *testing.T) {
 func TestCoverageDiagnosticCapacityKeepsConservativeOverflow(t *testing.T) {
 	s := openTemp(t, nil)
 	base := time.Now().UTC().Truncate(time.Millisecond)
+	// Capacity is a persistence invariant, independent of the best-effort 10ms
+	// hot-path budget. Exercise its real SQL helper in one fixture transaction;
+	// deadline and in-memory fallback behavior have separate controlled tests.
+	ctx := context.Background()
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
 	for i := 1; i <= 270; i++ {
-		if err := s.RecordCoverageGap(context.Background(), CoverageDiagnostic{At: base.Add(time.Duration(i) * time.Millisecond), AccountDigest: fmt.Sprintf("%032x", i), Reason: "missing_stable_identity"}); err != nil {
+		at := base.Add(time.Duration(i) * time.Millisecond).UnixMilli()
+		if _, err := persistCoverageEntry(ctx, tx, coverageEntry{StartMs: at, EndMs: at + 1, AccountDigest: fmt.Sprintf("%032x", i), Reason: "missing_stable_identity"}); err != nil {
 			t.Fatal(err)
 		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 	var count int
 	if err := s.db.QueryRow(`SELECT COUNT(*) FROM diagnostics WHERE code LIKE 'coverage_gap:%'`).Scan(&count); err != nil || count > 256 {
@@ -201,12 +214,103 @@ func TestCoverageDiagnosticCapacityKeepsConservativeOverflow(t *testing.T) {
 	}
 }
 
+func TestCoverageMemoryCapacityKeepsConservativeOverflow(t *testing.T) {
+	s := openTemp(t, nil)
+	base := time.Now().UTC().Truncate(time.Millisecond)
+	for i := 1; i <= 270; i++ {
+		at := base.Add(time.Duration(i) * time.Millisecond).UnixMilli()
+		s.coverage.add(coverageEntry{StartMs: at, EndMs: at + 1, AccountDigest: fmt.Sprintf("%032x", i), Reason: "missing_stable_identity"})
+	}
+	if count := len(s.coverage.snapshot()); count > coverageDiagnosticLimit {
+		t.Fatalf("memory diagnostics are unbounded: count=%d", count)
+	}
+	scope := coverageTestScope()
+	scope.AccountDigest = fmt.Sprintf("%032x", 270)
+	got, err := s.QueryCoverage(context.Background(), scope, base, base.Add(time.Second))
+	if err != nil || got.StorageStatus != "degraded" || len(got.Gaps) != 1 || got.Gaps[0].Reason != "coverage_history_compacted" {
+		t.Fatalf("memory overflow silently lost coverage: %+v err=%v", got, err)
+	}
+}
+
 func TestCoverageQueryHonorsCancellation(t *testing.T) {
 	s := openTemp(t, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	if _, err := s.QueryCoverage(ctx, coverageTestScope(), time.Time{}, time.Time{}); !errors.Is(err, context.Canceled) {
 		t.Fatalf("cancelled query err=%v", err)
+	}
+}
+
+// A deadline can pass before its timer goroutine delivers cancellation. This
+// models the observed parent context (Err=nil with negative remaining time)
+// without depending on scheduler timing or Windows timer resolution.
+type unsignalledCoverageDeadline struct {
+	context.Context
+	deadline time.Time
+}
+
+func (c unsignalledCoverageDeadline) Deadline() (time.Time, bool) { return c.deadline, true }
+
+func TestCoverageDiagnosticRejectsUnsignalledExpiredDeadline(t *testing.T) {
+	s := openTemp(t, nil)
+	at := time.Now().UTC().Truncate(time.Millisecond)
+	ctx := unsignalledCoverageDeadline{Context: context.Background(), deadline: time.Now().Add(-time.Second)}
+	err := s.RecordCoverageGap(ctx, CoverageDiagnostic{At: at, Reason: "begin_failed"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expired diagnostic write error=%v", err)
+	}
+	assertOnlyMemoryCoverage(t, s, coverageTestScope(), at)
+}
+
+func TestCoverageRecorderRejectsUnsignalledExpiredDeadline(t *testing.T) {
+	for _, phase := range []string{"begin", "finish"} {
+		t.Run(phase, func(t *testing.T) {
+			s := openTemp(t, nil)
+			at := time.Now().UTC().Truncate(time.Millisecond)
+			start := sampleStart("expired-write", coverageTestScope(), at)
+			ctx := unsignalledCoverageDeadline{Context: context.Background(), deadline: time.Now().Add(-time.Second)}
+			rec := WithCoverageDiagnostics(s)
+			var err error
+			if phase == "begin" {
+				err = rec.Begin(ctx, start)
+			} else {
+				err = rec.Finish(ctx, FinishRecord{CallID: start.CallID, Status: StatusSucceeded, FinishedAt: at, FrozenStart: start})
+			}
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expired %s error=%v", phase, err)
+			}
+			var events int
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM events`).Scan(&events); err != nil || events != 0 {
+				t.Fatalf("expired %s wrote %d events, error=%v", phase, events, err)
+			}
+			assertOnlyMemoryCoverage(t, s, start.Scope, at)
+		})
+	}
+}
+
+func TestCaptureStateRejectsUnsignalledExpiredDeadline(t *testing.T) {
+	for _, enabled := range []bool{false, true} {
+		t.Run(fmt.Sprint(enabled), func(t *testing.T) {
+			s := openTemp(t, nil)
+			wantMarkers := 0
+			if enabled {
+				if err := s.SetCaptureEnabled(context.Background(), false); err != nil {
+					t.Fatal(err)
+				}
+				wantMarkers = 1
+			}
+			ctx := unsignalledCoverageDeadline{Context: context.Background(), deadline: time.Now().Add(-time.Second)}
+			if err := s.SetCaptureEnabled(ctx, enabled); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("expired capture state write error=%v", err)
+			}
+			var markers, diagnostics int
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM meta WHERE key=?`, captureDisabledSinceKey).Scan(&markers); err != nil || markers != wantMarkers {
+				t.Fatalf("expired capture state changed markers: count=%d error=%v", markers, err)
+			}
+			if err := s.db.QueryRow(`SELECT COUNT(*) FROM diagnostics`).Scan(&diagnostics); err != nil || diagnostics != 0 {
+				t.Fatalf("expired capture state wrote diagnostics: count=%d error=%v", diagnostics, err)
+			}
+		})
 	}
 }
 
