@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 
 	"github.com/wt68/runcode/internal/browsertool"
@@ -135,6 +136,12 @@ func isArtifactProtectedPathText(path string) bool {
 	if p == "" {
 		return true
 	}
+	// A colon beyond the Windows volume selects an NTFS data stream. In
+	// particular, .env::$DATA writes .env itself, so none of these aliases may
+	// receive the ordinary artifact override. Preserve the inner policy instead.
+	if runtime.GOOS == "windows" && strings.Contains(p[len(filepath.VolumeName(p)):], ":") {
+		return true
+	}
 	segments := strings.FieldsFunc(strings.ReplaceAll(p, "\\", "/"), func(r rune) bool { return r == '/' })
 	for _, segment := range segments {
 		switch segment {
@@ -159,13 +166,3 @@ func isBoundArtifactPreview(action permissions.Action) bool {
 	}
 	return action.Metadata != nil && action.Metadata[metadataArtifactPreview] == true
 }
-
-// Compatibility helpers for callers/tests that used the earlier SVG-only
-// wrapper. They now use the complete artifact policy and retain the old names
-// only so a stale integration test cannot accidentally reintroduce SVG-only
-// behavior.
-const reasonSVGWrite = reasonArtifactWrite
-
-func newSVGWritePolicy(inner permissions.Policy) artifactPolicy { return newArtifactPolicy(inner) }
-
-func isSVGFileMutation(action permissions.Action) bool { return isArtifactMutation(action) }

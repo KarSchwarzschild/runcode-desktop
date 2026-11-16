@@ -6,11 +6,15 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/wt68/runcode/internal/browsertool"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/tools/edit"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/tools/read"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/tools/write"
 )
 
 func artifactAction(op permissions.Operation, path string, readState string) permissions.Action {
@@ -146,6 +150,109 @@ func TestArtifactPolicyPreservesReadBeforeWriteDenials(t *testing.T) {
 		if d.FinalEffect != permissions.EffectDeny {
 			t.Fatalf("state %q => %+v, want deny", state, d)
 		}
+	}
+}
+
+func TestArtifactWindowsStreamMutationKeepsOriginalPolicy(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("NTFS stream aliases are Windows paths")
+	}
+	for _, name := range []string{".env", ".npmrc", ".gitconfig", ".ENV", "poster.png"} {
+		for _, operation := range []string{"create", "overwrite", "edit", "unread overwrite"} {
+			t.Run(name+"/"+operation, func(t *testing.T) {
+				ws := t.TempDir()
+				base := filepath.Join(ws, name)
+				path := base + "::$DATA"
+				if name == ".ENV" {
+					path = base + "::$data"
+				}
+				original := "original content"
+				if operation != "create" {
+					if err := os.WriteFile(base, []byte(original), 0o600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				tctx := &tool.Context{WorkingDirectory: ws}
+				if operation == "overwrite" || operation == "edit" {
+					input, _ := json.Marshal(map[string]string{"path": path})
+					if _, err := (read.Tool{}).Run(context.Background(), input, tctx, nil); err != nil {
+						t.Fatal(err)
+					}
+				}
+				var mutation tool.Tool = write.Tool{}
+				input, _ := json.Marshal(map[string]string{"path": path, "content": "changed content"})
+				if operation == "edit" {
+					mutation = edit.Tool{}
+					input, _ = json.Marshal(map[string]string{"path": path, "old_string": original, "new_string": "changed content"})
+				}
+				action, err := (permissions.DefaultResolver{}).Resolve(context.Background(), permissions.ResolveRequest{ToolName: mutation.Name(), Input: input, Context: tctx})
+				if err != nil {
+					t.Fatal(err)
+				}
+				before := (permissions.DefaultPolicy{}).Decide(context.Background(), action)
+				after := newArtifactPolicy(permissions.DefaultPolicy{}).Decide(context.Background(), action)
+				// Execute only a silent approval, exactly the decision that bypassed
+				// the protected base file's interactive permission boundary.
+				if after.FinalEffect == permissions.EffectAllow {
+					if _, err := mutation.Run(context.Background(), input, tctx, nil); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if after.FinalEffect != before.FinalEffect {
+					t.Errorf("stream mutation effect=%s, original policy=%s", after.FinalEffect, before.FinalEffect)
+				}
+				data, err := os.ReadFile(base)
+				if operation == "create" {
+					if !os.IsNotExist(err) {
+						t.Fatalf("stream alias created base file: data=%q err=%v", data, err)
+					}
+				} else if err != nil || string(data) != original {
+					t.Fatalf("stream alias modified base file: data=%q err=%v", data, err)
+				}
+			})
+		}
+	}
+}
+
+func TestArtifactWindowsOrdinaryDriveMutationStillRuns(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("Windows drive path")
+	}
+	ws := t.TempDir()
+	path := filepath.Join(ws, "poster.png")
+	tctx := &tool.Context{WorkingDirectory: ws}
+	for _, operation := range []string{"create", "overwrite", "edit"} {
+		t.Run(operation, func(t *testing.T) {
+			if operation != "create" {
+				input, _ := json.Marshal(map[string]string{"path": path})
+				if _, err := (read.Tool{}).Run(context.Background(), input, tctx, nil); err != nil {
+					t.Fatal(err)
+				}
+			}
+			var mutation tool.Tool = write.Tool{}
+			content := "created"
+			if operation == "overwrite" {
+				content = "overwritten"
+			}
+			input, _ := json.Marshal(map[string]string{"path": path, "content": content})
+			if operation == "edit" {
+				mutation, content = edit.Tool{}, "edited"
+				input, _ = json.Marshal(map[string]string{"path": path, "old_string": "overwritten", "new_string": content})
+			}
+			action, err := (permissions.DefaultResolver{}).Resolve(context.Background(), permissions.ResolveRequest{ToolName: mutation.Name(), Input: input, Context: tctx})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if d := newArtifactPolicy(permissions.DefaultPolicy{}).Decide(context.Background(), action); d.FinalEffect != permissions.EffectAllow {
+				t.Fatalf("ordinary drive path effect=%s, want allow", d.FinalEffect)
+			}
+			if _, err := mutation.Run(context.Background(), input, tctx, nil); err != nil {
+				t.Fatal(err)
+			}
+			if data, err := os.ReadFile(path); err != nil || string(data) != content {
+				t.Fatalf("ordinary artifact data=%q err=%v", data, err)
+			}
+		})
 	}
 }
 
