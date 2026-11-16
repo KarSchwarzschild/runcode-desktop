@@ -188,10 +188,6 @@ func (a *App) ReloadMCPServers() (bool, error) {
 		a.emitPreviewLifecycle(entry, "closed", "")
 		return false, wireError(err)
 	}
-	a.mu.Lock()
-	entry = a.entryLocked(id)
-	a.mu.Unlock()
-	a.emitPreviewLifecycle(entry, "ready", a.previewGenerationOf(id))
 	return true, nil
 }
 

@@ -57,4 +57,24 @@ func TestPreviewReadyOnPublicStartAndResume(t *testing.T) {
 		t.Fatal("resume changed session identity")
 	}
 	assertReady(first.SessionID, old)
+	if rebuilt, err := app.ReloadMCPServers(); err != nil || !rebuilt {
+		t.Fatalf("reload=%v error=%v", rebuilt, err)
+	}
+	current := app.previewGenerationOf(first.SessionID)
+	sink.mu.Lock()
+	defer sink.mu.Unlock()
+	ready := 0
+	for _, event := range sink.events {
+		if event.name != protocol.EventPreviewLifecycle {
+			continue
+		}
+		env := event.data.(coreprotocol.Envelope)
+		payload := env.Payload.(protocol.PreviewLifecycle)
+		if payload.Phase == "ready" && payload.Generation == current {
+			ready++
+		}
+	}
+	if ready != 1 {
+		t.Fatalf("rebuild published %d ready events for one generation", ready)
+	}
 }
