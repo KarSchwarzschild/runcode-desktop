@@ -479,6 +479,42 @@ func TestIsAuxiliaryLLMRequest(t *testing.T) {
 	}
 }
 
+func TestLocalUsageAuxiliaryFilteringAppliesOnlyToLLM(t *testing.T) {
+	for _, tc := range []struct {
+		name, kind, system, question string
+		want                         int
+	}{
+		{"ordinary_tool_free_chat", CallKindLLM, "You are a helpful assistant.", "What is this?", 1},
+		{"title", CallKindLLM, "You name a coding-assistant conversation.", "Title this request: question", 0},
+		{"summary", CallKindLLM, "You are condensing a coding-assistant conversation to save context.", "Conversation to summarize: question", 0},
+		{"vision_quotes_title", CallKindVision, "Analyze the image.", "Title this request: question", 1},
+		{"vision_quotes_summary", CallKindVision, "Analyze the image.", "Conversation to summarize: question", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := openTemp(t, nil)
+			scope := sampleScope(tc.name)
+			base := fakeProvider{name: "openai", stream: func(context.Context, llm.Request) (llm.Stream, error) {
+				ch := make(chan llm.StreamEvent)
+				stream := &memStream{ch: ch}
+				_ = stream.Close()
+				return stream, nil
+			}}
+			provider := WrapPlatformProviderKind(base, func(context.Context) (Scope, error) { return scope, nil }, store, tc.kind)
+			stream, err := provider.Stream(context.Background(), llm.Request{Model: "m", System: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: tc.system}}, Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: tc.question}}}}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for range stream.Events() {
+			}
+			_ = stream.Close()
+			page, err := store.QueryPage(context.Background(), QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Hour), EndAt: time.Now().Add(time.Hour)}, "", 20)
+			if err != nil || page.TotalCount != tc.want {
+				t.Fatalf("usage=%+v error=%v want=%d", page, err, tc.want)
+			}
+		})
+	}
+}
+
 func TestLocalUsageIdentityFrozen(t *testing.T) {
 	// U07：Stream 开始冻结 scope；中途 freeze 变了也不改归属。
 	dir := t.TempDir()

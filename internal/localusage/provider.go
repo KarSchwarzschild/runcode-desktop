@@ -69,7 +69,9 @@ func (p *platformProvider) Name() string { return p.base.Name() }
 func (p *platformProvider) Capabilities() llm.Capabilities { return p.base.Capabilities() }
 
 func (p *platformProvider) Stream(ctx context.Context, req llm.Request) (llm.Stream, error) {
-	if isAuxiliaryLLMRequest(req) {
+	// Vision's tool-free question is user content and may quote an auxiliary
+	// prompt. Only the LLM path can originate the engine's auxiliary requests.
+	if (p.kind == "" || p.kind == CallKindLLM) && isAuxiliaryLLMRequest(req) {
 		return p.base.Stream(ctx, req)
 	}
 	scope, scopeErr := p.freeze(ctx)
