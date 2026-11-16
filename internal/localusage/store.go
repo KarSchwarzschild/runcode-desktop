@@ -184,19 +184,14 @@ func (s *Store) markRunDirty() error {
 	return err
 }
 
-// recoverDirtyRuns：上次未干净退出时，将该 runId 的未完成 start 追加 unknown finish。
+// recoverDirtyRuns 在新 run 接纳调用前，把所有遗留 start 追加 unknown finish。
+// 旧版 Close 可能误删 dirty marker，不能只依赖它找到未完成调用。
 // 不在查询页面时恢复；不重发任何上游请求。
 func (s *Store) recoverDirtyRuns() error {
 	var dirty string
 	err := s.db.QueryRow(`SELECT value FROM meta WHERE key = 'active_run_id'`).Scan(&dirty)
-	if errors.Is(err, sql.ErrNoRows) || isMissingTable(err) {
-		return nil
-	}
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return err
-	}
-	if dirty == "" || dirty == s.run {
-		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -210,8 +205,8 @@ func (s *Store) recoverDirtyRuns() error {
 		SELECT e.call_id, e.scope_id, e.account_digest, e.bridge_digest, e.tenant_id,
 		       e.model, e.call_kind, e.session_id, e.turn_id, e.generation_id, e.started_at_ms, e.run_id
 		FROM events e
-		WHERE e.phase = 'start' AND e.run_id = ?
-		  AND NOT EXISTS (SELECT 1 FROM events f WHERE f.call_id = e.call_id AND f.phase = 'finish')`, dirty)
+		WHERE e.phase = 'start'
+		  AND NOT EXISTS (SELECT 1 FROM events f WHERE f.call_id = e.call_id AND f.phase = 'finish')`)
 	if err != nil {
 		return err
 	}
@@ -233,6 +228,9 @@ func (s *Store) recoverDirtyRuns() error {
 	}
 	if err := rows.Err(); err != nil {
 		return err
+	}
+	if len(list) == 0 {
+		return nil
 	}
 	for _, p := range list {
 		_, err := tx.ExecContext(ctx, `
@@ -514,7 +512,8 @@ func validateFinish(f FinishRecord) error {
 	return nil
 }
 
-// Close 标记干净退出并释放连接。必须在回合收尾之后调用。
+// Close 释放连接。只有全部 start 已收尾才标记干净退出；否则保留 dirty
+// marker，让下次启动将未完成调用恢复为 unknown，并记录覆盖缺口。
 func (s *Store) Close() error {
 	s.mu.Lock()
 	if s.closed {
@@ -525,8 +524,12 @@ func (s *Store) Close() error {
 	s.closed = true
 	s.mu.Unlock()
 	s.active.Wait()
-	_, _ = s.db.Exec(`DELETE FROM meta WHERE key = 'active_run_id'`)
-	s.closeErr = errors.Join(s.readDB.Close(), s.db.Close())
+	_, cleanErr := s.db.Exec(`DELETE FROM meta WHERE key = 'active_run_id'
+		AND NOT EXISTS (
+			SELECT 1 FROM events e WHERE e.phase = 'start'
+			AND NOT EXISTS (SELECT 1 FROM events f WHERE f.call_id = e.call_id AND f.phase = 'finish')
+		)`)
+	s.closeErr = errors.Join(cleanErr, s.readDB.Close(), s.db.Close())
 	close(s.closeDone)
 	return s.closeErr
 }

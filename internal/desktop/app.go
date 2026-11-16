@@ -1,4 +1,4 @@
-﻿package desktop
+package desktop
 
 // app.go 是桌面外壳的骨架:App 结构本身、会话的开与关,以及各命令共用的错误包装
 // 与状态映射。回合、自动标题、会话设置分别在 turn.go / title.go /
@@ -35,8 +35,9 @@ import (
 // their protocol codes at every command boundary. Host-side failures already
 // arrive as *protocol.Error and pass through untouched.
 var (
-	errNoSession = errors.New("no active session")
-	errBusy      = errors.New("a turn is already in progress")
+	errNoSession  = errors.New("no active session")
+	errBusy       = errors.New("a turn is already in progress")
+	errAppExiting = errors.New("应用正在退出，无法创建会话")
 )
 
 // Dialoger opens native file/folder pickers. The Wails shell implements it; the
@@ -73,7 +74,7 @@ type Quitter interface{ Quit() }
 //     条目加锁,并遵守 startMu → App.mu → entry.mu 的次序。
 type sessionEntry struct {
 	modelRef   modelReference
-	questionMu sync.Mutex       // serializes submission preparation without holding App.mu
+	questionMu sync.Mutex             // serializes submission preparation without holding App.mu
 	identity   sessionIdentityBinding // immutable account binding for per-session product state
 	// Creation connection belongs to this entry, not whichever session has focus.
 	connectionConfig engine.Config
@@ -927,6 +928,9 @@ func (a *App) StartSession(req StartSessionRequest) (SessionInfo, error) {
 	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
+	if a.exit.closing.Load() {
+		return SessionInfo{}, wireError(errAppExiting)
+	}
 	// Record the workspace before the build so session listing works even when
 	// this start fails (pre-host behavior).
 	a.mu.Lock()
@@ -965,6 +969,9 @@ func (a *App) openSessionHeld(cfg engine.Config) (SessionInfo, error) {
 // 别的东西,它就没了"——先是新建对话,再是换工作区,最后是点最近对话。替换式打开
 // 留给真正意味着"这条会话要被换掉"的地方:换模型/改设置的原地重建、重载 MCP。
 func (a *App) addSessionHeld(cfg engine.Config, passport bool, tenantID string, refs ...modelReference) (SessionInfo, error) {
+	if a.exit.closing.Load() {
+		return SessionInfo{}, errAppExiting
+	}
 	if info, ok, err := a.focusIfAlreadyOpenHeld(cfg.Resume); ok {
 		return info, err
 	}
@@ -975,6 +982,9 @@ func (a *App) addSessionHeld(cfg engine.Config, passport bool, tenantID string, 
 // identity. Callers that build a new connection pass its origin directly; callers
 // that reuse a.config use openSessionHeld and inherit the stored identity.
 func (a *App) openSessionWithConnectionHeld(cfg engine.Config, passport bool, tenantID string, refs ...modelReference) (SessionInfo, error) {
+	if a.exit.closing.Load() {
+		return SessionInfo{}, errAppExiting
+	}
 	if info, ok, err := a.focusIfAlreadyOpenHeld(cfg.Resume); ok {
 		return info, err
 	}
@@ -1038,14 +1048,13 @@ func (a *App) buildSessionModeHeld(ctx context.Context, cfg engine.Config, passp
 }
 
 func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, passport bool, tenantID string, focus, restoreModel bool, refs ...modelReference) (SessionInfo, error) {
+	if a.exit.closing.Load() {
+		return SessionInfo{}, errAppExiting
+	}
 	requested := cfg.Model
 	cfg, err := restoredContextModel(ctx, cfg, restoreModel)
 	if err != nil {
 		return SessionInfo{}, err
-	}
-	resumeID := cfg.Resume
-	if resumeID == "" {
-		resumeID = cfg.SessionID
 	}
 	if passport && requested != "" && cfg.Model != requested && !a.keepRestoredPlatformModel(ctx, tenantID, cfg.Model) {
 		debugLog("resume: sidecar model %q is not a platform model; using %q", cfg.Model, requested)
