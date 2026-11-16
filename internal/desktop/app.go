@@ -1155,6 +1155,7 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 
 	// Restart the workspace preview server for this session (non-fatal on error).
 	a.startPreview(cfg.CWD)
+	a.emitPreviewLifecycle(entry, "ready", a.previewGenerationOf(id))
 	return a.sessionInfo(st), nil
 }
 
