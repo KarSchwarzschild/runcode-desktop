@@ -172,11 +172,13 @@ func TestLocalUsageImageLifecycle(t *testing.T) {
 }
 
 func TestLocalUsageRejectedBeforeSend(t *testing.T) {
-	// U05：禁用／发送前拒绝 → 零调用。
+	// U05：发送前拒绝 → 零调用。旧会话开关关闭不再拦截；改用 OA 锁定。
 	f := newImageGenFlow(t)
 	store := usageTestStore(t)
 	enableUsageCapture(t, f.app, store)
-	setImageGen(t, f.app, f.id, false)
+	f.app.mu.Lock()
+	f.entry.oaLocalModel = "local-model"
+	f.app.mu.Unlock()
 	f.app.freezeImageGenerationTurn(f.entry)
 	_ = f.run(t, "tu_rej", `{"prompt":"海报"}`)
 	if f.bridge.posts.Load() != 0 {
