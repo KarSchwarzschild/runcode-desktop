@@ -28,6 +28,7 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
   const load = useCallback(async () => {
     const gen = ++generation.seq
     setLoading(true)
+    setSaving(false)
     setCatalogError('')
     setSaveError('')
     setSaved(false)
