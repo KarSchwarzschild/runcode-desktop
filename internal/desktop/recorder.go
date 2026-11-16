@@ -250,6 +250,9 @@ func validRecordingID(id string) error {
 func (a *App) StartRecording(req protocol.StartRecordingRequest) (protocol.RecordingInfo, error) {
 	a.rec.mu.Lock()
 	defer a.rec.mu.Unlock()
+	if a.exit.closing.Load() {
+		return protocol.RecordingInfo{}, wireError(errAppExiting)
+	}
 
 	if a.rec.sess != nil {
 		return protocol.RecordingInfo{}, wireError(errors.New("已经有一场录音在进行中"))
