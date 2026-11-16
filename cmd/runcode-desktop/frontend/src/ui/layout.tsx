@@ -44,6 +44,12 @@ export function Placeholder({ children, pad = 'md', className }: {
 // `scrollRef` hands out the scrolling column itself, for pages that position
 // content inside it (settings' in-page directory). `contentClassName` is appended
 // to the measure only; the scrolling column's classes are not configurable.
+//
+// `min-h-0` is required: without it a flex item's min-height stays at content
+// size, so a tall page (用量统计) expands the whole App instead of scrolling
+// here — body then scrolls and reveals the gray window background under the
+// sidebar. `overscroll-contain` stops wheel chaining / rubber-band at the edges
+// from bubbling to that same document scroll (same idea as settings-nav).
 export function PageShell({ title, hint, action, width = 720, scrollRef, contentClassName, children }: {
   title: ReactNode
   hint?: ReactNode
@@ -54,7 +60,7 @@ export function PageShell({ title, hint, action, width = 720, scrollRef, content
   children: ReactNode
 }) {
   return (
-    <div ref={scrollRef} className="flex-1 overflow-y-auto px-[22px] py-7">
+    <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto overscroll-contain px-[22px] py-7">
       <div className={`mx-auto flex flex-col gap-5${contentClassName ? ' ' + contentClassName : ''}`} style={{ maxWidth: width }}>
         <div className={action ? 'flex items-start justify-between gap-3' : undefined}>
           <div className={action ? 'min-w-0' : undefined}>

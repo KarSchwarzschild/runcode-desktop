@@ -18,7 +18,7 @@ function parse(markup: string) {
 describe('PageShell', () => {
   it('keepsTheDefaultFrameWithoutOptionalProps', () => {
     const outer = parse(renderToStaticMarkup(<PageShell title="MCP 服务器" hint="说明">正文</PageShell>))
-    expect(outer.className).toBe('flex-1 overflow-y-auto px-[22px] py-7')
+    expect(outer.className).toBe('flex-1 min-h-0 overflow-y-auto overscroll-contain px-[22px] py-7')
     const inner = outer.firstElementChild as HTMLElement
     expect(inner.className).toBe('mx-auto flex flex-col gap-5')
     expect(inner.style.maxWidth).toBe('720px')
@@ -38,7 +38,7 @@ describe('PageShell', () => {
     const customInner = custom.firstElementChild as HTMLElement
     expect(customInner.className).toBe('mx-auto flex flex-col gap-5 settings-shell')
     expect(customInner.style.maxWidth).toBe('864px')
-    expect(custom.className).toBe('flex-1 overflow-y-auto px-[22px] py-7')
+    expect(custom.className).toBe('flex-1 min-h-0 overflow-y-auto overscroll-contain px-[22px] py-7')
     expect((plain.firstElementChild as HTMLElement).className).toBe('mx-auto flex flex-col gap-5')
     expect(markup.match(/settings-shell/g)).toHaveLength(1)
   })
