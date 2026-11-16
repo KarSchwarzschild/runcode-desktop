@@ -129,62 +129,16 @@ describe('Composer inline editor integration', () => {
 })
 
 describe('Composer image generation entry', () => {
-  it('「+」里开启生成图片：只改本会话开关，不动知识库，显示状态标记', async () => {
+  it('「+」菜单与工具条不再暴露生成图片开关或生图芯片', async () => {
     const app = await mount()
     await openAddMenu()
-    const item = findButton('生成图片')!
-    expect(item.getAttribute('aria-checked')).toBe('false')
-    await act(async () => item.click())
-    expect(imageApi.set).toHaveBeenCalledWith({ sessionId: 'A', enabled: true, expectedRevision: 0 })
-    expect(app.saves).toEqual([])
-    // 工具条只显示短「生图」；模型名与尺寸在菜单里，不把按钮拉宽。
-    expect(findButton('生图')).not.toBeNull()
-    expect(host.textContent).not.toContain('生图 · image-model')
-    await act(async () => findButton('生图')!.click())
-    expect(host.textContent).toContain('image-model')
-    expect(host.textContent).toContain('1024x1024')
-    expect(host.textContent).not.toContain('下一轮生效')
-    expect(host.textContent).not.toContain('每次生成会计费')
-  })
-
-  it('回合进行中禁止切换', async () => {
-    await mount({ busy: true })
-    await openAddMenu()
-    expect(findButton('生成图片')!.disabled).toBe(true)
-  })
-
-  it('未配置模型时标记提示去设置选择，不自动选择模型', async () => {
-    imageApi.get.mockImplementation(async (id: string) => imageView(id, { enabled: true, available: false, model: undefined, size: '', reason: '尚未选择生图模型，请在「设置 → 图片生成」中选择' }))
-    await mount()
-    expect(host.textContent).toContain('生图 · 未就绪')
-    await act(async () => findButton('生图')!.click())
-    expect(host.textContent).toContain('尚未选择生图模型')
-    expect(host.textContent).toContain('修改生图设置')
-    expect(imageApi.set).not.toHaveBeenCalled()
-  })
-
-  it('开关保存失败时提示原因且不显示已开启', async () => {
-    imageApi.set.mockRejectedValueOnce(new Error('图片生成记录无法读取或保存'))
-    const app = await mount()
-    await openAddMenu()
-    await act(async () => findButton('生成图片')!.click())
-    expect(app.toast()).toContain('无法读取或保存')
+    expect(findButton('生成图片')).toBeUndefined()
+    expect(host.querySelector('button[title^="添加："]')!.getAttribute('title')).toBe('添加：技能 / 智能体 / 文件 / 图片')
+    expect(host.textContent).not.toContain('关闭生图')
     expect(findButton('生图')).toBeUndefined()
-  })
-
-  it('新会话草稿保存失败时不发送首条消息', async () => {
-    const app = await mount({ sessionId: '' })
-    await openAddMenu()
-    await act(async () => findButton('生成图片')!.click())
     expect(imageApi.set).not.toHaveBeenCalled()
-    await app.switchSession('NEW')
-    imageApi.set.mockRejectedValueOnce(new Error('草稿未能保存'))
-    await act(async () => app.textbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
-    expect(imageApi.set).toHaveBeenCalledWith({ sessionId: 'NEW', enabled: true, expectedRevision: 0 })
-    expect(app.sends).toEqual([])
-    expect(app.toast()).toContain('草稿未能保存')
-
     await act(async () => app.textbox.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
     expect(app.sends).toEqual(['abcd'])
+    expect(imageApi.set).not.toHaveBeenCalled()
   })
 })

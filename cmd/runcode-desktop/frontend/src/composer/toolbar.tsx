@@ -45,10 +45,6 @@ const THINKING: { value: string; label: string }[] = [
 ]
 const THINKING_LABEL: Record<string, string> = { low: '低', medium: '中', high: '高' }
 
-// ImageGenerationChip 是工具条要画「生成图片」所需的全部：开关是不是开着、下一轮能不能
-// 真的生成（不能时 reason 说为什么）、用哪个模型。状态本身归 useImageGeneration。
-export type ImageGenerationChip = { enabled: boolean; available: boolean; reason: string; model: string; size: string; saving: boolean }
-
 export function ComposerToolbar({
   info,
   busy,
@@ -64,9 +60,6 @@ export function ComposerToolbar({
   onPickModel,
   onSend,
   onStop,
-  imageGeneration,
-  onToggleImageGeneration,
-  onOpenImageGenerationSettings,
 }: {
   info: SessionInfo | null
   busy: boolean
@@ -75,11 +68,6 @@ export function ComposerToolbar({
   onOpenSkillPicker: () => void
   onOpenAgentPicker: () => void
   onOpenFilePicker: () => void
-  // 不传 imageGeneration 就不画「生成图片」入口（例如还没接入的宿主）。
-  imageGeneration?: ImageGenerationChip
-  onToggleImageGeneration?: (enabled: boolean) => void
-  // 前往「设置 → 图片生成」；宿主没接时状态标记里改为文字提示。
-  onOpenImageGenerationSettings?: () => void
   onPickAttachment: () => void
   onToggleMode: () => void
   onTogglePlan: () => void
@@ -89,13 +77,9 @@ export function ComposerToolbar({
   onSend: () => void
   onStop: () => void
 }) {
-  // 模式由后端 kind 决定，不能因为移除了最后一个库就重新开放工具或外部模型。
-  // 选库不锁模式／模型／思考；仅真实只读历史禁用。旧独立 knowledge kind 也不再灰掉整条工具栏。
+  // 模式由后端 kind 决定；仅真实只读历史禁用整条工具栏相关入口。
   const restricted = !!info?.readOnlyReason
   const [addMenu, setAddMenu] = useState(false)
-  const [imageMenu, setImageMenu] = useState(false)
-  // 回合进行中不能切换：本轮已冻结目标，改了也只对下一轮生效，所以干脆不让改。
-  const imageToggleLocked = restricted || busy || !!imageGeneration?.saving
   const [reasonMenu, setReasonMenu] = useState(false)
   const [thinkMenu, setThinkMenu] = useState(false)
   // 对话内模型选择器：点底部模型名弹出，模糊检索，最多显示 10 个。平台(通行证)模型
@@ -144,10 +128,8 @@ export function ComposerToolbar({
   }, [])
   // Thresholds are the bar's natural content width: ~660px with every label, ~440px
   // once the secondary labels are icons. 0 = not measured yet → stay expanded.
-  // 生图芯片只显示「生图」短文案（模型名放进菜单），约占 56px，不再按模型名拉宽。
-  const chipShown = !!imageGeneration?.enabled
-  const compactBar = toolbarW > 0 && toolbarW < (chipShown ? 720 : 660)
-  const tinyBar = toolbarW > 0 && toolbarW < (chipShown ? 470 : 450)
+  const compactBar = toolbarW > 0 && toolbarW < 660
+  const tinyBar = toolbarW > 0 && toolbarW < 450
 
   return (
     <div
@@ -160,26 +142,12 @@ export function ComposerToolbar({
         <div className="relative flex-none">
           <button
             onClick={() => setAddMenu((v) => !v)}
-            title={imageGeneration ? '添加：生成图片 / 技能 / 智能体 / 文件 / 图片' : '添加：技能 / 智能体 / 文件 / 图片'}
+            title="添加：技能 / 智能体 / 文件 / 图片"
             className="border-none bg-transparent text-muted text-[13px] px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 hover:bg-surface2 hover:text-ink"
           >
             <Icon name="plus" size={16} />
           </button>
           <Popover open={addMenu} onClose={() => setAddMenu(false)} placement="up-left" className="w-[180px]">
-            {imageGeneration && (
-              <button
-                type="button"
-                role="menuitemcheckbox"
-                aria-checked={imageGeneration.enabled}
-                disabled={imageToggleLocked}
-                title={busy ? '回合进行中不能切换，结束或停止后再试' : imageGeneration.enabled ? '关闭当前会话的图片生成' : '为当前会话开启图片生成：你明确要求时才会生成，每次都要批准'}
-                onClick={() => { setAddMenu(false); onToggleImageGeneration?.(!imageGeneration.enabled) }}
-                className="w-full text-left px-3 py-[7px] text-[13px] text-ink hover:bg-surface2 flex items-center gap-2 disabled:opacity-40 disabled:cursor-default"
-              >
-                <Icon name="image-gen" size={15} />生成图片
-                {imageGeneration.enabled && <span className="ml-auto text-primary text-[12px]">✓</span>}
-              </button>
-            )}
             {/* 四项结构相同、只差图标/文案/动作，走数据驱动——加第五项不必再复制一遍类名。
                 关菜单是所有项的共同动作，提到这里，避免每项各写一次。 */}
             {([
@@ -198,39 +166,6 @@ export function ComposerToolbar({
             ))}
           </Popover>
         </div>
-        {imageGeneration?.enabled && (
-          <div className="relative flex-none">
-            <button
-              type="button"
-              onClick={() => setImageMenu((v) => !v)}
-              title={imageGeneration.available ? `生成图片已开启：${imageGeneration.model} · ${imageGeneration.size}` : `生成图片已开启但暂不可用：${imageGeneration.reason}`}
-              className={`border text-[13px] px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 flex-none whitespace-nowrap transition ${imageGeneration.available ? 'border-primary text-primaryink bg-primarysoft font-medium' : 'border-amber/40 text-amberink bg-amber/12'}`}
-            >
-              <Icon name="image-gen" size={16} />
-              {!compactBar && <span>{imageGeneration.available ? '生图' : '生图 · 未就绪'}</span>}
-            </button>
-            <Popover open={imageMenu} onClose={() => setImageMenu(false)} placement="up-left" className="w-[260px]">
-              {imageGeneration.available ? (
-                <div className="px-3 py-2.5 flex flex-col gap-1.5 border-b border-line">
-                  <div className="flex items-baseline gap-2 text-[12px] min-w-0">
-                    <span className="text-muted flex-none w-8">模型</span>
-                    <span className="font-mono text-ink2 break-all leading-snug">{imageGeneration.model}</span>
-                  </div>
-                  <div className="flex items-baseline gap-2 text-[12px]">
-                    <span className="text-muted flex-none w-8">尺寸</span>
-                    <span className="tabular-nums text-ink2">{imageGeneration.size}</span>
-                  </div>
-                </div>
-              ) : (
-                <div className="px-3 py-2 text-[12px] text-muted break-words border-b border-line">{imageGeneration.reason}</div>
-              )}
-              <button type="button" disabled={imageToggleLocked} onClick={() => { setImageMenu(false); onToggleImageGeneration?.(false) }} className="w-full text-left px-3 py-[7px] text-[13px] text-ink hover:bg-surface2 disabled:opacity-40 disabled:cursor-default">关闭生图</button>
-              {onOpenImageGenerationSettings
-                ? <button type="button" onClick={() => { setImageMenu(false); onOpenImageGenerationSettings() }} className="w-full text-left px-3 py-[7px] text-[13px] text-primary hover:bg-surface2">修改生图设置</button>
-                : <div className="px-3 py-[7px] text-[12px] text-faint">在「设置 → 图片生成」中修改生图设置</div>}
-            </Popover>
-          </div>
-        )}
         {/* The mode label is the last to go: unlike the toggles below, the shield
             icon alone carries no hint of which mode is active. */}
         <GhostBtn disabled={restricted} className="flex-none whitespace-nowrap" onClick={onToggleMode} title={info?.readOnlyReason || `点击切换权限模式\n当前：${modeLabel(info?.permissionMode)}`}>

@@ -413,7 +413,6 @@ export default function App() {
                 onPickModel={session.pickModel}
                 builtinScenarios={builtinScenarios}
                 onPickScenario={(sc) => void pickScenario(sc)}
-                onOpenImageGenerationSettings={() => openSettings('image-generation')}
               />
             </>
           )}

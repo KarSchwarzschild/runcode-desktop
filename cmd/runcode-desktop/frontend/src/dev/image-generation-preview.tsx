@@ -16,11 +16,10 @@ const tool = (data: ImageGenerationResult | undefined, type: ToolEvent['type'] =
   ({ type, toolName: 'image_generate', toolUseID: 'preview', data, message } as ToolEvent)
 const info = { sessionId: 'preview', kind: 'agent', model: 'platform-chat-model', permissionMode: 'interactive' } as SessionInfo
 
-function Toolbar({ chip }: { chip?: Parameters<typeof ComposerToolbar>[0]['imageGeneration'] }) {
+function Toolbar() {
   return <ComposerToolbar info={info} busy={false} canSend onOpenSkillPicker={noop} onOpenAgentPicker={noop} onOpenFilePicker={noop}
     onPickAttachment={noop} onToggleMode={noop} onTogglePlan={noop}
-    onChooseReasoning={noop} onChooseThinking={noop} onPickModel={noop} onSend={noop} onStop={noop}
-    imageGeneration={chip} onToggleImageGeneration={noop} />
+    onChooseReasoning={noop} onChooseThinking={noop} onPickModel={noop} onSend={noop} onStop={noop} />
 }
 
 export function ImageGenerationPreview() {
@@ -39,10 +38,8 @@ export function ImageGenerationPreview() {
         </div>
       </section>
       <section className="flex flex-col gap-3 max-w-[900px]">
-        <h2 className="text-[13px] text-muted">输入框工具条：未开启 / 已开启可用 / 已开启未就绪（点「+」看菜单，点标记看说明）</h2>
-        <Toolbar chip={{ enabled: false, available: true, reason: '', model: 'image-model', size: '1024x1024', saving: false }} />
-        <Toolbar chip={{ enabled: true, available: true, reason: '', model: base.model, size: '2048x2048', saving: false }} />
-        <Toolbar chip={{ enabled: true, available: false, reason: '尚未选择生图模型，请在「设置 → 图片生成」中选择', model: '', size: '', saving: false }} />
+        <h2 className="text-[13px] text-muted">输入框工具条（已无生图开关；生图设置入口改在助手回复尾注）</h2>
+        <Toolbar />
       </section>
       <section className="flex flex-col gap-3 max-w-[640px]">
         <h2 className="text-[13px] text-muted">设置小节（未连宿主，显示加载失败态）</h2>
