@@ -3,9 +3,7 @@ package desktop
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -326,22 +324,7 @@ func (m *tokenManager) identityParts() (issuer, sub string) {
 	m.mu.Lock()
 	token := m.ts.AccessToken
 	m.mu.Unlock()
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return "", ""
-	}
-	b, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", ""
-	}
-	var claims struct {
-		Sub string `json:"sub"`
-		Iss string `json:"iss"`
-	}
-	if json.Unmarshal(b, &claims) != nil || claims.Sub == "" {
-		return "", ""
-	}
-	return claims.Iss, claims.Sub
+	return tokenIdentityParts(token)
 }
 
 // isInternalUsageProvider 隐藏内部适配器名，不进入自定义模型可选列表。

@@ -3,7 +3,6 @@ package desktop
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"io"
@@ -124,25 +123,6 @@ type imageGenerationSendSnapshot struct {
 	Scope localusage.Scope
 }
 
-func imageGenerationTokenClaims(token string) (issuer, subject string) {
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return "", ""
-	}
-	b, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", ""
-	}
-	var claims struct {
-		Issuer  string `json:"iss"`
-		Subject string `json:"sub"`
-	}
-	if json.Unmarshal(b, &claims) != nil || claims.Subject == "" {
-		return "", ""
-	}
-	return claims.Issuer, claims.Subject
-}
-
 // prepareImageGenerationSend 完成所有本地拒绝条件后，返回不可变的 token／epoch／scope。
 // Token() 可能刷新令牌；随后再次在锁下比对同一个 access token，避免把切换前后身份拼接。
 func (a *App) prepareImageGenerationSend(snap imageGenerationSnapshot) (imageGenerationSendSnapshot, error) {
@@ -159,7 +139,7 @@ func (a *App) prepareImageGenerationSend(snap imageGenerationSnapshot) (imageGen
 	if token == "" || currentToken != token || tokenIdentity(token) != snap.Account || epoch != snap.Epoch {
 		return imageGenerationSendSnapshot{}, notSent("auth", "会话账号已变化，本次未生成图片；请重新打开会话")
 	}
-	issuer, subject := imageGenerationTokenClaims(token)
+	issuer, subject := tokenIdentityParts(token)
 	if issuer == "" || subject == "" {
 		return imageGenerationSendSnapshot{}, notSent("auth", "调用身份信息缺失，本次未提交生成请求")
 	}

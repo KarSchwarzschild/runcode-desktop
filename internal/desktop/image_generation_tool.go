@@ -169,10 +169,7 @@ func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input
 	// 用量在 postImageGeneration 的可信发送边界回调中开始。配置、目录、账本、
 	// token／epoch、请求构造和发送前取消都不会创建图片调用；该回调拿到的 scope
 	// 来自同一受保护 token 快照，Finish 不再读取当前登录态。
-	var endUsage func(status, errCode string, images *int64)
-	if endUsage == nil {
-		endUsage = func(string, string, *int64) {}
-	}
+	endUsage := func(string, string, *int64) {}
 
 	resp, err := a.postImageGeneration(ctx, snap, in, func(scope localusage.Scope) {
 		// 先落盘 attempted 再开始统计；即使统计库写失败，也不能因此重发模型请求。
@@ -185,9 +182,6 @@ func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input
 			CallID: generationID, Scope: scope, Model: snap.Model, CallKind: localusage.CallKindImage,
 			SessionID: snap.SessionID, TurnID: snap.TurnID, GenerationID: generationID, StartedAt: time.Now().UTC(),
 		})
-		if endUsage == nil {
-			endUsage = func(string, string, *int64) {}
-		}
 	})
 	if err != nil {
 		f := imageGenerationFailureOf(err)
