@@ -317,3 +317,19 @@ func TestPrepareExitCompletesUsageAfterSessionClose(t *testing.T) {
 		t.Fatalf("normal exit lost the final write: status=%q err=%v", status, err)
 	}
 }
+
+func TestPrepareExitKeepsSuccessfulResultAfterDeadline(t *testing.T) {
+	isolateConfigDir(t)
+	app := New(&recordingSink{})
+	if !app.PrepareExit(100 * time.Millisecond) {
+		t.Fatal("idle exit did not complete")
+	}
+	// Let the shared deadline expire; this tests elapsed-time behavior rather
+	// than using a delay to coordinate concurrent operations.
+	<-time.After(time.Until(app.exit.deadline))
+	for range 100 {
+		if !app.PrepareExit(time.Hour) {
+			t.Fatal("completed exit lost its result after the original deadline")
+		}
+	}
+}

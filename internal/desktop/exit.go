@@ -62,6 +62,13 @@ func (a *App) PrepareExit(limit time.Duration) bool {
 	case <-a.exit.done:
 		return a.exit.complete
 	case <-timer.C:
+		// A finished run keeps its published result even after the deadline.
+		// Both channels can be ready when another exit path arrives later.
+		select {
+		case <-a.exit.done:
+			return a.exit.complete
+		default:
+		}
 		debugLog("exit: cleanup still running after %s; exiting anyway", limit)
 		return false
 	}
