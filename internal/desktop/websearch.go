@@ -43,7 +43,7 @@ func webSearchEndpoint(baseURL string) string {
 	return base + "/websearch"
 }
 
-// passportWebSearch 造这条会话要用的 WebSearch 工具；非通行证连接返回 nil，引擎
+// passportWebSearchFor 造这条会话要用的 WebSearch 工具；非通行证连接返回 nil，引擎
 // 保留内置的那条(见引擎 build.go 的 replaceWebSearch)。
 //
 // 搜索模型可用 RUNCODE_WEBSEARCH_MODEL 覆盖，留空由 websearchtool 填默认值——
@@ -52,11 +52,7 @@ func webSearchEndpoint(baseURL string) string {
 // HTTP 客户端交给 websearchtool 自己建(普通带超时客户端)：**不能**用引擎那个加固
 // 客户端，它拒连回环/内网地址，而 Bridge 常部署在内网——与 passportHTTP 同一条
 // 理由。
-func passportWebSearch(cfg *engine.Config) tool.Tool {
-	return passportWebSearchFor(nil, cfg)
-}
-
-// passportWebSearchFor 在有 App 时挂上本机用量 Capture（401 续期仍只记一次）。
+// 在有 App 时挂上本机用量 Capture（401 续期仍只记一次）。
 func passportWebSearchFor(a *App, cfg *engine.Config) tool.Tool {
 	if !usingPassport(cfg) {
 		return nil
@@ -68,23 +64,25 @@ func passportWebSearchFor(a *App, cfg *engine.Config) tool.Tool {
 		OnUnauthorized: cfg.OnUnauthorized,
 	}
 	if a != nil && platformEnabled.Load() {
-		tenant := tenantFromBridgeBaseURL(cfg.BaseURL)
-		bridge := passportConfig().BridgeBaseURL
-		wc.Capture = func(ctx context.Context, model string) func(ok bool, errCode string) {
-			scope, err := a.freezeUsageScopeParts(bridge, tenant)
+		freeze := platformUsageFreezer(cfg.BaseURL, a.freezeUsageIdentity, currentPlatformRecorder())
+		wc.Capture = func(ctx context.Context, model string) func(websearchtool.Outcome, string) {
+			scope, err := freeze(ctx)
 			if err != nil {
-				return func(bool, string) {}
+				return func(websearchtool.Outcome, string) {}
 			}
 			end, began := a.beginNonLLMCapture(ctx, localusage.StartRecord{
 				CallID: localusage.NewCallID(), Scope: scope, Model: model, CallKind: localusage.CallKindSearch,
 				StartedAt: time.Now().UTC(),
 			})
 			if !began {
-				return func(bool, string) {}
+				return func(websearchtool.Outcome, string) {}
 			}
-			return func(ok bool, errCode string) {
+			return func(outcome websearchtool.Outcome, errCode string) {
 				status := localusage.StatusSucceeded
-				if !ok {
+				switch outcome {
+				case websearchtool.OutcomeCancelled:
+					status = localusage.StatusCancelled
+				case websearchtool.OutcomeFailed:
 					status = localusage.StatusFailed
 				}
 				end(status, errCode, nil)
@@ -92,19 +90,4 @@ func passportWebSearchFor(a *App, cfg *engine.Config) tool.Tool {
 		}
 	}
 	return websearchtool.New(wc)
-}
-
-// tenantFromBridgeBaseURL 从 <bridge>/t/<tenant>/v1 解析租户；无前缀则空串。
-func tenantFromBridgeBaseURL(baseURL string) string {
-	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
-	const marker = "/t/"
-	i := strings.Index(base, marker)
-	if i < 0 {
-		return ""
-	}
-	rest := base[i+len(marker):]
-	if j := strings.IndexByte(rest, '/'); j >= 0 {
-		rest = rest[:j]
-	}
-	return rest
 }

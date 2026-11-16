@@ -252,23 +252,23 @@ func TestLocalUsageSearchLifecycle(t *testing.T) {
 		OnUnauthorized: func() {
 			// 续期后第二次 POST 成功（phase 已是 1，再 Add 变成 2）
 		},
-		Capture: func(ctx context.Context, model string) func(bool, string) {
+		Capture: func(ctx context.Context, model string) func(websearchtool.Outcome, string) {
 			scope, err := app.freezeUsageScopeParts(passportConfig().BridgeBaseURL, "tenant-a")
 			if err != nil {
 				t.Errorf("scope: %v", err)
-				return func(bool, string) {}
+				return func(websearchtool.Outcome, string) {}
 			}
 			end, began := app.beginNonLLMCapture(ctx, localusage.StartRecord{
 				CallID: localusage.NewCallID(), Scope: scope, Model: model,
 				CallKind: localusage.CallKindSearch, StartedAt: time.Now().UTC(),
 			})
 			if !began {
-				return func(bool, string) {}
+				return func(websearchtool.Outcome, string) {}
 			}
-			return func(ok bool, errCode string) {
+			return func(outcome websearchtool.Outcome, errCode string) {
 				ends.Add(1)
 				st := localusage.StatusSucceeded
-				if !ok {
+				if outcome == websearchtool.OutcomeFailed {
 					st = localusage.StatusFailed
 				}
 				end(st, errCode, nil)
