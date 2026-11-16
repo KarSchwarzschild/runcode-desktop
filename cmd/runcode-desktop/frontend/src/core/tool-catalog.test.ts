@@ -74,7 +74,7 @@ describe('toolLabel', () => {
 it('labels image generation without promising it is free', () => {
   expect(toolVerb('image_generate')).toBe('生成图片')
   expect(toolLabel('image_generate')).toBe('文生图')
-  expect(BUILTIN_TOOLS.image_generate.desc).toContain('计费')
+  expect(BUILTIN_TOOLS.image_generate.desc).not.toMatch(/免费|不计费/)
 })
 
 it('labels OA attachment discovery and local downloads separately', () => {

@@ -74,7 +74,6 @@ async function mount(options: { kind?: string; busy?: boolean; attachments?: Att
   let text = 'abcd'
   let toast = ''
   let sessionId = options.sessionId ?? 'A'
-  const contextVersion = 1
   const saves: string[][] = []
   const sends: string[] = []
   const refreshFiles = vi.fn()

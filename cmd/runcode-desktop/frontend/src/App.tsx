@@ -2,7 +2,6 @@
 import { ArtifactActionsContext } from '@/chat/artifact-actions'
 import { useChatDrafts } from '@/session/use-chat-drafts'
 import { useQuestionRetry } from '@/session/use-question-retry'
-import { emptyDraft } from '@/session/question-draft'
 // App 只做两件事：把各个 hook 接起来（会话 / 对话 / 权限队列 / 预览栏 / 文件），
 // 以及按当前视图摆放 shell 组件。任何具体逻辑都不在这里——需要改行为时去
 // session/ 下对应的 hook，需要改样子去 shell/ 或各页面。
