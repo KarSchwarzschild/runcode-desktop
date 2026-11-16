@@ -20,7 +20,7 @@ import { AgentTaskCard } from './agent-task'
 import { ExecutionCard } from './execution-card'
 import { RecordingCard } from './recorder-card'
 
-export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange }: {
+export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings }: {
   textOnly?: boolean
   block: Block
   onRetryQuestion?: (id: string) => void
@@ -30,6 +30,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
   resolveFile?: (token: string) => string | null
   onGenerateMinutes?: (mark: RecordingMark) => void
   onContentHeightChange?: () => void
+  onOpenImageGenerationSettings?: () => void
 }) {
   // While an assistant answer streams, keep it in a fixed-height window pinned to
   // the newest text (consistent with the tool/agent cards); release to full height
@@ -95,6 +96,22 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                   {block.text}
                 </AssistantMarkdown>
                 {block.streaming && <span className="caret">▍</span>}
+              </div>
+            )}
+            {!block.streaming && block.imageGenerationNote && (
+              <div className="text-[12px] text-muted leading-snug flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>
+                  当前使用的生图模型：{block.imageGenerationNote.modelLabel}
+                  {' · '}
+                  生图尺寸：{block.imageGenerationNote.sizeLabel}
+                </span>
+                {onOpenImageGenerationSettings ? (
+                  <button type="button" onClick={onOpenImageGenerationSettings} className="text-primary hover:underline cursor-pointer bg-transparent border-0 p-0 text-[12px]">
+                    修改生图设置
+                  </button>
+                ) : (
+                  <span className="text-faint">在「设置 → 图片生成」中修改生图设置</span>
+                )}
               </div>
             )}
           </div>

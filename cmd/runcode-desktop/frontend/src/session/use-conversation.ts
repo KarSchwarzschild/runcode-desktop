@@ -32,6 +32,14 @@ import {
   type AgentNested,
   type Block,
 } from '@/chat/blocks'
+import {
+  lastUserQuestionId,
+  loadImageGenerationNoteMap,
+  rehydrateAssistantNotes,
+  saveImageGenerationNote,
+  stampTurnAssistantNote,
+  type AssistantImageGenerationNote,
+} from '@/chat/image-generation-note'
 import { basename } from '@/core/paths'
 import { digestDisplayText, docDisplayText, minutesDisplayText, parseRecordingMarker, type RecordingMark } from '@/recorder/minutes'
 import {
@@ -46,7 +54,7 @@ const now = () =>
 
 export type Conversation = ReturnType<typeof useConversation>
 
-export function useConversation({ focusedId, infoRef, permissions, onFilesChanged, onOpenPreview, showToast }: {
+export function useConversation({ focusedId, infoRef, permissions, onFilesChanged, onOpenPreview, showToast, getImageGenerationNote }: {
   /** focusedId 是当前**看得见**的那条会话。状态每会话存一份，渲染只取这一条。 */
   focusedId: string
   infoRef: RefObject<SessionInfo | null>
@@ -58,6 +66,8 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   onFilesChanged: () => void
   onOpenPreview: (artifact: import('@/core/bridge').ArtifactReference) => void
   showToast: (text: string) => void
+  /** 回合开始时读取当前生图设置快照；缺省则不写尾注。 */
+  getImageGenerationNote?: () => AssistantImageGenerationNote | null
 }) {
   // 每会话一份状态。引擎本来就是多会话的，每条信封都带 sessionId；存成一份全局
   // 状态时，后台会话的输出会记到前台会话头上。planOpen 不在其中——它是"胶囊下拉
@@ -71,6 +81,10 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   // 读 focusedId）。事件本身按信封里的 id 落，这个只用于判断"要不要动界面"。
   const focusedRef = useRef(focusedId)
   focusedRef.current = focusedId
+  // 每会话在回合开始冻结一份生图尾注，回合结束时写入助手气泡，避免事后改设置改写历史。
+  const turnImageGenNotes = useRef(new Map<string, AssistantImageGenerationNote>())
+  const getImageGenNoteRef = useRef(getImageGenerationNote)
+  getImageGenNoteRef.current = getImageGenerationNote
 
   // patch 改**指定**会话；下面那组 setXxx 是"改聚焦会话"的薄壳，签名与原来的
   // useState setter 一致，所以发送/停止/压缩那些本来就只作用于当前会话的动作
@@ -240,6 +254,13 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
           if (!producedText && end.text.trim()) {
             next = [...next, { kind: 'assistant', id: nextID(), text: end.text, streaming: false, ts: now() }]
           }
+          const frozenNote = turnImageGenNotes.current.get(sid)
+          if (frozenNote) {
+            next = stampTurnAssistantNote(next, frozenNote)
+            const qid = lastUserQuestionId(next)
+            if (qid) saveImageGenerationNote(sid, qid, frozenNote)
+            turnImageGenNotes.current.delete(sid)
+          }
           // The turn halted. For a user-denied tool, show a clear "stopped" notice.
           // For an AskUser question the interactive card already prompts the user,
           // so the notice would be redundant — skip it then.
@@ -358,6 +379,8 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
     const blockId = nextID()
     userStopped.current.delete(sid)
     chatStick.current = true
+    const note = getImageGenNoteRef.current?.() ?? null
+    if (note) turnImageGenNotes.current.set(sid, note)
     blocksOf(sid, (prev) => [...prev, { kind: 'user', id: blockId, text: display ?? req.text, ts: now(), attachments: names }])
     patch(sid, (s) => ({ ...s, busy: true }))
     try {
@@ -522,6 +545,10 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         }]
       }),
     )
+    // 引擎恢复会换掉助手块 id；按 questionId 从本机尾注映射贴回去。
+    if (sid) {
+      setBlocks((prev) => rehydrateAssistantNotes(prev, loadImageGenerationNoteMap(sid)))
+    }
     const edits = (await listEdits(sid)) ?? []
     if (isStale()) return
     if (edits.length > 0) {

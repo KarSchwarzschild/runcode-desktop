@@ -5,13 +5,14 @@ import type { ToolEvent, PlanSnapshot, PlanItem, EditRecord, ResumedBlock } from
 import { isEditRecord } from '@/core/bridge'
 import { IMAGE_GENERATION_TOOL } from '@/core/image-generation'
 import { type RecordingMark } from '@/recorder/minutes'
+import type { AssistantImageGenerationNote } from './image-generation-note'
 
 // AgentNested holds a sub-agent's live activity, shown nested inside its Task card:
 // the streamed assistant text and the child tool events (merged by tool-use id).
 export type AgentNested = { agent: string; text: string; tools: ToolEvent[]; usage?: { inTok: number; outTok: number; durMs?: number } }
 export type Block =
   | { kind: 'user'; id: string; questionId?: string; text: string; ts: string; attachments?: string[] }
-  | { kind: 'assistant'; id: string; text: string; thinking?: string; streaming: boolean; ts: string }
+  | { kind: 'assistant'; id: string; text: string; thinking?: string; streaming: boolean; ts: string; imageGenerationNote?: AssistantImageGenerationNote }
   // sessionId is the session the tool ran in; cards that open its files (the
   // generated image card) must address that session, never whichever is focused.
   | { kind: 'tool'; id: string; tool: ToolEvent; nested?: AgentNested; sessionId?: string }

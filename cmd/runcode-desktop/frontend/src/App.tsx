@@ -8,7 +8,8 @@ import { emptyDraft } from '@/session/question-draft'
 // session/ 下对应的 hook，需要改样子去 shell/ 或各页面。
 import { useEffect, useRef, useState } from 'react'
 import { usePersistentBool } from '@/hooks/use-persistent-state'
-import { errText, loadConfig, passportLogout, type SessionInfo } from '@/core/bridge'
+import { errText, getImageGenerationSettings, loadConfig, passportLogout, type SessionInfo } from '@/core/bridge'
+import { formatImageGenerationNote, type AssistantImageGenerationNote } from '@/chat/image-generation-note'
 import { passportDisplayName } from '@/core/passport-account'
 import { BRAND } from '@/core/brand'
 import { isPreviewable, toWorkspaceRel } from '@/preview/classify'
@@ -125,6 +126,9 @@ export default function App() {
     sessionId: focusedId, input, setInput, textarea: taRef, notify: toast.show,
   })
 
+  // 生图尾注用的当前设置快照：回合开始时冻结进对话块，事后改设置不改写历史。
+  const imageGenNoteRef = useRef<AssistantImageGenerationNote>(formatImageGenerationNote({}))
+
   const conversation = useConversation({
     focusedId,
     infoRef,
@@ -133,6 +137,7 @@ export default function App() {
     onFilesChanged: workspace.refresh,
     // 模型调用 open_preview 时给的是绝对路径（或工作区相对路径），统一换算后再开。
     onOpenPreview: preview.openReference,
+    getImageGenerationNote: () => imageGenNoteRef.current,
   })
 
 
@@ -158,6 +163,23 @@ export default function App() {
     infoRef.current = session.info
     setFocusedId(session.info?.sessionId ?? '')
   }, [session.info])
+  useEffect(() => {
+    let cancelled = false
+    void loadConfig()
+      .then((cfg) => getImageGenerationSettings(cfg.tenantId ?? ''))
+      .then((s) => {
+        if (!cancelled) {
+          imageGenNoteRef.current = formatImageGenerationNote({
+            modelName: s.defaultModel?.name, size: s.defaultSize,
+          })
+        }
+      })
+      .catch(() => {
+        if (!cancelled) imageGenNoteRef.current = formatImageGenerationNote({})
+      })
+    return () => { cancelled = true }
+    // 切会话/从设置页返回时刷新，避免尾注冻结到过期设置。
+  }, [focusedId, view])
 
   // 阶段化计划模式（需求理解 → 方案设计 → 方案审查 → 用户审批）。确认方案后要发的
   // 那条执行指令由后端拼好，这里原样走 conversation.send——busy、用户气泡、回合生命
@@ -373,6 +395,7 @@ export default function App() {
                 resolveFile={workspace.resolve}
                 recorderCard={restrictedConversation ? undefined : <LiveRecorderCard rec={recorder} onOpenWindow={() => void showRecorderWindow()} />}
                 onGenerateMinutes={(m) => void sendRecordingRequest(m, 'doc')}
+                onOpenImageGenerationSettings={() => openSettings('image-generation')}
               /></ArtifactActionsContext.Provider>
 
               {permissions.pending && (

@@ -18,6 +18,16 @@ it('keeps generated-image-unrelated assistant svg fences on the inline preview p
   expect(html).not.toContain('language-svg')
 })
 
+it('shows frozen imagegen footnote on completed assistant replies only', () => {
+  const note = { modelLabel: 'img-a', sizeLabel: '不固定尺寸（由提示词和生图模型能力共同决定）' }
+  const done = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a1', text: '好的', streaming: false, ts: '', imageGenerationNote: note }} onOpenImageGenerationSettings={() => {}} />)
+  expect(done).toContain('当前使用的生图模型：img-a')
+  expect(done).toContain('生图尺寸：')
+  expect(done).toContain('修改生图设置')
+  const streaming = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a2', text: '好', streaming: true, ts: '', imageGenerationNote: note }} />)
+  expect(streaming).not.toContain('修改生图设置')
+})
+
 describe('retry notice', () => {
   it('uses a quiet note, keeps the attempt count and moves diagnostics to the tooltip', () => {
     const reason = '模型仅返回思考或空内容，未返回回答或工具调用'
