@@ -126,8 +126,15 @@ export default function App() {
     sessionId: focusedId, input, setInput, textarea: taRef, notify: toast.show,
   })
 
-  // 生图尾注用的当前设置快照：回合开始时冻结进对话块，事后改设置不改写历史。
+  // 生图尾注用的当前设置快照：回合开始时再读一次；刷新失败保留上次成功值。
   const imageGenNoteRef = useRef<AssistantImageGenerationNote>(formatImageGenerationNote({}))
+  async function refreshImageGenerationNote(): Promise<AssistantImageGenerationNote> {
+    const cfg = await loadConfig()
+    const s = await getImageGenerationSettings(cfg.tenantId ?? '')
+    const note = formatImageGenerationNote({ modelName: s.defaultModel?.name, size: s.defaultSize })
+    imageGenNoteRef.current = note
+    return note
+  }
 
   const conversation = useConversation({
     focusedId,
@@ -137,7 +144,7 @@ export default function App() {
     onFilesChanged: workspace.refresh,
     // 模型调用 open_preview 时给的是绝对路径（或工作区相对路径），统一换算后再开。
     onOpenPreview: preview.openReference,
-    getImageGenerationNote: () => imageGenNoteRef.current,
+    getImageGenerationNote: () => refreshImageGenerationNote().catch(() => imageGenNoteRef.current),
   })
 
 
@@ -164,20 +171,7 @@ export default function App() {
     setFocusedId(session.info?.sessionId ?? '')
   }, [session.info])
   useEffect(() => {
-    let cancelled = false
-    void loadConfig()
-      .then((cfg) => getImageGenerationSettings(cfg.tenantId ?? ''))
-      .then((s) => {
-        if (!cancelled) {
-          imageGenNoteRef.current = formatImageGenerationNote({
-            modelName: s.defaultModel?.name, size: s.defaultSize,
-          })
-        }
-      })
-      .catch(() => {
-        if (!cancelled) imageGenNoteRef.current = formatImageGenerationNote({})
-      })
-    return () => { cancelled = true }
+    void refreshImageGenerationNote().catch(() => { /* 保留上次成功快照 */ })
     // 切会话/从设置页返回时刷新，避免尾注冻结到过期设置。
   }, [focusedId, view])
 

@@ -33,7 +33,6 @@ import {
   type Block,
 } from '@/chat/blocks'
 import {
-  lastUserQuestionId,
   loadImageGenerationNoteMap,
   rehydrateAssistantNotes,
   saveImageGenerationNote,
@@ -66,8 +65,8 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   onFilesChanged: () => void
   onOpenPreview: (artifact: import('@/core/bridge').ArtifactReference) => void
   showToast: (text: string) => void
-  /** 回合开始时读取当前生图设置快照；缺省则不写尾注。 */
-  getImageGenerationNote?: () => AssistantImageGenerationNote | null
+  /** 回合开始时读取当前生图设置快照（可异步）；缺省则不写尾注。 */
+  getImageGenerationNote?: () => AssistantImageGenerationNote | null | Promise<AssistantImageGenerationNote | null>
 }) {
   // 每会话一份状态。引擎本来就是多会话的，每条信封都带 sessionId；存成一份全局
   // 状态时，后台会话的输出会记到前台会话头上。planOpen 不在其中——它是"胶囊下拉
@@ -82,7 +81,9 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   const focusedRef = useRef(focusedId)
   focusedRef.current = focusedId
   // 每会话在回合开始冻结一份生图尾注，回合结束时写入助手气泡，避免事后改设置改写历史。
+  // pending 按乐观用户块 id 挂住，等 questionId 回执后再落盘，避免落到上一问。
   const turnImageGenNotes = useRef(new Map<string, AssistantImageGenerationNote>())
+  const pendingImageGenByUserBlock = useRef(new Map<string, { sessionId: string; note: AssistantImageGenerationNote }>())
   const getImageGenNoteRef = useRef(getImageGenerationNote)
   getImageGenNoteRef.current = getImageGenerationNote
 
@@ -257,8 +258,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
           const frozenNote = turnImageGenNotes.current.get(sid)
           if (frozenNote) {
             next = stampTurnAssistantNote(next, frozenNote)
-            const qid = lastUserQuestionId(next)
-            if (qid) saveImageGenerationNote(sid, qid, frozenNote)
+            // 落盘延后到 questionId 回执；这里只完成界面戳记。
             turnImageGenNotes.current.delete(sid)
           }
           // The turn halted. For a user-denied tool, show a clear "stopped" notice.
@@ -379,16 +379,29 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
     const blockId = nextID()
     userStopped.current.delete(sid)
     chatStick.current = true
-    const note = getImageGenNoteRef.current?.() ?? null
-    if (note) turnImageGenNotes.current.set(sid, note)
+    let note: AssistantImageGenerationNote | null = null
+    try {
+      note = (await getImageGenNoteRef.current?.()) ?? null
+    } catch { note = null }
+    if (note) {
+      turnImageGenNotes.current.set(sid, note)
+      pendingImageGenByUserBlock.current.set(blockId, { sessionId: sid, note })
+    }
     blocksOf(sid, (prev) => [...prev, { kind: 'user', id: blockId, text: display ?? req.text, ts: now(), attachments: names }])
     patch(sid, (s) => ({ ...s, busy: true }))
     try {
       const receipt = await submitQuestion(req)
       blocksOf(sid, (prev) => prev.map((b) => b.id === blockId && b.kind === 'user' ? { ...b, questionId: receipt.questionId } : b))
+      const pending = pendingImageGenByUserBlock.current.get(blockId)
+      if (pending && receipt.questionId) {
+        saveImageGenerationNote(pending.sessionId, receipt.questionId, pending.note)
+        pendingImageGenByUserBlock.current.delete(blockId)
+      }
       // Never set busy here: a fast model may have already emitted turn:end.
       return true
     } catch (e) {
+      pendingImageGenByUserBlock.current.delete(blockId)
+      turnImageGenNotes.current.delete(sid)
       blocksOf(sid, (prev) => {
         const remaining = prev.filter((b) => b.id !== blockId)
         const last = remaining[remaining.length - 1]

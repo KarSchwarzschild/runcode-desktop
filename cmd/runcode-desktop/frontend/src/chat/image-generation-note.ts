@@ -62,29 +62,51 @@ export function stampTurnAssistantNote(blocks: Block[], note: AssistantImageGene
   return blocks.map((b, i) => (i === lastAsst && b.kind === 'assistant' ? { ...b, imageGenerationNote: note } : b))
 }
 
-// rehydrateAssistantNotes 按 user.questionId 把持久化尾注贴回恢复后的助手块。
+// rehydrateAssistantNotes 按 user.questionId 把持久化尾注贴回恢复后的助手块；
+// 每个提问回合只贴在最后一个已完成的助手气泡上（与 stampTurnAssistantNote 一致）。
 export function rehydrateAssistantNotes(blocks: Block[], map: ImageGenerationNoteMap): Block[] {
   if (!map || Object.keys(map).length === 0) return blocks
-  let currentNote: AssistantImageGenerationNote | undefined
-  let changed = false
-  const next = blocks.map((b) => {
+  const stampAt = new Set<number>()
+  let turnStart = -1
+  let turnNote: AssistantImageGenerationNote | undefined
+  const flush = (endExclusive: number) => {
+    if (!turnNote) return
+    for (let i = endExclusive - 1; i > turnStart; i--) {
+      const b = blocks[i]
+      if (b.kind === 'assistant' && !b.streaming) {
+        stampAt.add(i)
+        return
+      }
+    }
+  }
+  for (let i = 0; i < blocks.length; i++) {
+    const b = blocks[i]
     if (b.kind === 'user') {
-      currentNote = b.questionId ? map[b.questionId] : undefined
-      return b
+      flush(i)
+      turnStart = i
+      turnNote = b.questionId ? map[b.questionId] : undefined
     }
-    if (b.kind === 'assistant' && !b.streaming && currentNote && !b.imageGenerationNote) {
-      changed = true
-      return { ...b, imageGenerationNote: currentNote }
-    }
-    return b
+  }
+  flush(blocks.length)
+  if (stampAt.size === 0) return blocks
+  let changed = false
+  const next = blocks.map((b, i) => {
+    if (!stampAt.has(i) || b.kind !== 'assistant' || b.imageGenerationNote) return b
+    const note = (() => {
+      for (let j = i; j >= 0; j--) {
+        const u = blocks[j]
+        if (u.kind === 'user' && u.questionId && map[u.questionId]) return map[u.questionId]
+      }
+      return undefined
+    })()
+    if (!note) return b
+    changed = true
+    return { ...b, imageGenerationNote: note }
   })
   return changed ? next : blocks
 }
 
-export function lastUserQuestionId(blocks: Block[]): string | undefined {
-  for (let i = blocks.length - 1; i >= 0; i--) {
-    const b = blocks[i]
-    if (b.kind === 'user' && b.questionId) return b.questionId
-  }
-  return undefined
+export function questionIdForUserBlock(blocks: Block[], userBlockId: string): string | undefined {
+  const b = blocks.find((x) => x.id === userBlockId && x.kind === 'user')
+  return b && b.kind === 'user' ? b.questionId : undefined
 }
