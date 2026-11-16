@@ -309,10 +309,6 @@ func (s *Store) beginLocked(ctx context.Context, start StartRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE scopes SET last_healthy_write_at_ms=? WHERE scope_id=?`, nowMs, start.Scope.ScopeID)
-	if err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 
@@ -439,10 +435,6 @@ func (s *Store) finishLocked(ctx context.Context, finish FinishRecord) error {
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE scopes SET last_healthy_write_at_ms=? WHERE scope_id=?`, nowMs, startScope)
-	if err != nil {
-		return err
-	}
 	return tx.Commit()
 }
 
@@ -459,8 +451,8 @@ func ensureScope(ctx context.Context, tx *sql.Tx, scope Scope, startedMs int64) 
 		return err
 	}
 	_, err = tx.ExecContext(ctx, `
-		INSERT INTO scopes(scope_id, account_digest, bridge_digest, tenant_id, collection_started_at_ms, coverage_status)
-		VALUES (?,?,?,?,?, 'ok')`,
+		INSERT INTO scopes(scope_id, account_digest, bridge_digest, tenant_id, collection_started_at_ms)
+		VALUES (?,?,?,?,?)`,
 		scope.ScopeID, scope.AccountDigest, scope.BridgeDigest, scope.TenantID, startedMs)
 	return err
 }
@@ -536,41 +528,3 @@ func (s *Store) Close() error {
 
 // Path 返回库文件绝对路径（测试／诊断用）。
 func (s *Store) Path() string { return s.path }
-
-// CountCalls 返回某 scope 的唯一 start 数（测试用）。
-func (s *Store) CountCalls(ctx context.Context, scopeID string) (int, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE scope_id=? AND phase='start'`, scopeID).Scan(&n)
-	return n, err
-}
-
-// CallStatus 返回 callId 在 finish 水位的状态；无 finish 则看 start→pending。
-func (s *Store) CallStatus(ctx context.Context, callID string) (string, error) {
-	var st sql.NullString
-	err := s.db.QueryRowContext(ctx, `SELECT status FROM events WHERE call_id=? AND phase='finish'`, callID).Scan(&st)
-	if err == nil {
-		return st.String, nil
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return "", err
-	}
-	var exists int
-	err = s.db.QueryRowContext(ctx, `SELECT 1 FROM events WHERE call_id=? AND phase='start'`, callID).Scan(&exists)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", sql.ErrNoRows
-	}
-	if err != nil {
-		return "", err
-	}
-	return StatusPending, nil
-}
-
-// DiagnosticCount 返回诊断条数（测试用）。
-func (s *Store) DiagnosticCount(ctx context.Context) (int, error) {
-	var n int
-	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM diagnostics`).Scan(&n)
-	return n, err
-}
-
-// DB 暴露只读测试钩子；生产查询走专用方法。
-func (s *Store) DB() *sql.DB { return s.db }

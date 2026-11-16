@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func TestQuerySnapshotUsesLatestFinishAndStableWatermark(t *testing.T) {
+func TestQueryPageUsesLatestFinishAndStableWatermark(t *testing.T) {
 	now := time.Date(2026, 11, 13, 4, 0, 0, 0, time.UTC)
 	s := openTemp(t, testClock(t, now))
 	ctx := context.Background()
@@ -26,7 +26,7 @@ func TestQuerySnapshotUsesLatestFinishAndStableWatermark(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snapshot, err := s.QuerySnapshot(ctx, QueryFilter{ScopeID: scope.ScopeID, StartAt: now.Add(-3 * time.Hour), EndAt: now})
+	snapshot, err := s.QueryPage(ctx, QueryFilter{ScopeID: scope.ScopeID, StartAt: now.Add(-3 * time.Hour), EndAt: now}, "", 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +42,7 @@ func TestQuerySnapshotUsesLatestFinishAndStableWatermark(t *testing.T) {
 	if err := s.Finish(ctx, FinishRecord{CallID: "call-a", Status: StatusFailed, FinishedAt: now, InputTokens: &late, InputTokensKnown: true, FrozenStart: start}); err != nil {
 		t.Fatal(err)
 	}
-	old, err := s.QuerySnapshot(ctx, QueryFilter{ScopeID: scope.ScopeID, StartAt: now.Add(-3 * time.Hour), EndAt: now, SnapshotSeq: snapshot.Seq})
+	old, err := s.QueryPage(ctx, QueryFilter{ScopeID: scope.ScopeID, StartAt: now.Add(-3 * time.Hour), EndAt: now, SnapshotSeq: snapshot.Seq}, "", 1000)
 	if err != nil {
 		t.Fatal(err)
 	}

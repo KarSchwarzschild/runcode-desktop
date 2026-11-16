@@ -90,7 +90,7 @@ func TestPlatformUsageConcurrentSessionsKeepFrozenTenant(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				snap, err := store.QuerySnapshot(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Hour), EndAt: time.Now().Add(time.Hour)})
+				snap, err := store.QueryPage(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Hour), EndAt: time.Now().Add(time.Hour)}, "", 1000)
 				if err != nil || len(snap.Calls) != 1 {
 					t.Fatalf("%s scope calls=%d err=%v; each session must use its own request URL", tenant, len(snap.Calls), err)
 				}
@@ -147,7 +147,7 @@ func TestPlatformUsageRejectsUnattributedCalls(t *testing.T) {
 					t.Fatal(err)
 				}
 				var count int
-				if err := store.DB().QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count); err != nil || count != 0 {
+				if err := localUsageTestDB(t, store).QueryRow(`SELECT COUNT(*) FROM events`).Scan(&count); err != nil || count != 0 {
 					t.Fatalf("unattributed call recorded %d events, err=%v", count, err)
 				}
 			})

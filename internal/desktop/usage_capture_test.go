@@ -116,7 +116,7 @@ func TestLocalUsagePlatformWiring(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, err := store.CountCalls(context.Background(), scope.ScopeID)
+	n, err := localUsageTestCountCalls(t, store, context.Background(), scope.ScopeID)
 	if err != nil || n != 1 {
 		t.Fatalf("calls=%d err=%v want 1 via provider wrap (observer-only would be 0)", n, err)
 	}
@@ -131,7 +131,7 @@ func TestLocalUsagePlatformWiring(t *testing.T) {
 	}
 	_ = vst.Close()
 	time.Sleep(30 * time.Millisecond)
-	n2, _ := store.CountCalls(context.Background(), scope.ScopeID)
+	n2, _ := localUsageTestCountCalls(t, store, context.Background(), scope.ScopeID)
 	if n2 != 2 {
 		t.Fatalf("after vision calls=%d want 2", n2)
 	}
@@ -152,7 +152,7 @@ func TestLocalUsageImageLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	n, _ := store.CountCalls(context.Background(), scope.ScopeID)
+	n, _ := localUsageTestCountCalls(t, store, context.Background(), scope.ScopeID)
 	if n != 1 {
 		t.Fatalf("image calls=%d want 1 (generationID=%s)", n, got.GenerationID)
 	}
@@ -165,7 +165,7 @@ func TestLocalUsageImageLifecycle(t *testing.T) {
 	if f.bridge.posts.Load() != 1 {
 		t.Fatalf("posts=%d want 1 (no replay charge)", f.bridge.posts.Load())
 	}
-	n2, _ := store.CountCalls(context.Background(), scope.ScopeID)
+	n2, _ := localUsageTestCountCalls(t, store, context.Background(), scope.ScopeID)
 	if n2 != 1 {
 		t.Fatalf("after replay calls=%d want 1", n2)
 	}
@@ -185,7 +185,7 @@ func TestLocalUsageRejectedBeforeSend(t *testing.T) {
 		t.Fatalf("posts=%d", f.bridge.posts.Load())
 	}
 	scope, _ := f.app.freezeUsageScopeParts(imageGenerationBridge(), "tenant-a")
-	n, _ := store.CountCalls(context.Background(), scope.ScopeID)
+	n, _ := localUsageTestCountCalls(t, store, context.Background(), scope.ScopeID)
 	if n != 0 {
 		t.Fatalf("rejected path recorded %d calls", n)
 	}
@@ -208,7 +208,7 @@ func TestLocalUsageTokenRejectedBeforeSendIsNotSubmitted(t *testing.T) {
 	if f.bridge.posts.Load() != 0 {
 		t.Fatalf("posts=%d, want zero", f.bridge.posts.Load())
 	}
-	if n, _ := store.CountCalls(context.Background(), scope.ScopeID); n != 0 {
+	if n, _ := localUsageTestCountCalls(t, store, context.Background(), scope.ScopeID); n != 0 {
 		t.Fatalf("missing token recorded %d image calls", n)
 	}
 }
@@ -293,7 +293,7 @@ func TestLocalUsageSearchLifecycle(t *testing.T) {
 	}
 	time.Sleep(30 * time.Millisecond)
 	scope, _ := app.freezeUsageScopeParts(passportConfig().BridgeBaseURL, "tenant-a")
-	n, _ := store.CountCalls(context.Background(), scope.ScopeID)
+	n, _ := localUsageTestCountCalls(t, store, context.Background(), scope.ScopeID)
 	if n != 1 {
 		t.Fatalf("search calls=%d want 1", n)
 	}

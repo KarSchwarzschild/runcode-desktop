@@ -323,7 +323,7 @@ func TestLocalUsageStreamErrorIsNotRecordedAsSuccess(t *testing.T) {
 		continue // 排空事件流
 	}
 	var got string
-	if err := store.DB().QueryRow(`SELECT status FROM events WHERE phase='finish'`).Scan(&got); err != nil {
+	if err := store.db.QueryRow(`SELECT status FROM events WHERE phase='finish'`).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
 	if got == StatusSucceeded {

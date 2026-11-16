@@ -166,7 +166,7 @@ func TestPrepareExitFailedCloseKeepsUsageRecoverable(t *testing.T) {
 	if app.PrepareExit(time.Second) {
 		t.Fatal("failed session flush reported successful exit cleanup")
 	}
-	if store.DB().Ping() != nil {
+	if !localUsageTestAvailable(store) {
 		t.Fatal("failed session cleanup closed the usage recorder")
 	}
 	session.closeErr = nil
@@ -185,7 +185,7 @@ func TestPrepareExitFailedCloseKeepsUsageRecoverable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if status, err := reopened.CallStatus(context.Background(), start.CallID); err != nil || status != localusage.StatusUnknown {
+	if status, err := localUsageTestCallStatus(t, reopened, context.Background(), start.CallID); err != nil || status != localusage.StatusUnknown {
 		t.Fatalf("failed exit recovery: status=%q err=%v", status, err)
 	}
 }
@@ -265,7 +265,7 @@ func TestPrepareExitAcceptsLateFinishAndRejectsNewSessions(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if status, err := reopened.CallStatus(context.Background(), start.CallID); err != nil || status != localusage.StatusCancelled {
+	if status, err := localUsageTestCallStatus(t, reopened, context.Background(), start.CallID); err != nil || status != localusage.StatusCancelled {
 		t.Fatalf("late finish after reopen: status=%q err=%v", status, err)
 	}
 }
@@ -302,7 +302,7 @@ func TestPrepareExitCompletesUsageAfterSessionClose(t *testing.T) {
 	if !app.PrepareExit(time.Second) || len(app.OpenSessions()) != 0 {
 		t.Fatal("normal exit did not close every session")
 	}
-	if store.DB().Ping() == nil {
+	if localUsageTestAvailable(store) {
 		t.Fatal("normal exit left usage connections open")
 	}
 	if !app.PrepareExit(time.Hour) {
@@ -313,7 +313,7 @@ func TestPrepareExitCompletesUsageAfterSessionClose(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer reopened.Close()
-	if status, err := reopened.CallStatus(context.Background(), start.CallID); err != nil || status != localusage.StatusSucceeded {
+	if status, err := localUsageTestCallStatus(t, reopened, context.Background(), start.CallID); err != nil || status != localusage.StatusSucceeded {
 		t.Fatalf("normal exit lost the final write: status=%q err=%v", status, err)
 	}
 }

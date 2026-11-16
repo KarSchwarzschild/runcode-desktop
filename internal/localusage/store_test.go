@@ -46,7 +46,6 @@ func sampleStart(callID string, scope Scope, at time.Time) StartRecord {
 		Model:     "qwen3.6-27b",
 		CallKind:  CallKindLLM,
 		StartedAt: at,
-		RunID:     "test-run",
 	}
 }
 
@@ -153,7 +152,7 @@ func TestFinishUsesStoredStartMetadataWhenFrozenStartMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	var account, bridge, tenant, model, kind string
-	err := s.DB().QueryRowContext(ctx, `
+	err := s.db.QueryRowContext(ctx, `
 		SELECT account_digest, bridge_digest, tenant_id, model, call_kind
 		FROM events WHERE call_id=? AND phase='finish'`, "call-stored-start").
 		Scan(&account, &bridge, &tenant, &model, &kind)

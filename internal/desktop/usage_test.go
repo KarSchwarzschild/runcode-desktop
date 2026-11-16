@@ -66,7 +66,7 @@ func TestUsageQueriesRaceWithShutdown(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := localusage.StartRecord{CallID: "shutdown-race", Scope: scope, Model: "qwen-max", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-time.Minute), RunID: "test"}
+	start := localusage.StartRecord{CallID: "shutdown-race", Scope: scope, Model: "qwen-max", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-time.Minute)}
 	if err := store.Begin(context.Background(), start); err != nil {
 		t.Fatal(err)
 	}
@@ -170,7 +170,7 @@ func TestLocalUsageCommandsReadSQLiteOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := localusage.StartRecord{CallID: "local-call-1", Scope: scope, Model: "doubao-seedream-4-0-250828", CallKind: localusage.CallKindImage, StartedAt: now.Add(-time.Hour), RunID: "test"}
+	start := localusage.StartRecord{CallID: "local-call-1", Scope: scope, Model: "doubao-seedream-4-0-250828", CallKind: localusage.CallKindImage, StartedAt: now.Add(-time.Hour)}
 	if err := store.Begin(context.Background(), start); err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestLocalUsageReportsCacheHitRateFromCoreUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	start := localusage.StartRecord{CallID: "local-cache-1", Scope: scope, Model: "qwen3.6-27b", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-time.Hour), RunID: "test"}
+	start := localusage.StartRecord{CallID: "local-cache-1", Scope: scope, Model: "qwen3.6-27b", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-time.Hour)}
 	if err := store.Begin(context.Background(), start); err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +266,7 @@ func TestLocalUsageTrendBucketsByHour(t *testing.T) {
 	}
 	write := func(id string, started time.Time, in, out int64) {
 		t.Helper()
-		start := localusage.StartRecord{CallID: id, Scope: scope, Model: "qwen-max", CallKind: localusage.CallKindLLM, StartedAt: started, RunID: "test"}
+		start := localusage.StartRecord{CallID: id, Scope: scope, Model: "qwen-max", CallKind: localusage.CallKindLLM, StartedAt: started}
 		if err := store.Begin(context.Background(), start); err != nil {
 			t.Fatal(err)
 		}
@@ -328,7 +328,7 @@ func TestLocalUsageTotalsIgnoresPendingAndShowsPartialTotal(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	main := localusage.StartRecord{CallID: "main-1", Scope: scope, Model: "qwen3.6-27b", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-2 * time.Second), RunID: "test"}
+	main := localusage.StartRecord{CallID: "main-1", Scope: scope, Model: "qwen3.6-27b", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-2 * time.Second)}
 	if err := store.Begin(context.Background(), main); err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +339,7 @@ func TestLocalUsageTotalsIgnoresPendingAndShowsPartialTotal(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	title := localusage.StartRecord{CallID: "title-1", Scope: scope, Model: "qwen3.6-27b", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-500 * time.Millisecond), RunID: "test"}
+	title := localusage.StartRecord{CallID: "title-1", Scope: scope, Model: "qwen3.6-27b", CallKind: localusage.CallKindLLM, StartedAt: now.Add(-500 * time.Millisecond)}
 	if err := store.Begin(context.Background(), title); err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +376,7 @@ func TestLocalUsageTrendAllStartsAtEarliestCall(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := now.Add(-3 * time.Hour)
-	start := localusage.StartRecord{CallID: "all-1", Scope: scope, Model: "qwen-max", CallKind: localusage.CallKindLLM, StartedAt: started, RunID: "test"}
+	start := localusage.StartRecord{CallID: "all-1", Scope: scope, Model: "qwen-max", CallKind: localusage.CallKindLLM, StartedAt: started}
 	if err := store.Begin(context.Background(), start); err != nil {
 		t.Fatal(err)
 	}

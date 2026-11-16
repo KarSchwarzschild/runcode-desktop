@@ -25,20 +25,20 @@ func TestPlatformUsageMissingIdentityPersistsSafeCoverage(t *testing.T) {
 		}
 	}
 	var count int
-	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM diagnostics`).Scan(&count); err != nil {
+	if err := localUsageTestDB(t, store).QueryRow(`SELECT COUNT(*) FROM diagnostics`).Scan(&count); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 {
 		t.Fatalf("coverage failures must persist one bounded diagnostic, got %d", count)
 	}
 	var code, detail string
-	if err := store.DB().QueryRow(`SELECT code, detail FROM diagnostics`).Scan(&code, &detail); err != nil {
+	if err := localUsageTestDB(t, store).QueryRow(`SELECT code, detail FROM diagnostics`).Scan(&code, &detail); err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(code+detail, "missing_stable_identity") || strings.Contains(code+detail, "private.example") || strings.Contains(code+detail, "secret-token") {
 		t.Fatalf("diagnostic was absent or unsafe: %q %q", code, detail)
 	}
-	if err := store.DB().QueryRow(`SELECT COUNT(*) FROM scopes`).Scan(&count); err != nil || count != 0 {
+	if err := localUsageTestDB(t, store).QueryRow(`SELECT COUNT(*) FROM scopes`).Scan(&count); err != nil || count != 0 {
 		t.Fatalf("unknown identity created %d statistical scopes, err=%v", count, err)
 	}
 	other := ScopeFreeze{AccountIssuer: "issuer", AccountSub: "account", BridgeBase: "https://private.example", TenantID: "tenant-b"}.toScope()
@@ -63,7 +63,7 @@ func TestNonLLMScopeFailurePersistsCoverage(t *testing.T) {
 				t.Fatal("invalid non-LLM identity accepted")
 			}
 			var detail string
-			if err := store.DB().QueryRow(`SELECT detail FROM diagnostics`).Scan(&detail); err != nil || !strings.Contains(detail, tc.reason) {
+			if err := localUsageTestDB(t, store).QueryRow(`SELECT detail FROM diagnostics`).Scan(&detail); err != nil || !strings.Contains(detail, tc.reason) {
 				t.Fatalf("non-LLM scope failure disappeared: detail=%q err=%v", detail, err)
 			}
 		})
@@ -83,7 +83,7 @@ func TestPlatformUsageInvalidTenantPersistsKnownAccountGap(t *testing.T) {
 		t.Fatal("missing tenant was attributed to a scope")
 	}
 	var detail string
-	if err := store.DB().QueryRow(`SELECT detail FROM diagnostics`).Scan(&detail); err != nil {
+	if err := localUsageTestDB(t, store).QueryRow(`SELECT detail FROM diagnostics`).Scan(&detail); err != nil {
 		t.Fatalf("missing tenant did not persist coverage: %v", err)
 	}
 	if !strings.Contains(detail, digestPair("issuer", "account-a")) || strings.Contains(detail, "private.example") {
@@ -114,7 +114,7 @@ func TestLocalUsageDisabledStillOpensHistory(t *testing.T) {
 	if platformEnabled.Load() || currentPlatformRecorder() != nil {
 		t.Fatal("disabled collection still accepts writes")
 	}
-	got, err := app.usageStore.QuerySnapshot(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: at.Add(-time.Hour), EndAt: at.Add(time.Hour)})
+	got, err := app.usageStore.QueryPage(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: at.Add(-time.Hour), EndAt: at.Add(time.Hour)}, "", 1000)
 	if err != nil || len(got.Calls) != 1 {
 		t.Fatalf("history unavailable: %+v err=%v", got, err)
 	}

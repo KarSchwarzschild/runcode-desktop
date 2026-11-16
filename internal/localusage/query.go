@@ -42,12 +42,6 @@ type CallRecord struct {
 	GeneratedImages      *int64
 }
 
-// QuerySnapshot 是一次性全量查询结果（含水位 seq）。
-type QuerySnapshot struct {
-	Seq   int64
-	Calls []CallRecord
-}
-
 // QueryPage 是分页查询结果。
 type QueryPage struct {
 	Seq        int64
@@ -93,28 +87,6 @@ func (s *Store) readSnapshot(ctx context.Context, filter QueryFilter) (*sql.Tx, 
 		return nil, 0, nil, err
 	}
 	return tx, seq, cleanup, nil
-}
-
-// QuerySnapshot retains pending calls for internal compatibility. User-facing
-// callers use SQL aggregates or QueryPage so they never materialize all calls.
-func (s *Store) QuerySnapshot(ctx context.Context, filter QueryFilter) (QuerySnapshot, error) {
-	if err := validateQueryFilter(filter); err != nil {
-		return QuerySnapshot{}, err
-	}
-	ctx, cancel := boundedQueryContext(ctx)
-	defer cancel()
-	tx, seq, done, err := s.readSnapshot(ctx, filter)
-	if err != nil {
-		return QuerySnapshot{}, err
-	}
-	defer done()
-	filter.SnapshotSeq = seq
-	from, args := callsFrom(filter, true)
-	calls, err := queryCalls(ctx, tx, callColumns+from+` ORDER BY s.started_at_ms DESC, s.call_id DESC`, args)
-	if err != nil {
-		return QuerySnapshot{}, err
-	}
-	return QuerySnapshot{Seq: seq, Calls: calls}, nil
 }
 
 // QueryPage uses a SQL keyset and LIMIT; late finishes remain outside its seq.

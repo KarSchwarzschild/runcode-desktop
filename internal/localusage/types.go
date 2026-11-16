@@ -48,7 +48,6 @@ type StartRecord struct {
 	TurnID       string // 可空
 	GenerationID string // 生图等复用既有 generationID
 	StartedAt    time.Time
-	RunID        string // 当前进程 runId，供崩溃恢复
 }
 
 // FinishRecord 是调用终态。不得覆盖已落盘的先前终态；矛盾终态记诊断。

@@ -50,7 +50,7 @@ func TestStoreOpenRecoversLegacyPendingWithoutDirtyMarker(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Older clients removed this marker even when Close raced with Finish.
-	if _, err := store.DB().Exec(`DELETE FROM meta WHERE key = 'active_run_id'`); err != nil {
+	if _, err := store.db.Exec(`DELETE FROM meta WHERE key = 'active_run_id'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Close(); err != nil {

@@ -453,7 +453,7 @@ func TestImageGenerationApprovedHostUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapshot, err := f.usageStore.QuerySnapshot(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Minute), EndAt: time.Now().Add(time.Minute)})
+	snapshot, err := f.usageStore.QueryPage(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Minute), EndAt: time.Now().Add(time.Minute)}, "", 1000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,7 +471,7 @@ func TestImageGenerationApprovedHostUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	chatSnapshot, err := f.usageStore.QuerySnapshot(context.Background(), localusage.QueryFilter{ScopeID: chatScope.ScopeID, StartAt: time.Now().Add(-time.Minute), EndAt: time.Now().Add(time.Minute)})
+	chatSnapshot, err := f.usageStore.QueryPage(context.Background(), localusage.QueryFilter{ScopeID: chatScope.ScopeID, StartAt: time.Now().Add(-time.Minute), EndAt: time.Now().Add(time.Minute)}, "", 1000)
 	if err != nil {
 		t.Fatal(err)
 	}

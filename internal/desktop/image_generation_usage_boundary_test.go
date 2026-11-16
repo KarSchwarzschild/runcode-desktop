@@ -37,7 +37,7 @@ func TestImageGenerationLocalRejectionsDoNotCreateUsage(t *testing.T) {
 			if got.Status != "failed" || got.SubmissionStatus != "not_submitted" || f.bridge.posts.Load() != 0 {
 				t.Fatalf("pre-Do rejection = %+v posts=%d", got, f.bridge.posts.Load())
 			}
-			if n, err := store.CountCalls(context.Background(), scope.ScopeID); err != nil || n != 0 {
+			if n, err := localUsageTestCountCalls(t, store, context.Background(), scope.ScopeID); err != nil || n != 0 {
 				t.Fatalf("pre-Do usage count=%d err=%v", n, err)
 			}
 			if reason == "ledger blocked" {
@@ -74,7 +74,7 @@ func TestImageGenerationUsageKeepsConfirmedImageCount(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			snapshot, err := store.QuerySnapshot(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Minute), EndAt: time.Now().Add(time.Minute)})
+			snapshot, err := store.QueryPage(context.Background(), localusage.QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Minute), EndAt: time.Now().Add(time.Minute)}, "", 1000)
 			if err != nil || len(snapshot.Calls) != 1 {
 				t.Fatalf("usage calls=%d err=%v", len(snapshot.Calls), err)
 			}

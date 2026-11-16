@@ -108,7 +108,7 @@ func TestLocalUsageSearchInvalidURLScopeCreatesOnlySafeGap(t *testing.T) {
 				t.Fatalf("result=%+v error=%v", result, err)
 			}
 			var scopes int
-			if err := store.DB().QueryRow(`SELECT COUNT(*) FROM scopes`).Scan(&scopes); err != nil || scopes != 0 {
+			if err := localUsageTestDB(t, store).QueryRow(`SELECT COUNT(*) FROM scopes`).Scan(&scopes); err != nil || scopes != 0 {
 				t.Fatalf("invalid URL created statistical scopes=%d error=%v", scopes, err)
 			}
 			identity, _ := app.freezeUsageIdentity(context.Background())
