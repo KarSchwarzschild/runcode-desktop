@@ -78,7 +78,7 @@ func TestToolRejectsDisabledAndUnknownFields(t *testing.T) {
 		tc    *tool.Context
 		code  string
 	}{
-		{"disabled", func(s *Snapshot) { s.Enabled, s.Available = false, false }, `{"prompt":"海报"}`, callCtx("u1"), "disabled"},
+		{"unavailable", func(s *Snapshot) { s.Enabled, s.Available = false, false }, `{"prompt":"海报"}`, callCtx("u1"), "not_configured"},
 		{"not configured", func(s *Snapshot) { s.Available, s.Reason = false, "尚未选择生图模型" }, `{"prompt":"海报"}`, callCtx("u1"), "not_configured"},
 		{"empty prompt", nil, `{"prompt":"   "}`, callCtx("u1"), "invalid_input"},
 		{"long prompt", nil, `{"prompt":"` + long + `"}`, callCtx("u1"), "invalid_input"},
@@ -258,13 +258,16 @@ func TestDescriptionStatesWhenToCallAndAvailability(t *testing.T) {
 	snap := readySnapshot()
 	tl := newTool(&fakeHost{}, &snap)
 	desc := tl.Description()
-	for _, want := range []string{"明确要求", "提示词", "不要生成", "知识库", "image-model"} {
+	for _, want := range []string{"根据用户提示词判断是否实际生成", "明确要求", "不要生成", "支持尺寸", "image-model"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description missing %q: %s", want, desc)
 		}
 	}
-	snap.Enabled, snap.Available, snap.Reason = false, false, "当前会话未开启图片生成"
-	if d := tl.Description(); !strings.Contains(d, "请勿调用") || strings.Contains(d, "image-model") {
+	if strings.Contains(desc, "「+」") || strings.Contains(desc, "开启「生成图片」") {
+		t.Fatalf("description still mentions composer toggle: %s", desc)
+	}
+	snap.Enabled, snap.Available, snap.Reason = false, false, "尚未选择生图模型"
+	if d := tl.Description(); !strings.Contains(d, "请勿调用") || !strings.Contains(d, "设置 → 图片生成") || strings.Contains(d, "image-model") {
 		t.Fatalf("unavailable description: %s", d)
 	}
 }

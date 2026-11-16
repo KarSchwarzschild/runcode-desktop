@@ -168,14 +168,14 @@ func TestImageGenerationFlowGeneratesWithConfiguredModel(t *testing.T) {
 	}
 }
 
-func TestImageGenerationFlowDisabledAndIneligibleSendNothing(t *testing.T) {
+func TestImageGenerationFlowIneligibleSendNothing(t *testing.T) {
 	f := newImageGenFlow(t)
+	// 旧开关关闭不再拦截；OA 锁定仍必须零 POST。
 	setImageGen(t, f.app, f.id, false)
 	f.app.freezeImageGenerationTurn(f.entry)
-	if got := f.run(t, "tu_1", `{"prompt":"海报"}`); got.Code != "disabled" {
-		t.Fatalf("disabled = %+v", got)
+	if snap := f.state.snapshot(); !snap.Enabled || !snap.Available {
+		t.Fatalf("switch off must still auto-enable: %+v", snap)
 	}
-	setImageGen(t, f.app, f.id, true)
 	f.app.mu.Lock()
 	f.entry.oaLocalModel = "local-model"
 	f.app.mu.Unlock()

@@ -8,14 +8,12 @@ import (
 	appwire "github.com/wt68/runcode/internal/protocol"
 )
 
-// 会话级「生成图片」开关与每个独立回合的冻结快照。
+// 会话级生图状态与每个独立回合的冻结快照。
 //
-// 开关只表示"允许模型在这个会话里提出生图调用"，不跳过审批；它按会话 + 身份分区，
-// 存在会话工作区的 sidecar 里。新会话、分叉会话（新的会话 id）默认关闭。
-//
-// 快照在回合开始时冻结一次（onTurnStart），整个回合——包括运行中追加的消息与
-// 等待中的审批——都用同一份模型、尺寸、TurnID 与一次生成预算。冻结不发网络请求；
-// 真正提交前再做权威校验。
+// 旧 sidecar「生成图片」开关仍可读可写以兼容历史文件，但冻结逻辑忽略它：只要本
+// 通行证会话有可用生图模型，回合就按自动生图处理。快照在回合开始时冻结一次
+// （onTurnStart），整个回合——包括运行中追加的消息与等待中的审批——都用同一份
+// 模型、尺寸、TurnID 与一次生成预算。冻结不发网络请求；真正提交前再做权威校验。
 
 const imageGenerationIneligibleReason = "仅平台通行证普通会话支持图片生成"
 
@@ -219,6 +217,7 @@ func (a *App) SetSessionImageGeneration(req appwire.SetSessionImageGenerationReq
 
 // freezeImageGenerationTurn 为独立回合预留新 TurnID 并冻结目标。
 // 只由回合开始钩子调用；注入消息与恢复回合沿用已有快照。
+// 旧 sidecar 开关不参与可用性；损坏或缺失的开关记录也不阻断自动生图。
 func (a *App) freezeImageGenerationTurn(e *sessionEntry) {
 	if e == nil {
 		return
@@ -238,25 +237,18 @@ func (a *App) freezeImageGenerationTurn(e *sessionEntry) {
 	b, reason := a.imageGenerationBindingOf(e)
 	if reason == "" {
 		snap.Account, snap.Epoch, snap.Bridge, snap.Tenant, snap.ScopeID = b.Account, b.Epoch, b.Bridge, b.Tenant, b.Scope
-		disk, err := readImageGenerationSession(workspace, e.id)
-		if err != nil {
-			reason = "图片生成开关记录无法读取，本回合不能生成图片"
-		} else {
+		if disk, err := readImageGenerationSession(workspace, e.id); err == nil {
 			sw := disk.Scopes[b.Scope]
-			snap.Enabled, snap.SwitchRevision = sw.Enabled, sw.Revision
-			if !sw.Enabled {
-				reason = "当前会话未开启图片生成"
-			}
+			snap.SwitchRevision = sw.Revision
 		}
-	}
-	if reason == "" {
 		pref, why := imageGenerationTarget(b, loadRawConfig())
 		snap.SettingsRevision = pref.Revision
 		if why != "" {
 			reason = why
 		} else {
+			snap.Enabled = true
 			snap.Model, snap.Size, snap.SupportedSizes, snap.ResponseFormat = pref.DefaultModel.Name, pref.DefaultSize, pref.SupportedSizes, pref.ResponseFormat
-			if len(snap.SupportedSizes) == 0 {
+			if len(snap.SupportedSizes) == 0 && pref.DefaultSize != "" {
 				snap.SupportedSizes = []string{pref.DefaultSize}
 			}
 		}

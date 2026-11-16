@@ -218,9 +218,51 @@ func TestImageGenerationTurnSnapshotIsFrozenPerTurn(t *testing.T) {
 	if next.TurnID == first.TurnID || next.Model != "image-only-b64" || next.Size != "1280x720" || next.SettingsRevision != 2 {
 		t.Fatalf("next independent turn = %+v", next)
 	}
+	// 旧 sidecar 开关关闭也不再禁用：自动生图只看模型是否可用。
 	setImageGen(t, app, id, false)
 	app.freezeImageGenerationTurn(e)
-	if off := state.snapshot(); off.Enabled || off.TurnID == next.TurnID {
-		t.Fatalf("disabled turn = %+v", off)
+	if off := state.snapshot(); !off.Enabled || !off.Available || off.TurnID == next.TurnID || off.Model != "image-only-b64" {
+		t.Fatalf("auto-enabled turn after switch off = %+v", off)
+	}
+}
+
+func TestImageGenerationFreezeIgnoresDisabledSessionSwitch(t *testing.T) {
+	app, id, _ := imageGenSessionApp(t, "user-a", "tenant-a")
+	saveImageModel(t, app, "tenant-a", "image-only-url", "")
+	// 默认开关关闭；不调用 setImageGen(true)。
+	e, err := app.entryOf(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newImageGenerationTurnState(id, "instance-auto")
+	app.mu.Lock()
+	e.imageGeneration = state
+	app.mu.Unlock()
+
+	app.freezeImageGenerationTurn(e)
+	snap := state.snapshot()
+	if !snap.Enabled || !snap.Available || snap.Model != "image-only-url" {
+		t.Fatalf("expected auto-available freeze, got %+v", snap)
+	}
+	if strings.Contains(snap.Reason, "当前会话未开启图片生成") {
+		t.Fatalf("switch gate leaked into reason: %q", snap.Reason)
+	}
+}
+
+func TestImageGenerationFreezeUnavailableWithoutModel(t *testing.T) {
+	app, id, _ := imageGenSessionApp(t, "user-a", "tenant-a")
+	e, err := app.entryOf(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newImageGenerationTurnState(id, "instance-nomodel")
+	app.mu.Lock()
+	e.imageGeneration = state
+	app.mu.Unlock()
+
+	app.freezeImageGenerationTurn(e)
+	snap := state.snapshot()
+	if snap.Available || !strings.Contains(snap.Reason, "设置") {
+		t.Fatalf("expected settings reason without model, got %+v", snap)
 	}
 }

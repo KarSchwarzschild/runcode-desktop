@@ -32,7 +32,7 @@ func InputSchema() tool.Schema {
 			},
 			"size": {
 				Type:        tool.SchemaTypeString,
-				Description: "可选：图片尺寸，形如 1024x1024，必须是工具说明中列出的尺寸之一；省略时使用设置中的默认尺寸。",
+				Description: "可选：图片尺寸，形如 1024x1024，必须是工具说明中列出的支持尺寸之一。用户说「更大」「更窄」「横向/竖向」等时，从支持尺寸里选最接近的；省略 size 表示不固定尺寸，由提示词与生图模型能力共同决定。",
 			},
 		},
 	}
