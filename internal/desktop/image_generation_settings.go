@@ -114,10 +114,8 @@ func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSetting
 		if !profile.Available {
 			return appwire.ImageGenerationSettings{}, wireError(errors.New("该生图模型当前不可用：" + profile.UnavailableReason))
 		}
-		if size == "" {
-			size = profile.DefaultSize
-		}
-		if !slices.Contains(profile.SupportedSizes, size) {
+		// 空尺寸表示「不固定」；只有显式固定值才必须落在目录支持列表里。
+		if size != "" && !slices.Contains(profile.SupportedSizes, size) {
 			return appwire.ImageGenerationSettings{}, wireError(errors.New("该生图模型不支持所选尺寸"))
 		}
 		supported, format = profile.SupportedSizes, preferredResponseFormat(profile.ResponseFormats)

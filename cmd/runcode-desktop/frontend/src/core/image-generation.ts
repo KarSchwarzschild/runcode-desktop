@@ -29,7 +29,9 @@ export function settingsSelection(catalog: ImageGenerationCatalog | null, settin
   const key = imageGenerationModelKey(saved)
   const size = settings?.defaultSize ?? ''
   const hit = (catalog?.models ?? []).find((m) => imageGenerationModelKey(m.model) === key)
-  const stale = !hit || !hit.profile.available || !(hit.profile.supportedSizes ?? []).includes(size)
+  // 空尺寸表示「不固定」，不算失效；只有显式固定值才要求落在支持列表里。
+  const sizeStale = size !== '' && !(hit?.profile.supportedSizes ?? []).includes(size)
+  const stale = !hit || !hit.profile.available || sizeStale
   return { key, size, stale }
 }
 

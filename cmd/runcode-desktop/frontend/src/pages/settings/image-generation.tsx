@@ -59,14 +59,16 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
   const draftStale = !!draftKey && (!draftModel || !draftModel.profile.available)
   const sizes = draftModel?.profile.supportedSizes ?? []
   const dirty = draftKey !== confirmed.key || (!!draftKey && draftSize !== confirmed.size)
-  const canSave = !!settings && !!catalog && !saving && !loading && dirty && !draftStale && (!draftKey || sizes.includes(draftSize))
+  // 空尺寸表示不固定，允许保存；固定尺寸必须在目录支持列表里。
+  const sizeOK = !draftKey || draftSize === '' || sizes.includes(draftSize)
+  const canSave = !!settings && !!catalog && !saving && !loading && dirty && !draftStale && sizeOK
 
   function pickModel(key: string) {
     setSaved(false)
     setSaveError('')
     setDraftKey(key)
-    const m = models.find((c) => imageGenerationModelKey(c.model) === key)
-    setDraftSize(m ? m.profile.defaultSize : '')
+    // 换模型时默认「不固定尺寸」，不自动填目录 defaultSize。
+    setDraftSize('')
   }
 
   async function save() {
@@ -95,7 +97,7 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
 
   const staleName = settings?.defaultModel?.name ?? ''
   return <Section title="图片生成" hint="显式保存，下一轮生效">
-    <p className="text-[12px] text-muted">仅用于生成图片，不改变当前聊天模型。在对话输入框「+」里为当前会话开启「生成图片」后，聊天模型会在你明确要求时调用生图工具；每次生成会计费，并照常经过权限审批。</p>
+    <p className="text-[12px] text-muted">仅用于生成图片，不改变当前聊天模型。配置可用生图模型后，聊天模型会根据你的提示词判断是否调用生图工具；每次生成会计费。</p>
     <div className="text-[12px] text-muted">当前平台租户：<span className="font-mono text-ink2">{tenantId || '通行证默认租户'}</span></div>
     <label className={LABEL_CLS}>
       默认文生图模型
@@ -110,11 +112,18 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
         })}
       </SelectField>
     </label>
-    <label className={LABEL_CLS}>
+    <label className={LABEL_CLS} title="由提示词和生图模型能力共同决定">
       默认尺寸
-      <SelectField value={draftSize} disabled={!draftModel || draftStale || saving || loading} onChange={(v) => { setSaved(false); setDraftSize(v) }}>
-        {!draftModel && <option value="">先选择模型</option>}
-        {draftModel && !sizes.includes(draftSize) && <option value={draftSize} disabled>{draftSize || '—'} · 已不支持</option>}
+      <SelectField
+        value={draftSize}
+        disabled={!draftModel || draftStale || saving || loading}
+        title="由提示词和生图模型能力共同决定"
+        onChange={(v) => { setSaved(false); setDraftSize(v) }}
+      >
+        {draftModel
+          ? <option value="">不固定尺寸</option>
+          : <option value="">先选择模型</option>}
+        {draftModel && draftSize !== '' && !sizes.includes(draftSize) && <option value={draftSize} disabled>{draftSize} · 已不支持</option>}
         {sizes.map((s) => <option key={s} value={s}>{s.replace('x', ' × ')}</option>)}
       </SelectField>
     </label>

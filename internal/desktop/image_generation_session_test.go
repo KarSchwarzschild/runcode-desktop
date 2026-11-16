@@ -84,7 +84,7 @@ func TestImageGenerationSessionAvailabilityFollowsSettings(t *testing.T) {
 	}
 	saveImageModel(t, app, "tenant-a", "image-only-url", "")
 	v, err := app.GetSessionImageGeneration(id)
-	if err != nil || !v.Enabled || !v.Available || v.Model == nil || v.Model.Name != "image-only-url" || v.Size != "2048x2048" {
+	if err != nil || !v.Enabled || !v.Available || v.Model == nil || v.Model.Name != "image-only-url" || v.Size != "" {
 		t.Fatalf("configured view = %+v %v", v, err)
 	}
 	off := setImageGen(t, app, id, false)
@@ -205,7 +205,7 @@ func TestImageGenerationTurnSnapshotIsFrozenPerTurn(t *testing.T) {
 
 	app.freezeImageGenerationTurn(e)
 	first := state.snapshot()
-	if !first.Enabled || !first.Available || first.TurnID == "" || first.Model != "image-only-url" || first.Size != "2048x2048" ||
+	if !first.Enabled || !first.Available || first.TurnID == "" || first.Model != "image-only-url" || first.Size != "" ||
 		first.Tenant != "tenant-a" || first.Workspace != cwd || first.Generation != "instance-7" || first.SettingsRevision != 1 || first.SwitchRevision != 1 || first.ScopeID == "" {
 		t.Fatalf("frozen snapshot = %+v", first)
 	}

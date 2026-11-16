@@ -16,11 +16,12 @@ export const LABEL_CLS = 'flex flex-col gap-1.5 text-[13px] text-muted'
 // SelectField is a native <select> dressed to match FIELD_CLS: the browser arrow is
 // removed (appearance-none) and one shared chevron is overlaid at the right, so these
 // and the custom ModelSelect all read as the same dropdown.
-export function SelectField({ value, onChange, children, disabled, 'aria-label': ariaLabel }: {
+export function SelectField({ value, onChange, children, disabled, title, 'aria-label': ariaLabel }: {
   value: string
   onChange: (value: string) => void
   children: ReactNode
   disabled?: boolean
+  title?: string
   'aria-label'?: string
 }) {
   return (
@@ -28,6 +29,7 @@ export function SelectField({ value, onChange, children, disabled, 'aria-label':
       <select
         value={value}
         disabled={disabled}
+        title={title}
         aria-label={ariaLabel}
         onChange={(e) => onChange(e.target.value)}
         className={`${FIELD_CLS} w-full appearance-none pr-9 cursor-pointer`}

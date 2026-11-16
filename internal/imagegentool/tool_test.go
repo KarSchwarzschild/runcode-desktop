@@ -205,6 +205,22 @@ func TestToolPublishesResultAsEventData(t *testing.T) {
 	}
 }
 
+func TestParseInputAllowsOmittedSizeWhenUnfixed(t *testing.T) {
+	snap := readySnapshot()
+	snap.Size = ""
+	got, err := parseInput(json.RawMessage(`{"prompt":"海报"}`), snap)
+	if err != nil || got.Prompt != "海报" || got.Size != "" {
+		t.Fatalf("omitted size = %+v %v", got, err)
+	}
+	got, err = parseInput(json.RawMessage(`{"prompt":"海报","size":"2048x2048"}`), snap)
+	if err != nil || got.Size != "2048x2048" {
+		t.Fatalf("explicit size = %+v %v", got, err)
+	}
+	if _, err := parseInput(json.RawMessage(`{"prompt":"海报","size":"4096x4096"}`), snap); err == nil {
+		t.Fatal("unsupported size accepted")
+	}
+}
+
 func TestAuthorizationBindingPinsDestination(t *testing.T) {
 	snap := readySnapshot()
 	tl := newTool(&fakeHost{}, &snap)

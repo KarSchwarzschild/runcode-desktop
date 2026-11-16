@@ -90,6 +90,25 @@ describe('ImageGenerationSection', () => {
     expect(modelSelect().value).toContain('img-off')
   })
 
+  it('选模型后默认不固定尺寸，可保存空尺寸；也可改固定尺寸', async () => {
+    api.listImageGenerationModels.mockResolvedValue(catalog())
+    api.getImageGenerationSettings.mockResolvedValue(settings())
+    api.saveImageGenerationSettings.mockResolvedValueOnce(settings({ revision: 1, defaultModel: ref('img-a'), defaultSize: '' }))
+    await mount()
+    await choose(modelSelect(), modelSelect().options[1].value)
+    const firstSize = sizeSelect().options[0]
+    expect(firstSize.value).toBe('')
+    expect(firstSize.textContent).toContain('不固定尺寸')
+    expect(sizeSelect().title).toContain('由提示词和生图模型能力共同决定')
+    expect(sizeSelect().value).toBe('')
+    await act(async () => button('保存').click())
+    expect(api.saveImageGenerationSettings.mock.calls[0][0]).toMatchObject({ defaultModel: ref('img-a'), defaultSize: '' })
+    await choose(sizeSelect(), '2048x2048')
+    api.saveImageGenerationSettings.mockResolvedValueOnce(settings({ revision: 2, defaultModel: ref('img-a'), defaultSize: '2048x2048' }))
+    await act(async () => button('保存').click())
+    expect(api.saveImageGenerationSettings.mock.calls[1][0]).toMatchObject({ defaultSize: '2048x2048' })
+  })
+
   it('显式保存；保存失败保留草稿且不改已生效值', async () => {
     api.listImageGenerationModels.mockResolvedValue(catalog())
     api.getImageGenerationSettings.mockResolvedValue(settings())
@@ -97,7 +116,7 @@ describe('ImageGenerationSection', () => {
     await mount()
     await choose(modelSelect(), modelSelect().options[1].value)
     expect(api.saveImageGenerationSettings).not.toHaveBeenCalled()
-    expect(sizeSelect().value).toBe('1024x1024')
+    expect(sizeSelect().value).toBe('')
     await choose(sizeSelect(), '2048x2048')
     await act(async () => button('保存').click())
     const req = api.saveImageGenerationSettings.mock.calls[0][0] as SaveImageGenerationSettingsRequest

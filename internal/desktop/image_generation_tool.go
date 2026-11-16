@@ -3,6 +3,7 @@ package desktop
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"time"
 
@@ -124,7 +125,8 @@ func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input
 	}
 	entry, ok := catalog.imageGeneration[snap.Model]
 	profile := normalizeImageGenerationProfile(entry.ImageGeneration)
-	if !ok || !profile.Available || !slices.Contains(profile.SupportedSizes, in.Size) {
+	sizeOK := in.Size == "" || slices.Contains(profile.SupportedSizes, in.Size)
+	if !ok || !profile.Available || !sizeOK {
 		return imageGenerationRejected(snap, in.Size, "model_unavailable", "该生图模型或尺寸当前不可用，本次未生成图片；请在设置中重新选择"), nil
 	}
 	if snap.ResponseFormat = preferredResponseFormat(profile.ResponseFormats); snap.ResponseFormat == "" {
@@ -146,7 +148,14 @@ func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input
 		return imageGenerationRejected(snap, in.Size, "", "无法记录本次提交，本次未生成图片"), nil
 	}
 	finish := func(result appwire.ImageGenerationResult) (appwire.ImageGenerationResult, error) {
-		result.Version, result.GenerationID, result.Model, result.Size = 1, generationID, snap.Model, in.Size
+		size := in.Size
+		if size == "" && len(result.Images) > 0 {
+			img := result.Images[0]
+			if img.Width > 0 && img.Height > 0 {
+				size = fmt.Sprintf("%dx%d", img.Width, img.Height)
+			}
+		}
+		result.Version, result.GenerationID, result.Model, result.Size = 1, generationID, snap.Model, size
 		rec = rec.finalized(result)
 		if err := writeImageGenerationLedger(snap.Workspace, rec); err != nil {
 			debugLog("image generation ledger %s not finalized: %v", generationID, err)

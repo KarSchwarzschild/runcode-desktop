@@ -39,11 +39,27 @@ func saveImageModel(t *testing.T, app *App, tenant, model, size string) appwire.
 	return got
 }
 
-func TestImageGenerationSettingsPartitionByAccountAndTenant(t *testing.T) {
+func TestImageGenerationSettingsKeepsEmptyDefaultSize(t *testing.T) {
 	app := imageGenSettingsApp(t, "user-a")
 	saved := saveImageModel(t, app, "tenant-a", "image-only-url", "")
+	if saved.Revision != 1 || saved.DefaultModel == nil || saved.DefaultModel.Name != "image-only-url" || saved.DefaultSize != "" {
+		t.Fatalf("saved = %+v (want empty default size)", saved)
+	}
+	fixed := saveImageModel(t, app, "tenant-a", "image-only-url", "2048x2048")
+	if fixed.DefaultSize != "2048x2048" || fixed.Revision != 2 {
+		t.Fatalf("fixed size = %+v", fixed)
+	}
+	cleared := saveImageModel(t, app, "tenant-a", "image-only-url", "")
+	if cleared.DefaultSize != "" || cleared.Revision != 3 {
+		t.Fatalf("cleared size = %+v", cleared)
+	}
+}
+
+func TestImageGenerationSettingsPartitionByAccountAndTenant(t *testing.T) {
+	app := imageGenSettingsApp(t, "user-a")
+	saved := saveImageModel(t, app, "tenant-a", "image-only-url", "2048x2048")
 	if saved.Revision != 1 || saved.DefaultModel == nil || saved.DefaultModel.Name != "image-only-url" || saved.DefaultSize != "2048x2048" {
-		t.Fatalf("saved = %+v (want profile default size)", saved)
+		t.Fatalf("saved = %+v (want fixed size)", saved)
 	}
 	other, err := app.GetImageGenerationSettings("tenant-b")
 	if err != nil || other.DefaultModel != nil || other.ScopeID == saved.ScopeID {

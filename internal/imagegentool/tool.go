@@ -125,7 +125,7 @@ func (t *Tool) AuthorizationBinding(raw json.RawMessage) (tool.AuthorizationBind
 	}
 	size := strings.TrimSpace(in.Size)
 	if size == "" {
-		size = snap.Size
+		size = strings.TrimSpace(snap.Size)
 	}
 	return tool.AuthorizationBinding{
 		Kind:     BindingKind,
@@ -343,9 +343,10 @@ func parseInput(raw json.RawMessage, snap Snapshot) (Input, error) {
 	}
 	size := strings.TrimSpace(in.Size)
 	if size == "" {
-		size = snap.Size
+		size = strings.TrimSpace(snap.Size)
 	}
-	if size == "" || !slices.Contains(snap.SupportedSizes, size) {
+	// 空尺寸表示不固定，交给网关按模型能力兜底；显式尺寸必须在支持列表中。
+	if size != "" && !slices.Contains(snap.SupportedSizes, size) {
 		return Input{}, fmt.Errorf("尺寸 %q 不在可用范围内（%s）", size, strings.Join(snap.SupportedSizes, "、"))
 	}
 	return Input{Prompt: prompt, Size: size}, nil

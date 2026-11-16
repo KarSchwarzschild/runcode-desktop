@@ -51,7 +51,7 @@ type imageGenerationWireRequest struct {
 	Model          string `json:"model"`
 	Prompt         string `json:"prompt"`
 	N              int    `json:"n"`
-	Size           string `json:"size"`
+	Size           string `json:"size,omitempty"`
 	ResponseFormat string `json:"response_format"`
 }
 
@@ -170,7 +170,7 @@ func (a *App) prepareImageGenerationSend(snap imageGenerationSnapshot) (imageGen
 // postImageGeneration 为冻结快照发送恰好一次生图请求。调用方必须先持久化 submitted 账本。
 // beforeSend 在所有 notSent 检查后、HTTP Do 紧邻之前同步调用；它是图片用量的唯一起点。
 func (a *App) postImageGeneration(ctx context.Context, snap imageGenerationSnapshot, in imagegentool.Input, beforeSend ...func(localusage.Scope)) (imageGenerationWireResponse, error) {
-	if snap.Account == "" || snap.Bridge == "" || snap.Model == "" || in.Size == "" || (snap.ResponseFormat != "url" && snap.ResponseFormat != "b64_json") {
+	if snap.Account == "" || snap.Bridge == "" || snap.Model == "" || (snap.ResponseFormat != "url" && snap.ResponseFormat != "b64_json") {
 		return imageGenerationWireResponse{}, notSent("not_configured", "生图配置不完整，本次未生成图片")
 	}
 	if snap.Bridge != imageGenerationBridge() {

@@ -48,6 +48,11 @@ describe('settingsSelection', () => {
   it('保存的尺寸已不支持时视为失效', () => {
     expect(settingsSelection(catalog, { scopeId: 's1', revision: 2, defaultModel: ref('a'), defaultSize: '4096x4096' }).stale).toBe(true)
   })
+  it('空默认尺寸表示不固定，不算失效', () => {
+    expect(settingsSelection(catalog, { scopeId: 's1', revision: 2, defaultModel: ref('a'), defaultSize: '' })).toEqual({
+      key: imageGenerationModelKey(ref('a')), size: '', stale: false,
+    })
+  })
 })
 
 describe('results', () => {
