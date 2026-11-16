@@ -119,6 +119,11 @@ func (a *App) initLocalUsage() error {
 		debugLog("local usage open failed: %v", err)
 		return err
 	}
+	if err := store.SetCaptureEnabled(context.Background(), localUsageEnvEnabled()); err != nil {
+		_ = store.Close()
+		debugLog("local usage capture state failed: %v", err)
+		return err
+	}
 	a.usageMu.Lock()
 	a.usageStore = store
 	a.usageMu.Unlock()

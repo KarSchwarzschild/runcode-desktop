@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -62,7 +63,7 @@ const (
 
 func validCoverageReason(reason string) bool {
 	switch reason {
-	case "invalid_platform_scope", "missing_stable_identity", "begin_failed", "finish_failed", "coverage_history_compacted", "unclean_exit", "collection_gap":
+	case "invalid_platform_scope", "missing_stable_identity", "begin_failed", "finish_failed", "coverage_history_compacted", "unclean_exit", "collection_gap", "capture_disabled":
 		return true
 	default:
 		return false
@@ -89,7 +90,12 @@ func coverageTenantDigest(tenant string) string {
 }
 
 func coverageKey(entry coverageEntry) string {
-	sum := sha256.Sum256([]byte(entry.ScopeID + "\x00" + entry.AccountDigest + "\x00" + entry.BridgeDigest + "\x00" + entry.TenantDigest + "\x00" + entry.Reason))
+	identity := entry.ScopeID + "\x00" + entry.AccountDigest + "\x00" + entry.BridgeDigest + "\x00" + entry.TenantDigest + "\x00" + entry.Reason
+	if entry.Reason == "capture_disabled" {
+		// Distinct disabled intervals must not swallow healthy enabled time.
+		identity += "\x00" + strconv.FormatInt(entry.StartMs, 10)
+	}
+	sum := sha256.Sum256([]byte(identity))
 	return coverageDiagnosticPrefix + hex.EncodeToString(sum[:16])
 }
 
@@ -179,39 +185,7 @@ func (s *Store) RecordCoverageGap(ctx context.Context, diagnostic CoverageDiagno
 		return err
 	}
 	defer tx.Rollback()
-	key := coverageKey(entry)
-	var seq int64
-	var detail string
-	err = tx.QueryRowContext(ctx, `SELECT seq, detail FROM diagnostics WHERE code=? LIMIT 1`, key).Scan(&seq, &detail)
-	if errors.Is(err, sql.ErrNoRows) {
-		var count int
-		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM diagnostics WHERE code LIKE 'coverage_gap:%'`).Scan(&count); err != nil {
-			return err
-		}
-		if count >= coverageDiagnosticLimit-1 {
-			entry = compactCoverageEntry(entry)
-			key = coverageKey(entry)
-			err = tx.QueryRowContext(ctx, `SELECT seq, detail FROM diagnostics WHERE code=? LIMIT 1`, key).Scan(&seq, &detail)
-		}
-	}
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	if err == nil {
-		var old coverageEntry
-		if json.Unmarshal([]byte(detail), &old) == nil {
-			entry = mergeCoverageEntry(entry, old)
-		}
-	}
-	payload, err := json.Marshal(entry)
-	if err != nil {
-		return err
-	}
-	if seq == 0 {
-		_, err = tx.ExecContext(ctx, `INSERT INTO diagnostics(at_ms,code,detail) VALUES(?,?,?)`, entry.StartMs, key, string(payload))
-	} else {
-		_, err = tx.ExecContext(ctx, `UPDATE diagnostics SET at_ms=?,detail=? WHERE seq=?`, entry.StartMs, string(payload), seq)
-	}
+	entry, err = persistCoverageEntry(ctx, tx, entry)
 	if err != nil {
 		return err
 	}
@@ -221,6 +195,48 @@ func (s *Store) RecordCoverageGap(ctx context.Context, diagnostic CoverageDiagno
 	s.coverage.persisted(pendingEntry)
 	s.coverage.persisted(entry)
 	return nil
+}
+
+// persistCoverageEntry shares one bounded diagnostic budget across scope gaps
+// and disabled intervals. At capacity, unknown attribution is conservative.
+func persistCoverageEntry(ctx context.Context, tx *sql.Tx, entry coverageEntry) (coverageEntry, error) {
+	key := coverageKey(entry)
+	var seq int64
+	var detail string
+	err := tx.QueryRowContext(ctx, `SELECT seq, detail FROM diagnostics WHERE code=? LIMIT 1`, key).Scan(&seq, &detail)
+	if errors.Is(err, sql.ErrNoRows) {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM diagnostics WHERE code LIKE 'coverage_gap:%'`).Scan(&count); err != nil {
+			return entry, err
+		}
+		if count >= coverageDiagnosticLimit-1 {
+			entry = compactCoverageEntry(entry)
+			key = coverageKey(entry)
+			err = tx.QueryRowContext(ctx, `SELECT seq, detail FROM diagnostics WHERE code=? LIMIT 1`, key).Scan(&seq, &detail)
+		}
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return entry, err
+	}
+	if err == nil {
+		var old coverageEntry
+		if json.Unmarshal([]byte(detail), &old) == nil {
+			entry = mergeCoverageEntry(entry, old)
+		}
+	}
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return entry, err
+	}
+	if seq == 0 {
+		_, err = tx.ExecContext(ctx, `INSERT INTO diagnostics(at_ms,code,detail) VALUES(?,?,?)`, entry.StartMs, key, string(payload))
+	} else {
+		_, err = tx.ExecContext(ctx, `UPDATE diagnostics SET at_ms=?,detail=? WHERE seq=?`, entry.StartMs, string(payload), seq)
+	}
+	if err != nil {
+		return entry, err
+	}
+	return entry, nil
 }
 
 func coverageMatches(entry coverageEntry, scope Scope) bool {
@@ -340,6 +356,18 @@ func (s *Store) QueryCoverage(ctx context.Context, scope Scope, start, end time.
 		return out, err
 	}
 	rows.Close()
+	var disabledSince int64
+	err = tx.QueryRowContext(ctx, `SELECT value FROM meta WHERE key=?`, captureDisabledSinceKey).Scan(&disabledSince)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return out, err
+	}
+	if err == nil {
+		until := s.now().UTC().UnixMilli() + 1
+		if until <= disabledSince {
+			until = disabledSince + 1
+		}
+		add(coverageEntry{Reason: "capture_disabled", StartMs: disabledSince, EndMs: until}, false)
+	}
 	if err := tx.Commit(); err != nil {
 		return out, err
 	}
