@@ -47,6 +47,7 @@ import (
 // missing,表行多了(常量已删)报 stale。表本身不是真理,与源码对上的表才是。
 var eventPayloads = map[string]string{
 	"EventDirectoryAccessChanged": "DirectoryAccessChanged",
+	"EventPreviewLifecycle":       "PreviewLifecycle",
 	"EventAssistantDelta":         "AssistantDelta",
 	"EventAssistantThinking":      "AssistantDelta",
 	"EventContextUsage":           "ContextUsage",
@@ -60,7 +61,7 @@ var eventPayloads = map[string]string{
 	"EventPermissionRequest":      "PermissionRequest",
 	"EventPlanUpdated":            "PlanRun",
 	"EventSessionRenamed":         "SessionRenamed",
-	"EventSessionStatus":          "SessionInfo",
+	"EventSessionStatus":          "ConversationInfo",
 	"EventOABlocked":              "OABlocked",
 	"EventSkillInstall":           "SkillInstallProgress",
 	"EventUpdate":                 "UpdateInfo",
@@ -209,6 +210,11 @@ var constGroupSpecs = []constGroupSpec{
 		goPrefix: "RuntimeStage", constName: "RuntimeStages", unionName: "RuntimeStage", open: false,
 		doc:      "Install stages of one managed runtime pack; the values of RuntimePack.stage.",
 		unionDoc: "RuntimeStage is the closed set of install stages — the shell drives this pipeline itself, so an unknown value is a bug, not a newer peer.",
+	},
+	{
+		goPrefix: "ImageGenerationSubmission", constName: "ImageGenerationSubmissionStatuses", unionName: "ImageGenerationSubmissionStatus", open: false,
+		doc:      "Local image-generation submission dispositions; they do not prove upstream receipt or billing.",
+		unionDoc: "ImageGenerationSubmissionStatus is the closed set of local send-boundary dispositions.",
 	},
 }
 

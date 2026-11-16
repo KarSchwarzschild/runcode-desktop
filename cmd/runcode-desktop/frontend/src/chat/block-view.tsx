@@ -1,4 +1,4 @@
-// BlockView 是对话流的单块渲染入口：把一个 Block 画成对应的行——用户消息、助手
+﻿// BlockView 是对话流的单块渲染入口：把一个 Block 画成对应的行——用户消息、助手
 // 回复(含思考面板)、系统事件条(错误/警告/提示/压缩/重试)、用量脚注、工具卡。
 // 分组类(执行卡/子代理组/编辑组)由上层 groupBlocks 决定，不走这里。
 //
@@ -7,8 +7,8 @@
 // 重试各自手写了一遍同样的分割线，四种形状表达同一件事。
 import { GhostBtn } from '@/ui/ghost-btn'
 import { Icon } from '@/ui/icons'
-import { Markdown } from '@/ui/markdown'
 import { SystemNote } from '@/ui/feedback'
+import { AssistantMarkdown } from './assistant-markdown'
 import { WarnTriangle } from '@/ui/glyphs'
 import { fmtDuration, fmtTokens } from '@/core/format'
 import { useStickToBottom } from '@/hooks/use-stick-to-bottom'
@@ -20,7 +20,8 @@ import { AgentTaskCard } from './agent-task'
 import { ExecutionCard } from './execution-card'
 import { RecordingCard } from './recorder-card'
 
-export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled }: {
+export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange }: {
+  textOnly?: boolean
   block: Block
   onRetryQuestion?: (id: string) => void
   onEditQuestion?: (id: string) => void
@@ -28,6 +29,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
   onOpenFile?: (relPath: string) => void
   resolveFile?: (token: string) => string | null
   onGenerateMinutes?: (mark: RecordingMark) => void
+  onContentHeightChange?: () => void
 }) {
   // While an assistant answer streams, keep it in a fixed-height window pinned to
   // the newest text (consistent with the tool/agent cards); release to full height
@@ -48,8 +50,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
               </div>
             )}
             {block.text && <div className="whitespace-pre-wrap break-words">{block.text}</div>}
-          </div>
-          {block.questionId && (onRetryQuestion || onEditQuestion) && (
+          </div>          {block.questionId && (onRetryQuestion || onEditQuestion) && (
             <div className="flex items-center opacity-60 group-hover:opacity-100 focus-within:opacity-100">
               <GhostBtn disabled={questionActionsDisabled} onClick={() => onRetryQuestion?.(block.questionId!)} title="重新生成：从这条提问重新开始；原记录保留，文件不会撤销">
                 <Icon name="refresh" size={16} />
@@ -83,7 +84,16 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                 onScroll={block.streaming ? aScroll.onScroll : undefined}
                 className={`text-[15px] text-ink2 leading-[1.75] break-words${block.streaming ? ' max-h-[58vh] overflow-y-auto pr-1' : ''}`}
               >
-                <Markdown onOpenFile={onOpenFile} resolveFile={resolveFile}>{block.text}</Markdown>
+                <AssistantMarkdown
+                  messageId={block.id}
+                  streaming={block.streaming}
+                  textOnly={textOnly}
+                  onOpenFile={onOpenFile}
+                  resolveFile={resolveFile}
+                  onContentHeightChange={onContentHeightChange}
+                >
+                  {block.text}
+                </AssistantMarkdown>
                 {block.streaming && <span className="caret">▍</span>}
               </div>
             )}

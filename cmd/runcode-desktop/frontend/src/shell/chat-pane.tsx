@@ -1,6 +1,6 @@
-// ChatPane 是对话流本身：顶部的计划进度胶囊、可滚动的消息区（把 groupBlocks 分好
+﻿// ChatPane 是对话流本身：顶部的计划进度胶囊、可滚动的消息区（把 groupBlocks 分好
 // 的组映射成各类卡片）、空态与"思考中"指示。纯展示——所有交互都经 props 回调。
-import { type ReactNode } from 'react'
+import { useCallback, useRef, type ReactNode } from 'react'
 import { Logo } from '@/ui/icons'
 import { BRAND } from '@/core/brand'
 import { shortenPath } from '@/core/paths'
@@ -10,6 +10,7 @@ import { diffStats, hasDiff } from '@/chat/tool-text'
 import { AgentTaskGroup } from '@/chat/agent-task'
 import { AnalyzeCard } from '@/chat/analyze-card'
 import { SkillCard } from '@/chat/skill-card'
+import { GeneratedImageCard } from '@/chat/generated-image-card'
 import { AskCard } from '@/chat/ask-card'
 import { BlockView } from '@/chat/block-view'
 import { BotRow } from '@/chat/bot-row'
@@ -21,15 +22,17 @@ import { ReplyArtifacts } from '@/chat/reply-artifacts'
 import { type PreviewTab } from '@/preview/tabs'
 import { PlanStates, type PlanSnapshot } from '@/core/bridge'
 import { type Plan } from '@/session/use-plan'
+import { InlinePreviewBudgetProvider } from '@/chat/inline-preview-budget'
 
 export function ChatPane({
-  blocks, busy, cwd, userName, plan, planOpen, onPlanToggle, planning,
+  blocks, busy, cwd, userName, plan, planOpen, onPlanToggle, planning, textOnly = false,
   harmAllows, oaBlocked, revertedEdits, files, tabs,
   scrollRef, onScroll,
   onAnswer, onOpenFile, onReviewEdit, onUndoEdit, resolveFile,
   recorderCard,
   onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled,
 }: {
+  textOnly?: boolean
   onRetryQuestion?: (id: string) => void
   onEditQuestion?: (id: string) => void
   questionActionsDisabled?: boolean
@@ -62,6 +65,18 @@ export function ChatPane({
   onGenerateMinutes?: (mark: RecordingMark) => void
 }) {
   const groups = groupBlocks(blocks)
+  // 内联预览高度晚于文本：只在用户本来贴底时跟随。贴底状态由 ChatPane 自己维护，
+  // 不经 App.tsx，避免与用量页等其它滚动容器抢同一份逻辑。
+  const stick = useRef(true)
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current
+    if (el) stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48
+    onScroll()
+  }, [scrollRef, onScroll])
+  const onContentHeightChange = useCallback(() => {
+    const el = scrollRef.current
+    if (el && stick.current) el.scrollTo({ top: el.scrollHeight })
+  }, [scrollRef])
   // 计划胶囊上的聚合数字：本会话改过的文件数与累计增删行数。
   const fileSet = new Set<string>()
   let planAdds = 0
@@ -102,7 +117,9 @@ export function ChatPane({
           />
         </div>
       )}
-      <div className="flex-1 overflow-y-auto bg-surface px-6 pt-3 pb-8" ref={scrollRef} onScroll={onScroll}>
+      <div className="flex-1 overflow-y-auto bg-surface px-6 pt-3 pb-8" ref={scrollRef} onScroll={handleScroll}>
+        {/* HTML 内联预览名额挂在本消息区：跨消息共享 liveFrames，切会话随子树卸载释放。 */}
+        <InlinePreviewBudgetProvider>
         <div className="mx-auto max-w-[1200px] flex flex-col gap-6">
           {blocks.length === 0 && (
             <div className="mt-[16vh] text-center text-faint">
@@ -139,12 +156,14 @@ export function ChatPane({
               <BotRow key={g.id}><AnalyzeCard tool={g.tool} /></BotRow>
             ) : g.kind === 'skill' ? (
               <BotRow key={g.id}><SkillCard tool={g.tool} /></BotRow>
+            ) : g.kind === 'image' ? (
+              <BotRow key={g.id}><GeneratedImageCard tool={g.tool} sessionId={g.sessionId} onOpenFile={onOpenFile} /></BotRow>
             ) : g.kind === 'taskgroup' ? (
               <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} /></BotRow>
             ) : (
               <div key={g.block.id}>
-                <BlockView onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} />
-                {g.block.kind === 'assistant' && (
+                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} onContentHeightChange={onContentHeightChange} />
+                {!textOnly && g.block.kind === 'assistant' && (
                   <ReplyArtifacts text={g.block.text} files={files} tabs={tabs} onOpen={onOpenFile} />
                 )}
               </div>
@@ -160,6 +179,7 @@ export function ChatPane({
             </BotRow>
           )}
         </div>
+        </InlinePreviewBudgetProvider>
       </div>
       {/* 审批板钉在输入区上方，不随对话滚走：这是一道必须有人应答的闸门。 */}
       {showBoard && (

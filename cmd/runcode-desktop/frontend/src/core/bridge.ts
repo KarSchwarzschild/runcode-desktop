@@ -1,4 +1,4 @@
-// bridge is the frontend's single facade over the generated protocol layer
+﻿// bridge is the frontend's single facade over the generated protocol layer
 // (src/protocol/*, protogen output — regenerate with `go generate ./pkg/protocol`).
 // It re-exports the wire types, the typed event helpers, and the typed command
 // functions, and keeps only the frontend-specific pieces: UI-side data shapes
@@ -11,6 +11,7 @@
 
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
+  ConversationInfo as SessionInfo,
  ArtifactReference, DirectoryAccessRequest, DirectoryAccessGrant, DirectoryAccessView,
   ModelContextValues, ModelContextOverride, ModelContextView, SaveModelContextSettingsRequest,
   QuestionReference, QuestionImage, QuestionDraft, QuestionReceipt, SubmitQuestionRequest,
@@ -70,7 +71,6 @@ export type {
   ResumedSession,
   ResumedTool,
   SaveCustomModelRequest,
-  SessionInfo,
   SessionRenamed,
   OpenSessionInfo,
   SessionSummary,
@@ -132,6 +132,7 @@ export {
   interrupt,
   listAgents,
   getVisionSettings, saveVisionSettings, setPlatformImageCapability,
+  getLocalUsageTenants,
   listCustomModels,
   listEdits,
   listFiles,
@@ -236,7 +237,7 @@ import {
   readArtifactBytes as readArtifactBytesCmd,
   switchModel as switchModelCmd,
 } from './protocol/commands'
-import type { EditRecord, SessionInfo } from './protocol/types'
+import type { EditRecord, ConversationInfo as SessionInfo } from './protocol/types'
 
 // switchModel spans platform (passport) and custom direct-connection models: a
 // same-connection platform swap is in place, any connection change rebuilds the
@@ -355,3 +356,22 @@ function base64(bytes: Uint8Array): string {
   }
   return btoa(binary)
 }
+
+// ---- 文生图（IMG-GEN-001）---------------------------------------------------------
+export type {
+  ImageGenerationProfile, ImageGenerationModel, ImageGenerationCatalog, ImageGenerationSettings,
+  SaveImageGenerationSettingsRequest, SessionImageGenerationView, SetSessionImageGenerationRequest,
+  ImageGenerationArtifact, ImageGenerationResult,
+} from './protocol/types'
+export {
+  listImageGenerationModels, getImageGenerationSettings, saveImageGenerationSettings,
+  getSessionImageGeneration, setSessionImageGeneration,
+} from './protocol/commands'
+
+// ---- 用量统计（USAGE-001）：只读查询，类型与命令都来自生成协议 ------------------
+export type {
+  UsageQuery, UsageEffectiveRange, ResolvedUsageQuery, UsageRequestsQuery, UsageDimensionsQuery,
+  UsageQuality, UsageTotals, UsageBucket, UsageCapabilities, UsageCoverageGap, UsageOverview,
+  UsageRowQuality, UsageRequestRow, UsageRequestsPage, UsageDimensionRow, UsageDimensionsPage,
+} from './protocol/types'
+export { getUsageOverview, getUsageRequests, getUsageDimensions } from './protocol/commands'

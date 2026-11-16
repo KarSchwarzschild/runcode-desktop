@@ -1,4 +1,4 @@
-package desktop
+﻿package desktop
 
 // app.go 是桌面外壳的骨架:App 结构本身、会话的开与关,以及各命令共用的错误包装
 // 与状态映射。回合、自动标题、会话设置分别在 turn.go / title.go /
@@ -17,6 +17,8 @@ import (
 	"github.com/wt68/runcode/internal/browsertool"
 	"github.com/wt68/runcode/internal/codexauth"
 	"github.com/wt68/runcode/internal/codexproxy"
+	"github.com/wt68/runcode/internal/imagegentool"
+	"github.com/wt68/runcode/internal/localusage"
 	"github.com/wt68/runcode/internal/officetool"
 	"github.com/wt68/runcode/internal/plantool"
 	"github.com/wt68/runcode/internal/previewtool"
@@ -71,7 +73,8 @@ type Quitter interface{ Quit() }
 //     条目加锁,并遵守 startMu → App.mu → entry.mu 的次序。
 type sessionEntry struct {
 	modelRef   modelReference
-	questionMu sync.Mutex // serializes submission preparation without holding App.mu
+	questionMu sync.Mutex       // serializes submission preparation without holding App.mu
+	identity   sessionIdentityBinding // immutable account binding for per-session product state
 	// Creation connection belongs to this entry, not whichever session has focus.
 	connectionConfig engine.Config
 	passport         bool
@@ -86,6 +89,9 @@ type sessionEntry struct {
 	emit      func(event string, payload any)
 	edits     *editStore
 	plans     *planStore
+	// imageGeneration holds this session instance's image_generate turn
+	// snapshot (nil for sessions that do not register the tool).
+	imageGeneration *imageGenerationTurnState
 
 	// turnActive mirrors whether this session has a turn in flight (set on
 	// submit, cleared when the sink adapter observes turn:end / turn:error).
@@ -231,6 +237,8 @@ type App struct {
 	// approval gate, and the persisted copy that lets a pending approval survive a
 	// restart. Same lifecycle as pendingEdits; promoted onto the entry on success.
 	pendingPlans *planStore
+	// pendingImageGeneration parks image_generate state while Create is in flight.
+	pendingImageGeneration *imageGenerationTurnState
 	// tokens holds the Passport OAuth tokens (memory + DPAPI persistence); it is
 	// also the engine's TokenSource. passportUser caches /api/me for PassportStatus.
 	// loginCancel cancels an in-flight browser login wait.
@@ -258,6 +266,10 @@ type App struct {
 	// oaBindings 缓存"当前账号在 Passport 里绑没绑 OA"（见 oa.go）。与上一行同一套
 	// 理由：会话创建不能每次都去问一趟。键同样是租户 id。
 	oaBindings map[string]oaBindingEntry
+	// usageStore 是本机平台用量 SQLite（见 usage_capture.go／internal/localusage）。
+	// Startup 打开；Shutdown 在回合收尾后关闭。nil 表示未启用或打开失败。
+	usageMu    sync.RWMutex
+	usageStore *localusage.Store
 }
 
 // New returns an App that emits events to sink. Session events are enveloped
@@ -282,8 +294,20 @@ func newWithBuild(sink EventSink, build host.BuildFunc) *App {
 		// ChatGPT 账号在这里就读回落盘的令牌,所以重启后仍是登录态(见 codex.go)。
 		codex: newCodexAccount(),
 	}
+	// 真实引擎会话需要一层极薄包装，以便 host.Manager 的 SubmitQuestion
+	// 把它分配的问题 ID 透传到生图工具；测试 fake session 保持原样。
+	wrappedBuild := func(cfg engine.Config, opts engine.Options) (host.Session, error) {
+		session, err := build(cfg, opts)
+		if err != nil {
+			return nil, err
+		}
+		if real, ok := session.(*engine.Session); ok {
+			return &imageGenerationInvocationSession{Session: real, app: a, sessionID: cfg.SessionID}, nil
+		}
+		return session, nil
+	}
 	a.mgr = host.NewManager(host.Options{
-		Build:       build,
+		Build:       wrappedBuild,
 		Sink:        hostSinkAdapter{app: a},
 		Limits:      host.Limits{}, // single-user shell: unbounded, IdleTimeout 0
 		Configure:   a.configureSession,
@@ -376,6 +400,10 @@ func (a *App) Startup() {
 		if _, err := a.audit.enable(); err != nil {
 			debugLog("context audit restore: %v", err)
 		}
+	}
+	// 本机平台用量：独立 SQLite；失败只记日志，不阻断启动。
+	if err := a.initLocalUsage(); err != nil {
+		debugLog("local usage init: %v", err)
 	}
 }
 
@@ -653,11 +681,13 @@ func (a *App) SetQuitter(q Quitter) { a.quit = q }
 // 让"某些会话里 OA 工具一调就被拒"这种问题多一个可能来源。
 var hostToolClasses = func() map[string]permissions.ToolClass {
 	m := map[string]permissions.ToolClass{
-		plantool.Name:       permissions.ClassReadOnly,
-		previewtool.Name:    permissions.ClassReadOnly,
-		officetool.Name:     permissions.ClassReadOnly,
-		runtimetool.Name:    permissions.ClassMutating,
-		browsertool.Name:    permissions.ClassMutating,
+		plantool.Name:    permissions.ClassReadOnly,
+		previewtool.Name: permissions.ClassReadOnly,
+		officetool.Name:  permissions.ClassReadOnly,
+		runtimetool.Name: permissions.ClassMutating,
+		browsertool.Name: permissions.ClassMutating,
+		// 生图会计费并写本地文件：ClassMutating 保留；会话开启「生成图片」后免弹窗放行。
+		imagegentool.Name:   permissions.ClassMutating,
 		imageinput.ToolName: permissions.ClassReadOnly,
 	}
 	for name, class := range oaToolClasses {
@@ -740,7 +770,10 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		// runtimeResolver 只做展示：给 install_runtime 的审批弹窗配一句"装的是什么、
 		// 多大、装到哪"（见 runtimetool.go）。
 		Resolver: privilegeResolver{inner: runtimeResolver{
-			inner: browserResolver{inner: fileReadResolver{inner: permissions.WithToolClasses(nil, hostToolClasses)}},
+			inner: imageGenerationResolver{
+				inner: browserResolver{inner: fileReadResolver{inner: permissions.WithToolClasses(nil, hostToolClasses)}, preview: a.sessionArtifactPreviewURL},
+				state: a.imageGenerationStateOf,
+			},
 			rt:    a.rt,
 			trust: a.ensureRuntimeTrust,
 		}},
@@ -760,9 +793,13 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		// sudo 那一层（privilegePolicy，把 sudo 从硬拒改成每次询问）必须包在 OA 锁**里面**：
 		// OA 锁要有最终决定权。反过来的话，一条 `sudo curl …` 会被这一层从"拒绝"改回
 		// "询问"，OA 锁想挡的出网就漏了。
+		// artifactPolicy 包在 appDir 外、提权内：工作区内产品产物的 Write/Edit
+		// 免弹窗，且只接受普通文件；执行面、凭据、越界和命令路径仍由内层规则保护。
 		Policy: newOALockPolicy(
 			privilegePolicy{
-				inner:   newAppDirPolicy(permissions.DefaultPolicy{TrustedMCPBindings: trustedMCPBindings(cfg.MCPServers)}),
+				inner: newArtifactPolicy(
+					newAppDirPolicy(permissions.DefaultPolicy{TrustedMCPBindings: trustedMCPBindings(cfg.MCPServers)}),
+				),
 				enabled: a.privilegeReady,
 			},
 			func() string { return a.oaLockedModel(sctx.ID) },
@@ -813,7 +850,7 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 
 	// 联网搜索：登录了通行证就换成平台自己的搜索(经 Bridge 走 AI.Core)，否则保留
 	// 引擎内置的那条。同样是"替换"而非"新增"——理由见 websearch.go。
-	if ws := passportWebSearch(cfg); ws != nil {
+	if ws := passportWebSearchFor(a, cfg); ws != nil {
 		opts.WebSearchTool = ws
 	}
 
@@ -825,6 +862,15 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 	// 工具。子代理跑在构建时那个模型上,给它 OA 工具等于给闸门开一条后门。
 	if oa := a.oaTools(cfg, sctx.ID); len(oa) > 0 {
 		opts.ExtraTools = append(opts.ExtraTools, oa...)
+	}
+	// image_generate：通行证主会话常驻注册；是否可用由每回合冻结的快照描述，关闭时
+	// Run 本地拒绝、零请求。
+	if ig := a.imageGenerationTools(cfg, sctx.ID, sctx.Generation); len(ig) > 0 {
+		opts.ExtraTools = append(opts.ExtraTools, ig...)
+	} else {
+		a.mu.Lock()
+		a.pendingImageGeneration = nil
+		a.mu.Unlock()
 	}
 
 	// 上下文审核观测器只在测试版接线;正式版连回调都不装,功能整体不存在。
@@ -997,6 +1043,10 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 	if err != nil {
 		return SessionInfo{}, err
 	}
+	resumeID := cfg.Resume
+	if resumeID == "" {
+		resumeID = cfg.SessionID
+	}
 	if passport && requested != "" && cfg.Model != requested && !a.keepRestoredPlatformModel(ctx, tenantID, cfg.Model) {
 		debugLog("resume: sidecar model %q is not a platform model; using %q", cfg.Model, requested)
 		cfg.Model = requested
@@ -1053,6 +1103,8 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 	a.mu.Lock()
 	pendingEdits, pendingPlans, pendingEmit := a.pendingEdits, a.pendingPlans, a.pendingEmit
 	a.pendingEdits, a.pendingPlans, a.pendingEmit = nil, nil, nil
+	pendingImageGeneration := a.pendingImageGeneration
+	a.pendingImageGeneration = nil
 	if err != nil {
 		a.mu.Unlock()
 		return SessionInfo{}, err
@@ -1063,7 +1115,11 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 	// 登记顺带把 focused 与 workspace 一起切到新会话(见 focusLocked)。
 	a.registerSessionModeLocked(id, cfg.CWD, pendingEdits, pendingPlans, pendingEmit, focus)
 	entry := a.entryLocked(id)
+	if pendingImageGeneration != nil && pendingImageGeneration.sessionID == id {
+		entry.imageGeneration = pendingImageGeneration
+	}
 	entry.connectionConfig, entry.passport, entry.tenantID = cfg, passport, strings.TrimSpace(tenantID)
+	a.bindSessionIdentityLocked(entry)
 	entry.modelRef = modelRef
 	// 锁跟着会话进内存:此后闸门、模型切换拦截、出网工具封锁读的都是这一份。
 	oaLock, oaLocked := readOALock(cfg.CWD, id)
@@ -1124,11 +1180,14 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	if e == nil {
 		return nil
 	}
+	// 关闭前先发 invalidating，让前端丢掉该会话的内联文件缓存与在途读取。
+	a.emitPreviewLifecycle(e, "invalidating", "")
 	a.mu.Lock()
 	id := ""
 	if !e.closed {
 		id = e.id
 	}
+	emit := e.emit
 	a.mu.Unlock()
 	if id != "" {
 		if err := a.mgr.Close(ctx, id); err != nil {
@@ -1157,6 +1216,7 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	a.mu.Unlock()
 	a.dropArtifacts(e.id)
 	a.stopPreview(previewWorkspaceOf(e))
+	emitPreviewLifecycleTo(emit, e.id, "closed", "")
 	return nil
 }
 
@@ -1172,6 +1232,7 @@ func (a *App) registerSessionLocked(id, workspace string, edits *editStore, plan
 func (a *App) registerSessionModeLocked(id, workspace string, edits *editStore, plans *planStore, emit func(string, any), focus bool) {
 	a.sessionSeq++
 	entry := &sessionEntry{id: id, seq: a.sessionSeq, workspace: workspace, emit: emit, edits: edits, plans: plans}
+	a.bindSessionIdentityLocked(entry)
 	// Configure 一定在 Create 成功前跑过,所以这两个不该为 nil;真为 nil 时用兜底
 	// 存储顶上,免得后面每个取用点都要判空。
 	if entry.edits == nil {
@@ -1247,7 +1308,7 @@ func (a *App) engineSessionOf(sessionID string) (*engine.Session, error) {
 	if err != nil {
 		return nil, err
 	}
-	es, ok := s.(*engine.Session)
+	es, ok := unwrapEngineSession(s)
 	if !ok {
 		return nil, errNoSession
 	}
@@ -1298,6 +1359,7 @@ func (a *App) Status(sessionID string) (SessionInfo, error) {
 // live preview base URL.
 func (a *App) sessionInfo(st engine.Status) SessionInfo {
 	return SessionInfo{
+		Kind:               "agent",
 		SessionID:          st.SessionID,
 		Model:              st.Model,
 		CWD:                st.CWD,
