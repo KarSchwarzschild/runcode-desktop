@@ -1,5 +1,5 @@
 // InlinePreview 把一段已判定可预览的静态内容画进助手消息：成功时显示图形，失败时
-// 退回传入的 defaultNode（原代码块）并附带可读原因。无工具栏、无切换按钮。
+// 退回传入的 defaultNode（原代码块）并附带可读原因。代码和预览共用同一份解析结果。
 //
 // HTML 另受 InlinePreviewBudgetProvider 名额约束（liveFrames）：有名额且靠近视口才挂
 // iframe；等待名额显示占位（不当失败）；离屏卸载保留已测高度。SVG／Mermaid 不占名额。
@@ -10,6 +10,10 @@ import { renderMermaid } from '@/preview/static-mermaid-loader'
 import { PREVIEW_LIMITS, type StaticPreviewKind } from '@/preview/static-detect'
 import { logPreviewFailure, previewFailureHint } from '@/preview/preview-failure'
 import { noteInlineFile, type InlineFileStatus } from '@/session/inline-preview-status'
+import { Icon } from '@/ui/icons'
+import { Popover } from '@/ui/popover'
+import { IconBtn } from '@/preview/icon-btn'
+import { ImageLightbox } from '@/preview/image-lightbox'
 import { useHtmlPreviewSlot } from './inline-preview-budget'
 
 type Props = {
@@ -27,6 +31,16 @@ type Ready =
   | { kind: 'svg' | 'mermaid'; url: string; width: number; height: number }
   | { kind: 'html'; srcdoc: string }
 
+const PREVIEW_TITLE: Record<StaticPreviewKind, string> = {
+  mermaid: 'Mermaid 预览',
+  svg: 'SVG 预览',
+  html: 'HTML 预览',
+}
+
+const INLINE_IMAGE_STYLE = {
+  maxHeight: 'clamp(240px, 42vh, 420px)',
+} as const
+
 function reportPaths(sessionId: string | undefined, paths: string[] | undefined, status: InlineFileStatus) {
   if (!sessionId || !paths?.length) return
   for (const p of paths) noteInlineFile(sessionId, p, status)
@@ -35,6 +49,9 @@ function reportPaths(sessionId: string | undefined, paths: string[] | undefined,
 export function InlinePreview({ kind, source, defaultNode, onHeightChange, messageId, relatedPaths, sessionId }: Props) {
   const [ready, setReady] = useState<Ready | null>(null)
   const [failReason, setFailReason] = useState<string | null>(null)
+  const [view, setView] = useState<'preview' | 'source'>('preview')
+  const [viewOpen, setViewOpen] = useState(false)
+  const [lightboxOpen, setLightboxOpen] = useState(false)
   const urlRef = useRef<string | null>(null)
   const notify = useRef(onHeightChange)
   notify.current = onHeightChange
@@ -51,6 +68,8 @@ export function InlinePreview({ kind, source, defaultNode, onHeightChange, messa
     let cancelled = false
     const ac = new AbortController()
     const paths = pathsRef.current
+    setViewOpen(false)
+    setLightboxOpen(false)
     setReady(null)
     setFailReason(null)
     reportPaths(sessionId, paths, 'pending')
@@ -110,13 +129,47 @@ export function InlinePreview({ kind, source, defaultNode, onHeightChange, messa
     if (ready) notify.current?.()
   }, [ready])
 
+  const title = PREVIEW_TITLE[kind]
+  const imageReady = ready && ready.kind !== 'html' ? ready : null
+  const canFullscreen = targetFullscreen(imageReady, view)
+  const header = ready ? (
+    <div className="relative flex items-center gap-2 min-h-9 px-2.5 border-b border-line2 bg-surface">
+      <span className="text-[12px] font-medium text-ink flex-1 min-w-0 truncate">{title}</span>
+      <button
+        type="button"
+        className="flex-none inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] text-muted hover:text-ink hover:bg-surface2"
+        aria-expanded={viewOpen}
+        onClick={() => setViewOpen((open) => !open)}
+      >
+        视图
+        <Icon name="chevron-down" size={12} className={viewOpen ? 'rotate-180 transition' : 'transition'} />
+      </button>
+      <Popover open={viewOpen} onClose={() => setViewOpen(false)} placement="down-right" className="w-[132px]">
+        <button type="button" className={`${VIEW_ITEM} ${view === 'preview' ? ACTIVE_VIEW_ITEM : ''}`} onClick={() => { setView('preview'); setViewOpen(false) }}>
+          {kind === 'html' ? '仅显示页面' : '仅显示图表'}
+        </button>
+        <button type="button" className={`${VIEW_ITEM} ${view === 'source' ? ACTIVE_VIEW_ITEM : ''}`} onClick={() => { setView('source'); setViewOpen(false) }}>
+          仅显示代码
+        </button>
+      </Popover>
+      {canFullscreen && <IconBtn name="expand" title="全屏" onClick={() => setLightboxOpen(true)} />}
+    </div>
+  ) : (
+    <div className="flex items-center min-h-9 px-2.5 border-b border-line2 bg-surface">
+      <span className="text-[12px] font-medium text-ink truncate">{title}</span>
+    </div>
+  )
+
   if (failReason) {
     return (
-      <div className="my-2 flex flex-col gap-1">
-        {defaultNode}
-        <p className="text-[12px] text-faint px-0.5" role="note">
-          未显示预览：{previewFailureHint(failReason)}
-        </p>
+      <div className="my-2 overflow-hidden rounded-lg border border-line2 bg-surface">
+        {header}
+        <div className="p-2.5">
+          {defaultNode}
+          <p className="text-[12px] text-faint px-0.5 mt-1.5" role="note">
+            未显示预览：{previewFailureHint(failReason)}
+          </p>
+        </div>
       </div>
     )
   }
@@ -125,30 +178,59 @@ export function InlinePreview({ kind, source, defaultNode, onHeightChange, messa
   }
   if (ready.kind === 'html') {
     return (
-      <HtmlPreviewGate
-        srcdoc={ready.srcdoc}
-        defaultNode={defaultNode}
-        onHeightChange={() => notify.current?.()}
-        onFallback={(reason) => {
-          setFailReason(reason)
-          logPreviewFailure({ kind: 'html', reason, messageId })
-          reportPaths(sessionId, relatedPaths, 'fallback')
-        }}
-      />
+      <div className="my-2 overflow-visible rounded-lg border border-line2 bg-surface">
+        {header}
+        {view === 'source' ? (
+          <div className="p-2.5">{defaultNode}</div>
+        ) : (
+          <HtmlPreviewGate
+            srcdoc={ready.srcdoc}
+            defaultNode={defaultNode}
+            onHeightChange={() => notify.current?.()}
+            onFallback={(reason) => {
+              setFailReason(reason)
+              logPreviewFailure({ kind: 'html', reason, messageId })
+              reportPaths(sessionId, relatedPaths, 'fallback')
+            }}
+          />
+        )}
+      </div>
     )
   }
   return (
-    <div className="my-2 overflow-hidden rounded-lg border border-line2 bg-surface">
-      <img
-        src={ready.url}
-        alt=""
-        width={ready.width}
-        height={ready.height}
-        className="block max-w-full h-auto mx-auto"
-        onLoad={() => notify.current?.()}
+    <div className="my-2 overflow-visible rounded-lg border border-line2 bg-surface">
+      {header}
+      {view === 'source' ? (
+        <div className="p-2.5">{defaultNode}</div>
+      ) : (
+        <div className="p-2 overflow-hidden rounded-b-lg">
+          <img
+            src={ready.url}
+            alt={`${title}图`}
+            width={ready.width}
+            height={ready.height}
+            style={INLINE_IMAGE_STYLE}
+            className="block max-w-full w-auto h-auto mx-auto object-contain"
+            onLoad={() => notify.current?.()}
+          />
+        </div>
+      )}
+      <ImageLightbox
+        open={lightboxOpen && !!imageReady}
+        src={imageReady?.url ?? ''}
+        alt={`${title}图`}
+        mode="vector"
+        onClose={() => setLightboxOpen(false)}
       />
     </div>
   )
+}
+
+const VIEW_ITEM = 'block w-full text-left px-3 py-2 text-[12px] text-ink2 hover:bg-surface2'
+const ACTIVE_VIEW_ITEM = 'text-primary bg-primarysoft'
+
+function targetFullscreen(ready: Extract<Ready, { kind: 'svg' | 'mermaid' }> | null, view: 'preview' | 'source'): boolean {
+  return !!ready && view === 'preview'
 }
 
 /** HTML：先占位并观察视口，有名额才挂 HtmlFrame；无 IO 且无名额时回退源码。 */
@@ -185,7 +267,7 @@ function HtmlPreviewGate({
   }
 
   return (
-    <div ref={shellRef} className="my-2">
+    <div ref={shellRef}>
       {hasSlot ? (
         <HtmlFrame
           srcdoc={srcdoc}
@@ -251,7 +333,7 @@ function HtmlFrame({
 
   return (
     <div
-      className={`overflow-hidden rounded-lg border border-line2 bg-surface${box.scroll ? ' overflow-y-auto' : ''}`}
+      className={`overflow-hidden bg-surface${box.scroll ? ' overflow-y-auto' : ''}`}
       style={{ maxHeight: box.scroll ? PREVIEW_LIMITS.htmlMaxHeight : undefined }}
     >
       <iframe

@@ -125,4 +125,76 @@ describe('InlinePreview lifecycle', () => {
     expect(host.textContent).toContain('未显示预览')
     expect(host.textContent).toMatch(/暂不支持|unsupported-type|预览不可用/)
   })
+
+  it('提供标题和仅代码/图表两态切换，并在预览态显示全屏入口', async () => {
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'svg', source: svgOk, defaultNode: createElement('code', null, 'SOURCE'),
+      }))
+    })
+    expect(host.textContent).toContain('SVG 预览')
+    expect(host.querySelector('button[title="全屏"]')).toBeTruthy()
+
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    expect(host.textContent).toContain('仅显示图表')
+    expect(host.textContent).toContain('仅显示代码')
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    expect(host.textContent).toContain('SOURCE')
+    expect(host.querySelector('img')).toBeNull()
+    expect(host.querySelector('button[title="全屏"]')).toBeNull()
+
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示图表') as HTMLButtonElement).click())
+    expect(host.querySelector('img')).toBeTruthy()
+    expect(host.querySelector('button[title="全屏"]')).toBeTruthy()
+  })
+
+  it('HTML 有双态切换但不提供图片全屏', async () => {
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html',
+          source: '<!doctype html><html><body><p>页面</p></body></html>',
+          defaultNode: createElement('code', null, 'HTML SOURCE'),
+        }),
+      ))
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(host.textContent).toContain('HTML 预览')
+    expect(host.querySelector('button[title="全屏"]')).toBeNull()
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    expect(host.textContent).toContain('仅显示页面')
+    expect(host.textContent).toContain('仅显示代码')
+  })
+
+  it('Mermaid 成功渲染后使用 Mermaid 预览标题', async () => {
+    mermaid.render.mockResolvedValue({
+      ok: true,
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>',
+      width: 20,
+      height: 10,
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'mermaid', source: 'graph TD;A-->B', defaultNode: createElement('code', null, 'SOURCE'),
+      }))
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(host.textContent).toContain('Mermaid 预览')
+    expect(host.querySelector('button[title="全屏"]')).toBeTruthy()
+  })
+
+  it('全屏按钮打开客户端图片遮罩，单击图片后关闭', async () => {
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'svg', source: svgOk, defaultNode: createElement('code', null, 'SOURCE'),
+      }))
+    })
+    await act(async () => (host.querySelector('button[title="全屏"]') as HTMLButtonElement).click())
+    const dialog = document.body.querySelector('[role="dialog"]') as HTMLElement
+    expect(dialog).toBeTruthy()
+    const imageButton = dialog.querySelector('img')?.closest('button') as HTMLButtonElement
+    await act(async () => imageButton.click())
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+  })
 })
