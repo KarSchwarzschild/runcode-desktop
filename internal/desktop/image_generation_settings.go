@@ -114,9 +114,13 @@ func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSetting
 		if !profile.Available {
 			return appwire.ImageGenerationSettings{}, wireError(errors.New("该生图模型当前不可用：" + profile.UnavailableReason))
 		}
-		// 空尺寸表示「不固定」；只有显式固定值才必须落在目录支持列表里。
+		// 显式尺寸必须落在 Bridge 目录声明的支持列表里；错误值拒绝，不静默改写。
 		if size != "" && !slices.Contains(profile.SupportedSizes, size) {
 			return appwire.ImageGenerationSettings{}, wireError(errors.New("该生图模型不支持所选尺寸"))
+		}
+		// 仅一种尺寸时没有「不固定」：空值钉成该尺寸。
+		if size == "" && len(profile.SupportedSizes) == 1 {
+			size = profile.SupportedSizes[0]
 		}
 		supported, format = profile.SupportedSizes, preferredResponseFormat(profile.ResponseFormats)
 		if current.sameTarget(model, size) {

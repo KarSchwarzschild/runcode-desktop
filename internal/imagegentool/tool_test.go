@@ -85,7 +85,6 @@ func TestToolRejectsDisabledAndUnknownFields(t *testing.T) {
 		{"extra model", nil, `{"prompt":"海报","model":"other"}`, callCtx("u1"), "invalid_input"},
 		{"extra path", nil, `{"prompt":"海报","path":"C:/x.png"}`, callCtx("u1"), "invalid_input"},
 		{"extra n", nil, `{"prompt":"海报","n":4}`, callCtx("u1"), "invalid_input"},
-		{"unsupported size", nil, `{"prompt":"海报","size":"4096x4096"}`, callCtx("u1"), "invalid_input"},
 		{"malformed json", nil, `{"prompt":`, callCtx("u1"), "invalid_input"},
 		{"missing tool use id", nil, `{"prompt":"海报"}`, &tool.Context{SessionID: "sess", MessageID: "msg_1"}, "invalid_input"},
 		{"missing message id", nil, `{"prompt":"海报"}`, &tool.Context{SessionID: "sess", ToolUseID: "u1"}, "invalid_input"},
@@ -119,6 +118,16 @@ func TestToolRejectsDisabledAndUnknownFields(t *testing.T) {
 	}
 	if h.last.Prompt != "校园开放日海报" || h.last.Size != "1024x1024" {
 		t.Fatalf("host input = %+v (want trimmed prompt and frozen default size)", h.last)
+	}
+	remapHost := &fakeHost{}
+	remapSnap := readySnapshot()
+	remapSnap.Size = ""
+	remap, err := newTool(remapHost, &remapSnap).Run(context.Background(), json.RawMessage(`{"prompt":"海报","size":"4096x4096"}`), callCtx("u-remap"), nil)
+	if err != nil || remap.IsError || remapHost.calls.Load() != 1 || remapHost.last.Size != "2048x2048" {
+		t.Fatalf("unsupported size should remap: host=%+v result=%+v err=%v", remapHost.last, decodeResult(t, remap), err)
+	}
+	if note := decodeResult(t, remap).Message; note == "" || !strings.Contains(note, "2048x2048") {
+		t.Fatalf("remap note missing: %q", note)
 	}
 	if h.meta != (CallMeta{SessionID: "sess", MessageID: "msg_1", ToolUseID: "u1", TurnID: "turn_1"}) {
 		t.Fatalf("host meta = %+v", h.meta)
@@ -216,8 +225,23 @@ func TestParseInputAllowsOmittedSizeWhenUnfixed(t *testing.T) {
 	if err != nil || got.Size != "2048x2048" {
 		t.Fatalf("explicit size = %+v %v", got, err)
 	}
-	if _, err := parseInput(json.RawMessage(`{"prompt":"海报","size":"4096x4096"}`), snap); err == nil {
-		t.Fatal("unsupported size accepted")
+	got, err = parseInput(json.RawMessage(`{"prompt":"海报","size":"4096x4096"}`), snap)
+	if err != nil || got.Size != "2048x2048" || got.SizeNote == "" {
+		t.Fatalf("unsupported size should remap closest = %+v %v", got, err)
+	}
+}
+
+func TestParseInputForcesSingleSupportedSize(t *testing.T) {
+	snap := readySnapshot()
+	snap.Size = ""
+	snap.SupportedSizes = []string{"1024x1024"}
+	got, err := parseInput(json.RawMessage(`{"prompt":"海报"}`), snap)
+	if err != nil || got.Size != "1024x1024" {
+		t.Fatalf("single-size model must force size = %+v %v", got, err)
+	}
+	got, err = parseInput(json.RawMessage(`{"prompt":"海报","size":"2048x1024"}`), snap)
+	if err != nil || got.Size != "1024x1024" || got.SizeNote == "" {
+		t.Fatalf("single-size remap = %+v %v", got, err)
 	}
 }
 

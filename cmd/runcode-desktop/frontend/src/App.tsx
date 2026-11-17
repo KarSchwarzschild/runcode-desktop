@@ -212,7 +212,8 @@ export default function App() {
 
   if (!session.started) {
     return (
-      <div className="flex flex-col h-screen">
+      // 窗口只承载固定视口，首屏内容由自身滚动，避免溢出内容带动整个文档。
+      <div className="relative flex flex-col h-screen overflow-hidden">
         <TitleBar />
         {session.initialReq ? (
           <StartForm onStart={session.start} starting={session.starting} error={session.startError} initial={session.initialReq} />
@@ -247,7 +248,8 @@ export default function App() {
   }))
 
   return (
-    <div className="flex flex-col h-screen">
+    // 页面与侧栏各自滚动；窗口根截住越界内容，标题栏和底部用户区不能随文档移动。
+    <div className="relative flex flex-col h-screen overflow-hidden">
       <TitleBar />
       <div className="flex flex-1 min-h-0">
         <Sidebar

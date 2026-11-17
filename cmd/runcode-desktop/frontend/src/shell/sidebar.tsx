@@ -139,7 +139,8 @@ export function Sidebar({
         // 撑开中间，让工作区按钮保持贴底（展开态由最近对话列表的 flex-1 承担）。
         <div className="flex-1" />
       ) : (
-        <div className="mt-[22px] flex-1 overflow-y-auto -mr-1 pr-1">
+        // 列表触底或不足一屏时也截住滚动链，不能让滚轮转去滚动窗口文档。
+        <div className="mt-[22px] flex-1 overflow-y-auto overscroll-contain -mr-1 pr-1">
           {openSessions.length > 0 && (
             <>
               <div className="text-[12px] text-faint px-[11px] pb-2 tracking-wide">打开中</div>

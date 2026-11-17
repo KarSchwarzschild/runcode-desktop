@@ -21,16 +21,39 @@ export function imageGenerationModelKey(ref?: ModelReference | null): string {
   return ref ? JSON.stringify([ref.kind, ref.name, ref.bridge ?? '', ref.tenantId ?? '']) : ''
 }
 
+/** 多尺寸才允许「不固定尺寸」；仅一种尺寸时必须选该值。 */
+export function allowsUnfixedSize(supportedSizes: string[] | null | undefined): boolean {
+  return (supportedSizes ?? []).length > 1
+}
+
+/** 换模型时的默认尺寸草稿：单尺寸直接钉死，多尺寸默认不固定。 */
+export function defaultDraftSize(supportedSizes: string[] | null | undefined): string {
+  const sizes = supportedSizes ?? []
+  return sizes.length === 1 ? sizes[0]! : ''
+}
+
+/** 把已保存尺寸校正到当前模型可选范围（含单尺寸强制）。 */
+export function coerceDraftSize(savedSize: string, supportedSizes: string[] | null | undefined): string {
+  const sizes = supportedSizes ?? []
+  if (sizes.length === 0) return ''
+  if (sizes.length === 1) return sizes[0]!
+  const size = (savedSize ?? '').trim()
+  if (size === '' || sizes.includes(size)) return size
+  return ''
+}
+
 // settingsSelection 把已保存设置映射到当前目录上。没有保存时什么都不选（不自动挑第一个
 // 付费模型）；保存的模型/尺寸在目录里已不可用时 stale=true，由界面画「不可用」占位。
 export function settingsSelection(catalog: ImageGenerationCatalog | null, settings: ImageGenerationSettings | null): { key: string; size: string; stale: boolean } {
   const saved = settings?.defaultModel
   if (!saved) return { key: '', size: '', stale: false }
   const key = imageGenerationModelKey(saved)
-  const size = settings?.defaultSize ?? ''
   const hit = (catalog?.models ?? []).find((m) => imageGenerationModelKey(m.model) === key)
-  // 空尺寸表示「不固定」，不算失效；只有显式固定值才要求落在支持列表里。
-  const sizeStale = size !== '' && !(hit?.profile.supportedSizes ?? []).includes(size)
+  const sizes = hit?.profile.supportedSizes ?? []
+  // 单尺寸模型把已保存值钉成唯一支持项；多尺寸保留原值，不支持的仍标 stale 以便 UI 提示。
+  const raw = settings?.defaultSize ?? ''
+  const size = sizes.length === 1 ? sizes[0]! : raw
+  const sizeStale = size !== '' && !sizes.includes(size)
   const stale = !hit || !hit.profile.available || sizeStale
   return { key, size, stale }
 }

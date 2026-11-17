@@ -70,8 +70,8 @@ it('renders question actions as icons with tooltips and screen-reader labels', (
     expect(button).toContain('<svg')
     expect(button).toContain('aria-hidden="true"')
     expect(button).toContain(`title="${label}`)
-    expect(button).toContain(`<span class="sr-only">${label}</span>`)
-    const visible = button.replace(/<span class="sr-only">[^<]*<\/span>/g, '').replace(/<[^>]*>/g, '')
+    expect(button).toContain(`aria-label="${label}"`)
+    const visible = button.replace(/<[^>]*>/g, '')
     expect(visible).toBe('')
   }
 })

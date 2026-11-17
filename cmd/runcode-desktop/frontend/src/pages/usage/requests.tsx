@@ -72,7 +72,8 @@ export function UsageRequests({ page, pageIndex, pageSize, providerColumn, statu
               <th className={`${TH} text-right`}>缓存命中</th>
               <th className={`${TH} text-right`}>未命中输入</th>
               <th className={`${TH} text-right`} title="整次调用的耗时，不是首个字返回的时间">总耗时</th>
-              <th className={TH}><span className="sr-only">详情</span></th>
+              {/* 隐藏列名直接交给表头，避免绝对定位的隐藏文本越过滚动区撑高文档。 */}
+              <th className={TH} aria-label="详情" />
             </tr>
           </thead>
           <tbody>

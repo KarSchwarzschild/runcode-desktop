@@ -45,11 +45,8 @@ export function Placeholder({ children, pad = 'md', className }: {
 // content inside it (settings' in-page directory). `contentClassName` is appended
 // to the measure only; the scrolling column's classes are not configurable.
 //
-// `min-h-0` is required: without it a flex item's min-height stays at content
-// size, so a tall page (用量统计) expands the whole App instead of scrolling
-// here — body then scrolls and reveals the gray window background under the
-// sidebar. `overscroll-contain` stops wheel chaining / rubber-band at the edges
-// from bubbling to that same document scroll (same idea as settings-nav).
+// 页面在主栏的剩余高度内滚动，min-h-0 允许长内容收缩，overscroll-contain 隔离触底滚动。
+// 这不能替代 App 的窗口边界：无就近定位父容器的绝对定位元素仍可能越出页面滚动区。
 export function PageShell({ title, hint, action, width = 720, scrollRef, contentClassName, children }: {
   title: ReactNode
   hint?: ReactNode

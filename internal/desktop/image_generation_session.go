@@ -251,6 +251,10 @@ func (a *App) freezeImageGenerationTurn(e *sessionEntry) {
 			if len(snap.SupportedSizes) == 0 && pref.DefaultSize != "" {
 				snap.SupportedSizes = []string{pref.DefaultSize}
 			}
+			// 仅一种尺寸时没有「不固定」：冻结回合钉成该尺寸。
+			if len(snap.SupportedSizes) == 1 {
+				snap.Size = snap.SupportedSizes[0]
+			}
 		}
 	}
 	snap.Reason, snap.Available = reason, reason == ""

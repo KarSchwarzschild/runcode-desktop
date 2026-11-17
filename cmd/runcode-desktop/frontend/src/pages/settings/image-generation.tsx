@@ -1,4 +1,4 @@
-// 「图片生成」设置小节：当前平台/租户下的默认文生图模型与尺寸。显式保存（切换下拉
+// 「图片生成」设置小节：当前平台/租户下的生图模型与尺寸。显式保存（切换下拉
 // 不触发网络校验与落盘）；目录只列网关明确标为 image_generation 的模型。只影响生成
 // 图片，不改变聊天模型；保存后下一轮生效，进行中的回合固定原模型与尺寸。
 import { useCallback, useEffect, useState } from 'react'
@@ -6,7 +6,9 @@ import {
   errText, getImageGenerationSettings, listImageGenerationModels, saveImageGenerationSettings,
   type ImageGenerationCatalog, type ImageGenerationSettings,
 } from '@/core/bridge'
-import { imageGenerationModelKey, settingsSelection } from '@/core/image-generation'
+import {
+  allowsUnfixedSize, defaultDraftSize, imageGenerationModelKey, settingsSelection,
+} from '@/core/image-generation'
 import { BTN, BTN_PRIMARY } from '@/ui/tokens'
 import { InlineError } from '@/ui/feedback'
 import { LABEL_CLS, SelectField } from '@/ui/fields'
@@ -59,17 +61,18 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
   const draftModel = models.find((m) => imageGenerationModelKey(m.model) === draftKey)
   const draftStale = !!draftKey && (!draftModel || !draftModel.profile.available)
   const sizes = draftModel?.profile.supportedSizes ?? []
+  const unfixedOK = allowsUnfixedSize(sizes)
   const dirty = draftKey !== confirmed.key || (!!draftKey && draftSize !== confirmed.size)
-  // 空尺寸表示不固定，允许保存；固定尺寸必须在目录支持列表里。
-  const sizeOK = !draftKey || draftSize === '' || sizes.includes(draftSize)
+  // 多尺寸允许空（不固定）；单尺寸必须落在唯一支持值上。
+  const sizeOK = !draftKey || (unfixedOK && draftSize === '') || sizes.includes(draftSize)
   const canSave = !!settings && !!catalog && !saving && !loading && dirty && !draftStale && sizeOK
 
   function pickModel(key: string) {
     setSaved(false)
     setSaveError('')
     setDraftKey(key)
-    // 换模型时默认「不固定尺寸」，不自动填目录 defaultSize。
-    setDraftSize('')
+    const next = models.find((m) => imageGenerationModelKey(m.model) === key)
+    setDraftSize(defaultDraftSize(next?.profile.supportedSizes))
   }
 
   async function save() {
@@ -98,10 +101,10 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
 
   const staleName = settings?.defaultModel?.name ?? ''
   return <Section title="图片生成" hint="显式保存，下一轮生效">
-    <p className="text-[12px] text-muted">仅用于生成图片，不改变当前聊天模型。配置可用生图模型后，聊天模型会根据你的提示词判断是否调用生图工具；每次生成会计费。</p>
+    <p className="text-[12px] text-muted">仅用于生成图片，不改变当前聊天模型。配置可用生图模型后，聊天模型会根据你的提示词判断是否调用生图工具。</p>
     <div className="text-[12px] text-muted">当前平台租户：<span className="font-mono text-ink2">{tenantId || '通行证默认租户'}</span></div>
     <label className={LABEL_CLS}>
-      默认文生图模型
+      生图模型选择
       <SelectField value={draftKey} disabled={!catalog || !settings || saving || loading} onChange={pickModel}>
         <option value="">不使用（清除选择）</option>
         {draftKey && !draftModel && <option value={draftKey} disabled>{staleName} · 已不可用，请重新选择</option>}
@@ -113,17 +116,17 @@ export function ImageGenerationSection({ tenantId }: { tenantId: string }) {
         })}
       </SelectField>
     </label>
-    <label className={LABEL_CLS} title="由提示词和生图模型能力共同决定">
-      默认尺寸
+    <label className={LABEL_CLS} title={unfixedOK ? '由提示词和生图模型能力共同决定' : undefined}>
+      图片尺寸设置
       <SelectField
         value={draftSize}
-        disabled={!draftModel || draftStale || saving || loading}
-        title="由提示词和生图模型能力共同决定"
+        disabled={!draftModel || draftStale || saving || loading || sizes.length === 0}
+        title={unfixedOK ? '由提示词和生图模型能力共同决定' : undefined}
         onChange={(v) => { setSaved(false); setDraftSize(v) }}
       >
-        {draftModel
-          ? <option value="">不固定尺寸</option>
-          : <option value="">先选择模型</option>}
+        {!draftModel && <option value="">先选择模型</option>}
+        {draftModel && sizes.length === 0 && <option value="">暂无可用尺寸</option>}
+        {draftModel && unfixedOK && <option value="">不固定尺寸</option>}
         {draftModel && draftSize !== '' && !sizes.includes(draftSize) && <option value={draftSize} disabled>{draftSize} · 已不支持</option>}
         {sizes.map((s) => <option key={s} value={s}>{s.replace('x', ' × ')}</option>)}
       </SelectField>

@@ -53,13 +53,11 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
             {block.text && <div className="whitespace-pre-wrap break-words">{block.text}</div>}
           </div>          {block.questionId && (onRetryQuestion || onEditQuestion) && (
             <div className="flex items-center opacity-60 group-hover:opacity-100 focus-within:opacity-100">
-              <GhostBtn disabled={questionActionsDisabled} onClick={() => onRetryQuestion?.(block.questionId!)} title="重新生成：从这条提问重新开始；原记录保留，文件不会撤销">
+              <GhostBtn disabled={questionActionsDisabled} onClick={() => onRetryQuestion?.(block.questionId!)} aria-label="重新生成" title="重新生成：从这条提问重新开始；原记录保留，文件不会撤销">
                 <Icon name="refresh" size={16} />
-                <span className="sr-only">重新生成</span>
               </GhostBtn>
-              <GhostBtn disabled={questionActionsDisabled} onClick={() => onEditQuestion?.(block.questionId!)} title="修改后重试">
+              <GhostBtn disabled={questionActionsDisabled} onClick={() => onEditQuestion?.(block.questionId!)} aria-label="修改后重试" title="修改后重试">
                 <Icon name="pencil" size={16} />
-                <span className="sr-only">修改后重试</span>
               </GhostBtn>
             </div>
           )}

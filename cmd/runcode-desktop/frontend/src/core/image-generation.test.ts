@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import type { ImageGenerationCatalog, ImageGenerationResult, PassportModel } from './bridge'
 import {
-  accountingLabel, imageGenerationModelKey, imageGenerationResultSummary, isChatModel, isImageGenerationModel, submissionLabel,
+  accountingLabel, allowsUnfixedSize, coerceDraftSize, defaultDraftSize,
+  imageGenerationModelKey, imageGenerationResultSummary, isChatModel, isImageGenerationModel, submissionLabel,
   isImageGenerationResult, settingsSelection,
 } from './image-generation'
 
@@ -48,6 +49,15 @@ describe('settingsSelection', () => {
   it('保存的尺寸已不支持时视为失效', () => {
     expect(settingsSelection(catalog, { scopeId: 's1', revision: 2, defaultModel: ref('a'), defaultSize: '4096x4096' }).stale).toBe(true)
   })
+  it('allowsUnfixedSize 仅在多尺寸时为真；单尺寸 defaultDraftSize 钉死', () => {
+    expect(allowsUnfixedSize(['1024x1024'])).toBe(false)
+    expect(allowsUnfixedSize(['1024x1024', '2048x2048'])).toBe(true)
+    expect(defaultDraftSize(['1024x1024'])).toBe('1024x1024')
+    expect(defaultDraftSize(['1024x1024', '2048x2048'])).toBe('')
+    expect(coerceDraftSize('', ['1024x1024'])).toBe('1024x1024')
+    expect(coerceDraftSize('999x999', ['1024x1024', '2048x2048'])).toBe('')
+  })
+
   it('空默认尺寸表示不固定，不算失效', () => {
     expect(settingsSelection(catalog, { scopeId: 's1', revision: 2, defaultModel: ref('a'), defaultSize: '' })).toEqual({
       key: imageGenerationModelKey(ref('a')), size: '', stale: false,

@@ -67,6 +67,9 @@ describe('ImageGenerationSection', () => {
     expect(off?.disabled).toBe(true)
     expect(off?.textContent).toContain('尚未完成兼容验证')
     expect(host.textContent).toContain('不改变当前聊天模型')
+    expect(host.textContent).toContain('生图模型选择')
+    expect(host.textContent).toContain('图片尺寸设置')
+    expect(host.textContent).not.toContain('每次生成会计费')
   })
 
   it('空目录、加载失败、原选择失效三种状态区分', async () => {
@@ -90,7 +93,7 @@ describe('ImageGenerationSection', () => {
     expect(modelSelect().value).toContain('img-off')
   })
 
-  it('选模型后默认不固定尺寸，可保存空尺寸；也可改固定尺寸', async () => {
+  it('多尺寸模型默认不固定尺寸，可保存空尺寸；也可改固定尺寸', async () => {
     api.listImageGenerationModels.mockResolvedValue(catalog())
     api.getImageGenerationSettings.mockResolvedValue(settings())
     api.saveImageGenerationSettings.mockResolvedValueOnce(settings({ revision: 1, defaultModel: ref('img-a'), defaultSize: '' }))
@@ -107,6 +110,27 @@ describe('ImageGenerationSection', () => {
     api.saveImageGenerationSettings.mockResolvedValueOnce(settings({ revision: 2, defaultModel: ref('img-a'), defaultSize: '2048x2048' }))
     await act(async () => button('保存').click())
     expect(api.saveImageGenerationSettings.mock.calls[1][0]).toMatchObject({ defaultSize: '2048x2048' })
+  })
+
+  it('仅一种尺寸的模型不提供不固定尺寸，并默认选中该尺寸', async () => {
+    const single = {
+      scopeId: 'scope-t1',
+      models: [{
+        model: ref('img-one'),
+        provider: 'v',
+        profile: { available: true, supportedSizes: ['1024x1024'], defaultSize: '1024x1024', responseFormats: ['url'] },
+      }],
+    }
+    api.listImageGenerationModels.mockResolvedValue(single)
+    api.getImageGenerationSettings.mockResolvedValue(settings())
+    api.saveImageGenerationSettings.mockResolvedValueOnce(settings({ revision: 1, defaultModel: ref('img-one'), defaultSize: '1024x1024' }))
+    await mount()
+    await choose(modelSelect(), modelSelect().options[1].value)
+    expect([...sizeSelect().options].map((o) => o.value)).toEqual(['1024x1024'])
+    expect(sizeSelect().value).toBe('1024x1024')
+    expect(sizeSelect().textContent).not.toContain('不固定尺寸')
+    await act(async () => button('保存').click())
+    expect(api.saveImageGenerationSettings.mock.calls[0][0]).toMatchObject({ defaultModel: ref('img-one'), defaultSize: '1024x1024' })
   })
 
   it('显式保存；保存失败保留草稿且不改已生效值', async () => {

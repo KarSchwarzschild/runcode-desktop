@@ -41,17 +41,23 @@ func saveImageModel(t *testing.T, app *App, tenant, model, size string) appwire.
 
 func TestImageGenerationSettingsKeepsEmptyDefaultSize(t *testing.T) {
 	app := imageGenSettingsApp(t, "user-a")
-	saved := saveImageModel(t, app, "tenant-a", "image-only-url", "")
-	if saved.Revision != 1 || saved.DefaultModel == nil || saved.DefaultModel.Name != "image-only-url" || saved.DefaultSize != "" {
+	// image-only-b64 支持多种尺寸，空值表示不固定。
+	saved := saveImageModel(t, app, "tenant-a", "image-only-b64", "")
+	if saved.Revision != 1 || saved.DefaultModel == nil || saved.DefaultModel.Name != "image-only-b64" || saved.DefaultSize != "" {
 		t.Fatalf("saved = %+v (want empty default size)", saved)
 	}
-	fixed := saveImageModel(t, app, "tenant-a", "image-only-url", "2048x2048")
-	if fixed.DefaultSize != "2048x2048" || fixed.Revision != 2 {
+	fixed := saveImageModel(t, app, "tenant-a", "image-only-b64", "1280x720")
+	if fixed.DefaultSize != "1280x720" || fixed.Revision != 2 {
 		t.Fatalf("fixed size = %+v", fixed)
 	}
-	cleared := saveImageModel(t, app, "tenant-a", "image-only-url", "")
+	cleared := saveImageModel(t, app, "tenant-a", "image-only-b64", "")
 	if cleared.DefaultSize != "" || cleared.Revision != 3 {
 		t.Fatalf("cleared size = %+v", cleared)
+	}
+	// 仅一种尺寸的模型：空值保存时钉成该尺寸，不提供不固定。
+	single := saveImageModel(t, app, "tenant-a", "image-only-url", "")
+	if single.DefaultSize != "2048x2048" {
+		t.Fatalf("single-size model empty save = %+v", single)
 	}
 }
 

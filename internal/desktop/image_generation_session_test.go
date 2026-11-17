@@ -82,9 +82,9 @@ func TestImageGenerationSessionAvailabilityFollowsSettings(t *testing.T) {
 	if !v.Enabled || v.Available || !strings.Contains(v.Reason, "设置") || v.Model != nil {
 		t.Fatalf("unconfigured switch pretends to be ready: %+v", v)
 	}
-	saveImageModel(t, app, "tenant-a", "image-only-url", "")
+	saveImageModel(t, app, "tenant-a", "image-only-b64", "")
 	v, err := app.GetSessionImageGeneration(id)
-	if err != nil || !v.Enabled || !v.Available || v.Model == nil || v.Model.Name != "image-only-url" || v.Size != "" {
+	if err != nil || !v.Enabled || !v.Available || v.Model == nil || v.Model.Name != "image-only-b64" || v.Size != "" {
 		t.Fatalf("configured view = %+v %v", v, err)
 	}
 	off := setImageGen(t, app, id, false)
@@ -192,7 +192,7 @@ func TestImageGenerationSessionCorruptSidecarFailsClosed(t *testing.T) {
 
 func TestImageGenerationTurnSnapshotIsFrozenPerTurn(t *testing.T) {
 	app, id, cwd := imageGenSessionApp(t, "user-a", "tenant-a")
-	saveImageModel(t, app, "tenant-a", "image-only-url", "")
+	saveImageModel(t, app, "tenant-a", "image-only-b64", "")
 	setImageGen(t, app, id, true)
 	e, err := app.entryOf(id)
 	if err != nil {
@@ -205,23 +205,23 @@ func TestImageGenerationTurnSnapshotIsFrozenPerTurn(t *testing.T) {
 
 	app.freezeImageGenerationTurn(e)
 	first := state.snapshot()
-	if !first.Enabled || !first.Available || first.TurnID == "" || first.Model != "image-only-url" || first.Size != "" ||
+	if !first.Enabled || !first.Available || first.TurnID == "" || first.Model != "image-only-b64" || first.Size != "" ||
 		first.Tenant != "tenant-a" || first.Workspace != cwd || first.Generation != "instance-7" || first.SettingsRevision != 1 || first.SwitchRevision != 1 || first.ScopeID == "" {
 		t.Fatalf("frozen snapshot = %+v", first)
 	}
-	saveImageModel(t, app, "tenant-a", "image-only-b64", "1280x720")
-	if mid := state.snapshot(); mid.Model != "image-only-url" || mid.TurnID != first.TurnID {
+	saveImageModel(t, app, "tenant-a", "image-only-url", "2048x2048")
+	if mid := state.snapshot(); mid.Model != "image-only-b64" || mid.TurnID != first.TurnID {
 		t.Fatalf("settings change leaked into the running turn: %+v", mid)
 	}
 	app.freezeImageGenerationTurn(e)
 	next := state.snapshot()
-	if next.TurnID == first.TurnID || next.Model != "image-only-b64" || next.Size != "1280x720" || next.SettingsRevision != 2 {
+	if next.TurnID == first.TurnID || next.Model != "image-only-url" || next.Size != "2048x2048" || next.SettingsRevision != 2 {
 		t.Fatalf("next independent turn = %+v", next)
 	}
 	// 旧 sidecar 开关关闭也不再禁用：自动生图只看模型是否可用。
 	setImageGen(t, app, id, false)
 	app.freezeImageGenerationTurn(e)
-	if off := state.snapshot(); !off.Enabled || !off.Available || off.TurnID == next.TurnID || off.Model != "image-only-b64" {
+	if off := state.snapshot(); !off.Enabled || !off.Available || off.TurnID == next.TurnID || off.Model != "image-only-url" {
 		t.Fatalf("auto-enabled turn after switch off = %+v", off)
 	}
 }
