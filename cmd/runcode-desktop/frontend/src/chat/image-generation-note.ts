@@ -6,7 +6,7 @@ export type AssistantImageGenerationNote = {
   sizeLabel: string
 }
 
-export const UNFIXED_SIZE_LABEL = '不固定尺寸（由提示词和生图模型能力共同决定）'
+export const UNFIXED_SIZE_LABEL = '不固定尺寸（未指定时出站补最小正方形）'
 
 export function formatImageGenerationNote(input: { modelName?: string | null; size?: string | null }): AssistantImageGenerationNote {
   const model = (input.modelName ?? '').trim()

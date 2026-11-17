@@ -123,7 +123,7 @@ func (t *Tool) Description() string {
 	case strings.TrimSpace(snap.Size) != "":
 		fmt.Fprintf(&b, " 本回合默认尺寸为 %s；省略 size 即使用该默认。用户指定了不支持的尺寸或比例时，从支持列表选最接近的一项，并在最终回复末尾说明本模型支持哪些尺寸与像素。", snap.Size)
 	default:
-		b.WriteString(" 省略 size 表示不固定尺寸（由提示词与生图模型能力共同决定）。对「更大/更窄/横向/竖向」或不支持的尺寸/比例，从支持列表选最接近的一项，并在最终回复末尾说明本模型支持哪些尺寸与像素。")
+		b.WriteString(" 设置未固定尺寸：用户或提示词有明确尺寸／比例倾向（更大/更窄/横向/竖向等）时必须传 size；否则可省略，客户端会按支持列表补最小正方形（无正方形则补面积最小项）再请求，不会空 size 出站。对不支持的尺寸/比例，从支持列表选最接近的一项，并在最终回复末尾说明本模型支持哪些尺寸与像素。")
 	}
 	return b.String()
 }
@@ -136,10 +136,8 @@ func (t *Tool) AuthorizationBinding(raw json.RawMessage) (tool.AuthorizationBind
 	if err != nil {
 		return tool.AuthorizationBinding{}, err
 	}
-	size := strings.TrimSpace(in.Size)
-	if size == "" {
-		size = strings.TrimSpace(snap.Size)
-	}
+	// 与 parseInput 同一套生效尺寸，避免审批身份与出站 size 漂移。
+	size, _ := resolveOutboundSize(in.Size, snap)
 	return tool.AuthorizationBinding{
 		Kind:     BindingKind,
 		Identity: tool.BindingFingerprint(snap.BindingIdentity, size),
@@ -416,30 +414,43 @@ func parseInput(raw json.RawMessage, snap Snapshot) (Input, error) {
 		return Input{}, fmt.Errorf("prompt 超过 %d 字上限", MaxPromptRunes)
 	}
 	intent := sanitizeDisplayIntent(in.DisplayIntent)
-	size := canonicalizeSize(in.Size)
+	size, note, err := resolveOutboundSizeDetailed(in.Size, snap)
+	if err != nil {
+		return Input{}, err
+	}
+	return Input{Prompt: prompt, Size: size, SizeNote: note, DisplayIntent: intent}, nil
+}
+
+// resolveOutboundSize 算出与出站请求一致的生效尺寸（审批绑定用）。
+func resolveOutboundSize(requested string, snap Snapshot) (string, error) {
+	size, _, err := resolveOutboundSizeDetailed(requested, snap)
+	return size, err
+}
+
+// resolveOutboundSizeDetailed：显式／设置默认优先；都不固定时出站兜底最小正方形。
+func resolveOutboundSizeDetailed(requested string, snap Snapshot) (size, note string, err error) {
+	size = canonicalizeSize(requested)
 	if size == "" {
 		size = canonicalizeSize(snap.Size)
 	}
 	// 仅支持一种尺寸时强制该值，不提供「不固定」。
 	if len(snap.SupportedSizes) == 1 {
 		only := canonicalizeSize(snap.SupportedSizes[0])
-		note := ""
 		if size != "" && size != only {
-			note = sizeRemapNote(size, only, snap.SupportedSizes)
+			return only, sizeRemapNote(size, only, snap.SupportedSizes), nil
 		}
-		return Input{Prompt: prompt, Size: only, SizeNote: note, DisplayIntent: intent}, nil
+		return only, "", nil
 	}
-	// 空尺寸表示不固定，交给网关按模型能力兜底。
+	// 不固定且未传：出站补最小正方形（无则面积最小），禁止空 size 出网。
 	if size == "" {
-		return Input{Prompt: prompt, Size: "", DisplayIntent: intent}, nil
+		return DefaultOutboundSize(snap.SupportedSizes), "", nil
 	}
 	if slices.Contains(snap.SupportedSizes, size) {
-		return Input{Prompt: prompt, Size: size, DisplayIntent: intent}, nil
+		return size, "", nil
 	}
-	// 用户/模型指定了不兼容尺寸：就近匹配，并附说明供最终回复转述。
 	if len(snap.SupportedSizes) == 0 {
-		return Input{}, fmt.Errorf("尺寸 %q 不在可用范围内", size)
+		return "", "", fmt.Errorf("尺寸 %q 不在可用范围内", size)
 	}
 	chosen := closestSupportedSize(size, snap.SupportedSizes)
-	return Input{Prompt: prompt, Size: chosen, SizeNote: sizeRemapNote(size, chosen, snap.SupportedSizes), DisplayIntent: intent}, nil
+	return chosen, sizeRemapNote(size, chosen, snap.SupportedSizes), nil
 }

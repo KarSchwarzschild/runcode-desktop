@@ -29,3 +29,19 @@ func TestFormatSupportedSizesNote(t *testing.T) {
 		}
 	}
 }
+
+func TestDefaultOutboundSizePrefersSmallestSquare(t *testing.T) {
+	if got := DefaultOutboundSize([]string{"2048x2048", "1024x1024", "1280x720"}); got != "1024x1024" {
+		t.Fatalf("smallest square = %q, want 1024x1024", got)
+	}
+	if got := DefaultOutboundSize([]string{"2048x2048", "768x768", "1024x1024"}); got != "768x768" {
+		t.Fatalf("among squares = %q, want 768x768", got)
+	}
+	// 无正方形时退到面积最小的一项。
+	if got := DefaultOutboundSize([]string{"2048x768", "768x2048", "1280x720"}); got != "1280x720" {
+		t.Fatalf("no square fallback = %q, want 1280x720", got)
+	}
+	if got := DefaultOutboundSize(nil); got != "" {
+		t.Fatalf("empty list = %q", got)
+	}
+}

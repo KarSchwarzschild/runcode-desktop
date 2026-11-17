@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/wt68/runcode/internal/imagegentool"
@@ -125,7 +126,11 @@ func (h imageGenerationHost) Generate(ctx context.Context, in imagegentool.Input
 	}
 	entry, ok := catalog.imageGeneration[snap.Model]
 	profile := normalizeImageGenerationProfile(entry.ImageGeneration)
-	sizeOK := in.Size == "" || slices.Contains(profile.SupportedSizes, in.Size)
+	// 出站兜底：工具侧已补过；此处再按活目录补一次，禁止空 size 出网。
+	if strings.TrimSpace(in.Size) == "" {
+		in.Size = imagegentool.DefaultOutboundSize(profile.SupportedSizes)
+	}
+	sizeOK := in.Size != "" && slices.Contains(profile.SupportedSizes, in.Size)
 	if !ok || !profile.Available || !sizeOK {
 		return imageGenerationRejected(snap, in.Size, "model_unavailable", "该生图模型或尺寸当前不可用，本次未生成图片；请在设置中重新选择"), nil
 	}

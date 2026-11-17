@@ -26,7 +26,7 @@ it('does not render ThinkingPanel while keeping thinking data on the block type'
 })
 
 it('shows frozen imagegen footnote on completed assistant replies only', () => {
-  const note = { modelLabel: 'img-a', sizeLabel: '不固定尺寸（由提示词和生图模型能力共同决定）' }
+  const note = { modelLabel: 'img-a', sizeLabel: '不固定尺寸（未指定时出站补最小正方形）' }
   const done = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a1', text: '好的', streaming: false, ts: '', imageGenerationNote: note }} onOpenImageGenerationSettings={() => {}} />)
   expect(done).toContain('当前使用的生图模型：img-a')
   expect(done).toContain('生图尺寸：')

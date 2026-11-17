@@ -290,13 +290,21 @@ func TestToolPublishesResultAsEventData(t *testing.T) {
 	}
 }
 
-func TestParseInputAllowsOmittedSizeWhenUnfixed(t *testing.T) {
+func TestParseInputFillsSmallestSquareWhenUnfixedAndOmitted(t *testing.T) {
 	snap := readySnapshot()
 	snap.Size = ""
+	snap.SupportedSizes = []string{"2048x2048", "1024x1024", "1280x720"}
 	got, err := parseInput(json.RawMessage(`{"prompt":"海报"}`), snap)
-	if err != nil || got.Prompt != "海报" || got.Size != "" {
-		t.Fatalf("omitted size = %+v %v", got, err)
+	if err != nil || got.Prompt != "海报" || got.Size != "1024x1024" || got.SizeNote != "" {
+		t.Fatalf("omitted unfixed size should fill smallest square = %+v %v", got, err)
 	}
+	// 设置钉死默认时仍用设置值，不用最小正方形覆盖。
+	snap.Size = "2048x2048"
+	got, err = parseInput(json.RawMessage(`{"prompt":"海报"}`), snap)
+	if err != nil || got.Size != "2048x2048" {
+		t.Fatalf("fixed default size = %+v %v", got, err)
+	}
+	snap.Size = ""
 	got, err = parseInput(json.RawMessage(`{"prompt":"海报","size":"2048x2048"}`), snap)
 	if err != nil || got.Size != "2048x2048" {
 		t.Fatalf("explicit size = %+v %v", got, err)
@@ -354,6 +362,24 @@ func TestAuthorizationBindingPinsDestination(t *testing.T) {
 	}
 	if _, err := tl.AuthorizationBinding(json.RawMessage(`{"prompt":`)); err == nil {
 		t.Fatal("malformed input produced a binding")
+	}
+}
+
+func TestAuthorizationBindingMatchesOutboundDefaultWhenUnfixed(t *testing.T) {
+	snap := readySnapshot()
+	snap.Size = ""
+	snap.SupportedSizes = []string{"2048x2048", "1024x1024", "1280x720"}
+	tl := newTool(&fakeHost{}, &snap)
+	omit, err := tl.AuthorizationBinding(json.RawMessage(`{"prompt":"海报"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	filled, err := tl.AuthorizationBinding(json.RawMessage(`{"prompt":"海报","size":"1024x1024"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if omit.Identity != filled.Identity {
+		t.Fatal("unfixed omitted size must share approval identity with smallest-square outbound default")
 	}
 }
 

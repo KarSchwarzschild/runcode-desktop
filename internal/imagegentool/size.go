@@ -30,6 +30,35 @@ func parseWH(size string) (int, int, bool) {
 	return width, height, true
 }
 
+// DefaultOutboundSize 在「不固定且未传 size」时的出站兜底：优先最小正方形，
+// 没有正方形则取面积最小的支持项。列表为空时返回空串。
+func DefaultOutboundSize(supported []string) string {
+	bestSquare := ""
+	bestSquareSide := 0
+	bestAny := ""
+	bestAnyArea := 0
+	for _, candidate := range supported {
+		w, h, ok := parseWH(candidate)
+		if !ok {
+			continue
+		}
+		size := canonicalizeSize(candidate)
+		area := w * h
+		if bestAny == "" || area < bestAnyArea || (area == bestAnyArea && size < bestAny) {
+			bestAny, bestAnyArea = size, area
+		}
+		if w == h {
+			if bestSquare == "" || w < bestSquareSide || (w == bestSquareSide && size < bestSquare) {
+				bestSquare, bestSquareSide = size, w
+			}
+		}
+	}
+	if bestSquare != "" {
+		return bestSquare
+	}
+	return bestAny
+}
+
 // closestSupportedSize 在支持列表中选宽高比优先、像素量次之的最接近项。
 func closestSupportedSize(want string, supported []string) string {
 	if len(supported) == 0 {
