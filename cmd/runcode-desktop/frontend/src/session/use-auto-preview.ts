@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react'
-import { toolTargetPath } from '@/chat/tool-text'
-import { extractFilePaths, rankAutoPreview, toWorkspaceRel } from '@/preview/classify'
+import { rankAutoPreview } from '@/preview/classify'
 import { createActionScope } from './action-scope'
+import { collectAutoPreviewCandidates } from './auto-preview-candidates'
 import {
   inlineFileStatus, isStaticInlinePath, noteInlineFile, shouldSkipAutoPreview, waitForInlineSettled,
 } from './inline-preview-status'
@@ -74,20 +74,8 @@ export function useAutoPreview({ sessionID, busy, blocks, cwd, enabled, opens, o
       const { blocks: bs, cwd: dir, enabled: on, opens, open: openFile } = latest.current
       const alreadyShown = (opens.current ?? 0) > opensAtTurnStart.current
       if (on && !alreadyShown) {
-        const paths: string[] = []
-        for (const b of bs.slice(turnStartLen.current)) {
-          if (b.kind === 'tool') {
-            const t = b.tool
-            if ((t.toolName === 'Write' || t.toolName === 'Edit') && t.type === 'completed') {
-              const p = toolTargetPath(t)
-              if (p) paths.push(toWorkspaceRel(p, dir))
-            }
-          } else if (b.kind === 'assistant') {
-            // 正文里的路径可能是绝对的（"已生成 D:\演示\…\deck.pptx"），换算成
-            // 工作区相对路径后才与其它候选同形。
-            for (const token of extractFilePaths(b.text)) paths.push(toWorkspaceRel(token, dir))
-          }
-        }
+        // 候选收集（含排除「生成图片」）见 auto-preview-candidates，避免生图抢侧栏。
+        const paths = collectAutoPreviewCandidates(bs.slice(turnStartLen.current), dir)
         void openFirstExisting(sessionID, rankAutoPreview(paths), openFile, scope.current.capture())
       }
     }
