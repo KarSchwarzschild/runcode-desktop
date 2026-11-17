@@ -843,6 +843,7 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 	// Browser navigation is a user-visible external action, not a read-only preview.
 	opts.ExtraTools = append(opts.ExtraTools, browsertool.New(openBrowserContext))
 	appendSystemPrompt(cfg, localBrowserPrompt)
+	appendSystemPrompt(cfg, renderRoutePrompt)
 	// The desktop's Skill tool discloses exactly what the engine's does and
 	// additionally announces each load, so the chat can show which skill the model
 	// picked up and what it is for. Which skills exist stays the engine's business
