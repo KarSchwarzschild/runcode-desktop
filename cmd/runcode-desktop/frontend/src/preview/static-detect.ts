@@ -19,6 +19,8 @@ export const PREVIEW_LIMITS = {
 } as const
 
 const HTML_LANGS = new Set(['html', 'htm', 'h5'])
+const SVG_LANGS = new Set(['svg', 'xml', 'svg+xml', 'image/svg+xml'])
+const MERMAID_LANGS = new Set(['mermaid', 'mmd'])
 
 export function utf8Bytes(text: string): number {
   return new TextEncoder().encode(text).length
@@ -66,20 +68,37 @@ export type CodeBlockDecision = { kind: StaticPreviewKind } | { kind: null; reas
 export function classifyCodeBlock({ lang, meta, value, closed }: CodeBlockInput): CodeBlockDecision {
   const language = (lang ?? '').trim().toLowerCase()
   const flags = new Set((meta ?? '').trim().toLowerCase().split(/\s+/).filter(Boolean))
-  if (!language) return { kind: null, reason: 'no-language' }
   if (flags.has('source')) return { kind: null, reason: 'source' }
-  const isMermaid = language === 'mermaid'
-  const isSvg = language === 'svg'
-  const isHtml = HTML_LANGS.has(language)
-  if (!isMermaid && !isSvg && !isHtml) return { kind: null, reason: 'language' }
   if (!closed) return { kind: null, reason: 'unclosed' }
   const body = value.trim()
   if (!body) return { kind: null, reason: 'empty' }
+
+  // 无语言：仅当正文已是完整 SVG / HTML 文档时才预览，绝不按内容猜代码语言。
+  if (!language) {
+    if (looksLikeSvgDocument(body)) {
+      if (utf8Bytes(body) > PREVIEW_LIMITS.markupBytes) return { kind: null, reason: 'too-large' }
+      return { kind: 'svg' }
+    }
+    if (looksLikeHtmlDocument(body)) {
+      if (utf8Bytes(body) > PREVIEW_LIMITS.markupBytes) return { kind: null, reason: 'too-large' }
+      return { kind: 'html' }
+    }
+    return { kind: null, reason: 'no-language' }
+  }
+
+  const isMermaid = MERMAID_LANGS.has(language)
+  const isSvg = SVG_LANGS.has(language)
+  const isHtml = HTML_LANGS.has(language)
+  if (!isMermaid && !isSvg && !isHtml) return { kind: null, reason: 'language' }
+
   const limit = isMermaid ? PREVIEW_LIMITS.mermaidBytes : PREVIEW_LIMITS.markupBytes
   if (utf8Bytes(body) > limit) return { kind: null, reason: 'too-large' }
   if (isMermaid) return { kind: 'mermaid' }
   if (isSvg) return looksLikeSvgDocument(body) ? { kind: 'svg' } : { kind: null, reason: 'not-svg' }
-  if (looksLikeHtmlDocument(body) || flags.has('preview')) return { kind: 'html' }
+  // html 围栏里若整段就是静态 SVG，按 SVG 走（避免不必要的 iframe）。
+  if (looksLikeSvgDocument(body)) return { kind: 'svg' }
+  // 完整网页、显式 preview，或片段内已含完整 <svg>…</svg>（常见「html 里画 SVG」）。
+  if (looksLikeHtmlDocument(body) || flags.has('preview') || containsSvgDocument(body)) return { kind: 'html' }
   return { kind: null, reason: 'html-fragment' }
 }
 
@@ -93,6 +112,11 @@ function looksLikeSvgDocument(body: string): boolean {
 // 需要显式 `html preview` 才会预览。
 function looksLikeHtmlDocument(body: string): boolean {
   return /<html[\s>]/i.test(body) && /<\/html\s*>$/i.test(body)
+}
+
+// 片段内是否嵌套完整 SVG 文档（允许前后有其它静态标签）。
+function containsSvgDocument(body: string): boolean {
+  return /<svg[\s>][\s\S]*<\/svg\s*>/i.test(body)
 }
 
 // contentDigest 是缓存键与去重用的同步摘要（cyrb53 + 长度），不是安全哈希。

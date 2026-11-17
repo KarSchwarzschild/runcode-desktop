@@ -110,4 +110,19 @@ describe('InlinePreview lifecycle', () => {
     expect(host.textContent).not.toContain('SOURCE')
     expect(host.querySelector('[aria-hidden]')).toBeTruthy()
   })
+
+  it('失败时保留源码并显示可读原因', async () => {
+    mermaid.render.mockResolvedValue({ ok: false, reason: 'unsupported-type' })
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'mermaid',
+        source: 'pie\n"a": 1',
+        defaultNode: createElement('code', null, 'SRC'),
+      }))
+    })
+    await act(async () => {})
+    expect(host.textContent).toContain('SRC')
+    expect(host.textContent).toContain('未显示预览')
+    expect(host.textContent).toMatch(/暂不支持|unsupported-type|预览不可用/)
+  })
 })

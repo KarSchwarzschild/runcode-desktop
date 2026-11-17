@@ -10,12 +10,16 @@ import { Markdown, type CodeBlockRenderInfo, type MarkdownProps } from '@/ui/mar
 import {
   classifyCodeBlock, contentDigest, fenceClosed, planMessagePreviews, type StaticPreviewKind,
 } from '@/preview/static-detect'
+import { extractFilePaths } from '@/preview/classify'
+import { isStaticInlinePath } from '@/session/inline-preview-status'
 import { InlinePreview } from './inline-preview'
 
 export type AssistantMarkdownProps = Omit<MarkdownProps, 'renderCodeBlock'> & {
   messageId: string
   streaming?: boolean
   onContentHeightChange?: () => void
+  /** 接通 inline-preview-status：成功内联后抑制同路径右侧自动预览。 */
+  sessionId?: string
 }
 
 export type FenceBlock = { lang: string; meta: string; value: string; start: number; end: number }
@@ -56,12 +60,40 @@ export function selectPreviewBlocks(source: string, streaming: boolean): Map<str
   return selected
 }
 
-export function AssistantMarkdown({ messageId: _messageId, streaming = false, onContentHeightChange, children, textOnly, ...rest }: AssistantMarkdownProps) {
+function extOf(path: string): string {
+  return path.replace(/\\/g, '/').split('/').pop()?.split('.').pop()?.toLowerCase() ?? ''
+}
+
+/** 同条消息里提到的、扩展名与预览类型相符的静态路径（不猜裸字符串是否存在）。 */
+export function relatedPathsForKind(source: string, kind: StaticPreviewKind): string[] {
+  const want = kind === 'svg' ? new Set(['svg'])
+    : kind === 'mermaid' ? new Set(['mmd', 'mermaid'])
+    : new Set(['html', 'htm'])
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of extractFilePaths(source)) {
+    const p = raw.replace(/\\/g, '/')
+    if (!isStaticInlinePath(p) || !want.has(extOf(p)) || seen.has(p)) continue
+    seen.add(p)
+    out.push(p)
+  }
+  return out
+}
+
+export function AssistantMarkdown({ messageId, streaming = false, onContentHeightChange, children, textOnly, sessionId, ...rest }: AssistantMarkdownProps) {
   const enable = !streaming && !textOnly
   const selected = useMemo(
     () => (enable ? selectPreviewBlocks(children, false) : new Map<string, StaticPreviewKind>()),
     [enable, children],
   )
+  const pathsByKind = useMemo(() => {
+    if (!enable || !sessionId) return null
+    return {
+      svg: relatedPathsForKind(children, 'svg'),
+      mermaid: relatedPathsForKind(children, 'mermaid'),
+      html: relatedPathsForKind(children, 'html'),
+    }
+  }, [enable, sessionId, children])
 
   const renderCodeBlock = useMemo(() => {
     if (!enable || selected.size === 0) return undefined
@@ -75,10 +107,13 @@ export function AssistantMarkdown({ messageId: _messageId, streaming = false, on
           source={info.value}
           defaultNode={info.defaultNode}
           onHeightChange={onContentHeightChange}
+          messageId={messageId}
+          sessionId={sessionId}
+          relatedPaths={pathsByKind?.[kind]}
         />
       )
     }
-  }, [enable, selected, onContentHeightChange])
+  }, [enable, selected, onContentHeightChange, messageId, sessionId, pathsByKind])
 
   return (
     <Markdown {...rest} textOnly={textOnly} renderCodeBlock={renderCodeBlock}>

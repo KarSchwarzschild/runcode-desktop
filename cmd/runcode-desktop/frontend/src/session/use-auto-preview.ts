@@ -2,7 +2,9 @@ import { useEffect, useRef, type RefObject } from 'react'
 import { toolTargetPath } from '@/chat/tool-text'
 import { extractFilePaths, rankAutoPreview, toWorkspaceRel } from '@/preview/classify'
 import { createActionScope } from './action-scope'
-import { isStaticInlinePath, shouldSkipAutoPreview, waitForInlineSettled } from './inline-preview-status'
+import {
+  inlineFileStatus, isStaticInlinePath, noteInlineFile, shouldSkipAutoPreview, waitForInlineSettled,
+} from './inline-preview-status'
 import type { Block } from '@/chat/blocks'
 
 // 最多验证前几个候选就收手：助手正文里往往会提到一串路径，逐个问后端既慢又没必要
@@ -105,6 +107,8 @@ async function openFirstExisting(sessionID: string, ranked: string[], openFile: 
     if (!current()) return
     if (isStaticInlinePath(rel)) {
       if (shouldSkipAutoPreview(sessionID, rel)) continue
+      // 尚无状态时先记 pending，给正文 InlinePreview 一个短窗口上报 rendered。
+      if (inlineFileStatus(sessionID, rel) === null) noteInlineFile(sessionID, rel, 'pending')
       const settled = await waitForInlineSettled(sessionID, rel)
       if (!current()) return
       if (settled === 'rendered') continue

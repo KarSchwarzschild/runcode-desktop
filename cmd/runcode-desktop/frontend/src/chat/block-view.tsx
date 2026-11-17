@@ -20,7 +20,7 @@ import { AgentTaskCard } from './agent-task'
 import { ExecutionCard } from './execution-card'
 import { RecordingCard } from './recorder-card'
 
-export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings }: {
+export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings, sessionId }: {
   textOnly?: boolean
   block: Block
   onRetryQuestion?: (id: string) => void
@@ -31,6 +31,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
   onGenerateMinutes?: (mark: RecordingMark) => void
   onContentHeightChange?: () => void
   onOpenImageGenerationSettings?: () => void
+  sessionId?: string
 }) {
   // While an assistant answer streams, keep it in a fixed-height window pinned to
   // the newest text (consistent with the tool/agent cards); release to full height
@@ -87,6 +88,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                   messageId={block.id}
                   streaming={block.streaming}
                   textOnly={textOnly}
+                  sessionId={sessionId}
                   onOpenFile={onOpenFile}
                   resolveFile={resolveFile}
                   onContentHeightChange={onContentHeightChange}
@@ -172,7 +174,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
     case 'tool':
       // Live Task with sub-agent activity → nested observable view; a resumed Task
       // (no live nested data) falls back to the normal card showing its result.
-      if (block.tool.toolName === 'Task' && block.nested) return <BotRow><AgentTaskCard tool={block.tool} nested={block.nested} /></BotRow>
+      if (block.tool.toolName === 'Task' && block.nested) return <BotRow><AgentTaskCard tool={block.tool} nested={block.nested} sessionId={sessionId ?? block.sessionId} /></BotRow>
       return <BotRow><ExecutionCard tools={[block.tool]} /></BotRow>
   }
 }

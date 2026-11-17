@@ -32,6 +32,7 @@ export function ChatPane({
   recorderCard,
   onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled,
   onOpenImageGenerationSettings,
+  sessionId,
 }: {
   textOnly?: boolean
   onRetryQuestion?: (id: string) => void
@@ -65,6 +66,7 @@ export function ChatPane({
   // onGenerateMinutes 由历史里的录音卡片触发「重新生成纪要」。
   onGenerateMinutes?: (mark: RecordingMark) => void
   onOpenImageGenerationSettings?: () => void
+  sessionId?: string
 }) {
   const groups = groupBlocks(blocks)
   // 内联预览高度晚于文本：只在用户本来贴底时跟随。贴底状态由 ChatPane 自己维护，
@@ -161,10 +163,10 @@ export function ChatPane({
             ) : g.kind === 'image' ? (
               <BotRow key={g.id}><GeneratedImageCard tool={g.tool} sessionId={g.sessionId} onOpenFile={onOpenFile} /></BotRow>
             ) : g.kind === 'taskgroup' ? (
-              <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} /></BotRow>
+              <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} sessionId={sessionId} /></BotRow>
             ) : (
               <div key={g.block.id}>
-                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} onContentHeightChange={onContentHeightChange} onOpenImageGenerationSettings={onOpenImageGenerationSettings} />
+                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} onContentHeightChange={onContentHeightChange} onOpenImageGenerationSettings={onOpenImageGenerationSettings} sessionId={sessionId} />
                 {!textOnly && g.block.kind === 'assistant' && (
                   <ReplyArtifacts text={g.block.text} files={files} tabs={tabs} onOpen={onOpenFile} />
                 )}

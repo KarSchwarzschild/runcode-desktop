@@ -102,9 +102,18 @@ describe('classifyCodeBlock', () => {
     expect(classifyCodeBlock({ lang: 'svg', meta: 'source', value: svg, closed: true })).toEqual({ kind: null, reason: 'source' })
     expect(classifyCodeBlock({ lang: 'html', meta: 'preview source', value: page, closed: true })).toEqual({ kind: null, reason: 'source' })
   })
-  it('never guesses unlabeled or other-language blocks', () => {
-    expect(classifyCodeBlock({ value: svg, closed: true })).toEqual({ kind: null, reason: 'no-language' })
-    expect(classifyCodeBlock({ lang: 'xml', value: svg, closed: true })).toEqual({ kind: null, reason: 'language' })
+  it('recognizes svg/mermaid aliases and safe unlabeled markup', () => {
+    expect(classifyCodeBlock({ lang: 'xml', value: svg, closed: true })).toEqual({ kind: 'svg' })
+    expect(classifyCodeBlock({ lang: 'svg+xml', value: svg, closed: true })).toEqual({ kind: 'svg' })
+    expect(classifyCodeBlock({ lang: 'mmd', value: 'graph TD\nA-->B', closed: true })).toEqual({ kind: 'mermaid' })
+    expect(classifyCodeBlock({ value: svg, closed: true })).toEqual({ kind: 'svg' })
+    expect(classifyCodeBlock({ value: page, closed: true })).toEqual({ kind: 'html' })
+    expect(classifyCodeBlock({ value: 'const x = 1', closed: true })).toEqual({ kind: null, reason: 'no-language' })
+    expect(classifyCodeBlock({ lang: 'python', value: 'print(1)', closed: true })).toEqual({ kind: null, reason: 'language' })
+  })
+  it('previews html fences that wrap a static svg fragment', () => {
+    expect(classifyCodeBlock({ lang: 'html', value: svg, closed: true })).toEqual({ kind: 'svg' })
+    expect(classifyCodeBlock({ lang: 'html', value: `<div>${svg}</div>`, closed: true })).toEqual({ kind: 'html' })
   })
   it('refuses unclosed, empty, non-svg and oversized input', () => {
     expect(classifyCodeBlock({ lang: 'svg', value: svg, closed: false })).toEqual({ kind: null, reason: 'unclosed' })

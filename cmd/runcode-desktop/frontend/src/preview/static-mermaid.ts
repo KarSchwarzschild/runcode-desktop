@@ -12,8 +12,25 @@
 import { PREVIEW_LIMITS, utf8Bytes } from './static-detect'
 import { sanitizeSvg, type SvgResult } from './static-svg'
 
+// 白名单覆盖对话里常见图种（含 beta 命名）。未知头仍拒绝，避免把任意文本当图解析。
 export const MERMAID_DIAGRAMS = new Set([
-  'flowchart', 'graph', 'sequenceDiagram', 'classDiagram', 'classDiagram-v2', 'stateDiagram-v2', 'erDiagram',
+  'flowchart', 'graph',
+  'sequenceDiagram',
+  'classDiagram', 'classDiagram-v2',
+  'stateDiagram', 'stateDiagram-v2',
+  'erDiagram',
+  'pie',
+  'gantt',
+  'gitGraph',
+  'journey',
+  'timeline',
+  'mindmap',
+  'quadrantChart',
+  'requirementDiagram',
+  'xychart', 'xychart-beta',
+  'sankey', 'sankey-beta',
+  'block', 'block-beta',
+  'architecture', 'architecture-beta',
 ])
 
 const FONT = '"Microsoft YaHei","PingFang SC","Noto Sans CJK SC","Source Han Sans SC",sans-serif'
@@ -85,8 +102,21 @@ export type MermaidApi = {
   render(id: string, text: string, container?: Element): Promise<{ svg: string }>
 }
 
-export type MermaidFailure = MermaidCheckFailure | 'busy' | 'load-failed' | 'syntax' | 'cancelled' | 'unsafe-output'
+export type MermaidFailure = MermaidCheckFailure | 'busy' | 'load-failed' | 'syntax' | 'cancelled' | 'unsafe-output' | 'platform-unsupported'
 export type MermaidResult = Extract<SvgResult, { ok: true }> | { ok: false; reason: MermaidFailure }
+
+// Mermaid 12 依赖 Constructable Stylesheets（new CSSStyleSheet）。麒麟旧 WebKit
+// 没有该 API 时，提前失败并给出明确原因，避免 render 抛错后被静默吞掉。
+export function mermaidRuntimeSupported(): boolean {
+  try {
+    if (typeof CSSStyleSheet === 'undefined') return false
+    // 探测构造能力；部分环境有名无实。
+    const sheet = new CSSStyleSheet()
+    return !!sheet
+  } catch {
+    return false
+  }
+}
 
 // createSerialQueue：Mermaid 的渲染共享模块级状态，并发调用会串扰，所以一次只跑
 // 一个；排队的任务数有上限，超出直接拒绝而不是无限堆积。
@@ -121,6 +151,7 @@ export function createMermaidRenderer(load: () => Promise<MermaidApi>, opts: { m
   return async (source, signal) => {
     const check = checkMermaidSource(source)
     if (!check.ok) return check
+    if (!mermaidRuntimeSupported()) return { ok: false, reason: 'platform-unsupported' }
     const run = enqueue(async (): Promise<MermaidResult> => {
       if (signal?.aborted) return { ok: false, reason: 'cancelled' }
       let mermaid: MermaidApi
@@ -140,7 +171,10 @@ export function createMermaidRenderer(load: () => Promise<MermaidApi>, opts: { m
       try {
         await mermaid.parse(source)
         svg = (await mermaid.render(id, source, box)).svg
-      } catch {
+      } catch (err) {
+        // 运行时若仍撞上 CSSStyleSheet 等平台缺口，归为 platform-unsupported。
+        const msg = err instanceof Error ? err.message : String(err)
+        if (/CSSStyleSheet/i.test(msg)) return { ok: false, reason: 'platform-unsupported' }
         return { ok: false, reason: 'syntax' }
       } finally {
         box.remove()

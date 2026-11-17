@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from 'vitest'
 import {
-  checkMermaidSource, countFlowNodes, createMermaidRenderer, createSerialQueue, MERMAID_CONFIG, type MermaidApi,
+  checkMermaidSource, countFlowNodes, createMermaidRenderer, createSerialQueue, MERMAID_CONFIG,
+  mermaidRuntimeSupported, type MermaidApi,
 } from './static-mermaid'
 import { PREVIEW_LIMITS } from './static-detect'
 
@@ -14,8 +15,29 @@ describe('checkMermaidSource', () => {
   it('skips leading comments and blank lines when finding the type', () => {
     expect(checkMermaidSource('\n%% 架构图\n\nflowchart TD\nA-->B')).toEqual({ ok: true, diagram: 'flowchart' })
   })
-  it('rejects types not yet verified', () => {
-    for (const head of ['pie', 'gantt', 'mindmap', 'journey', 'stateDiagram', 'C4Context', 'block-beta']) {
+  it('accepts chart and common diagram types used in real replies', () => {
+    for (const head of [
+      'pie title Share',
+      'xychart-beta',
+      'xychart',
+      'quadrantChart',
+      'gantt',
+      'gitGraph',
+      'journey',
+      'timeline',
+      'mindmap',
+      'sankey-beta',
+      'sankey',
+      'block-beta',
+      'architecture-beta',
+      'requirementDiagram',
+      'stateDiagram',
+    ]) {
+      expect(checkMermaidSource(`${head}\n  a`)).toEqual({ ok: true, diagram: head.split(/[\s\n]/)[0] })
+    }
+  })
+  it('still rejects unknown or unsafe diagram heads', () => {
+    for (const head of ['C4Context', 'unknownDiagram', 'packet-beta']) {
       expect(checkMermaidSource(`${head}\n  a`)).toEqual({ ok: false, reason: 'unsupported-type' })
     }
   })
@@ -140,8 +162,19 @@ describe('createMermaidRenderer', () => {
   it('does not load Mermaid for input rejected by the pre-check', async () => {
     const load = vi.fn(async () => fakeMermaid())
     const render = createMermaidRenderer(load)
-    expect(await render('pie\n"a": 1')).toEqual({ ok: false, reason: 'unsupported-type' })
+    expect(await render('C4Context\nSystem_Boundary')).toEqual({ ok: false, reason: 'unsupported-type' })
     expect(load).not.toHaveBeenCalled()
+  })
+  it('refuses to load when CSSStyleSheet is unavailable (Kylin WebKit)', async () => {
+    const Original = globalThis.CSSStyleSheet
+    // @ts-expect-error deliberate probe
+    globalThis.CSSStyleSheet = undefined
+    expect(mermaidRuntimeSupported()).toBe(false)
+    const load = vi.fn(async () => fakeMermaid())
+    const render = createMermaidRenderer(load)
+    expect(await render('flowchart TD\nA-->B')).toEqual({ ok: false, reason: 'platform-unsupported' })
+    expect(load).not.toHaveBeenCalled()
+    globalThis.CSSStyleSheet = Original
   })
   it('falls back on syntax errors and still cleans up (F08)', async () => {
     const render = createMermaidRenderer(async () => fakeMermaid())

@@ -391,6 +391,7 @@ export default function App() {
                 recorderCard={restrictedConversation ? undefined : <LiveRecorderCard rec={recorder} onOpenWindow={() => void showRecorderWindow()} />}
                 onGenerateMinutes={(m) => void sendRecordingRequest(m, 'doc')}
                 onOpenImageGenerationSettings={() => openSettings('image-generation')}
+                sessionId={session.info?.sessionId}
               /></ArtifactActionsContext.Provider>
 
               {permissions.pending && (

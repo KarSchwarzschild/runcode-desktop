@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { listFenceBlocks, selectPreviewBlocks, AssistantMarkdown } from './assistant-markdown'
+import { listFenceBlocks, relatedPathsForKind, selectPreviewBlocks, AssistantMarkdown } from './assistant-markdown'
 
 const SVG = '<svg viewBox="0 0 10 10"><rect width="5" height="5"/></svg>'
 const PAGE = '<!doctype html><html><body><div>架构</div></body></html>'
@@ -52,6 +52,15 @@ describe('listFenceBlocks / selectPreviewBlocks', () => {
     expect(selectPreviewBlocks(md, false).size).toBe(1)
     const many = Array.from({ length: 8 }, (_, i) => '```svg\n<svg viewBox="0 0 1 1"><rect width="1" height="1" id="n' + i + '"/></svg>\n```').join('\n\n')
     expect(selectPreviewBlocks(many, false).size).toBe(6)
+  })
+})
+
+describe('relatedPathsForKind', () => {
+  it('picks same-message static paths matching the preview kind', () => {
+    const md = '已生成 charts/a.svg 与 notes/flow.mmd\n\n```svg\n' + SVG + '\n```'
+    expect(relatedPathsForKind(md, 'svg')).toEqual(['charts/a.svg'])
+    expect(relatedPathsForKind(md, 'mermaid')).toEqual(['notes/flow.mmd'])
+    expect(relatedPathsForKind(md, 'html')).toEqual([])
   })
 })
 
