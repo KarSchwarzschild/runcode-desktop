@@ -120,4 +120,76 @@ describe('GeneratedImageCard', () => {
     expect(host.textContent).not.toContain('完成后的意图说明')
     expect(host.textContent).not.toContain('一双高跟鞋在地毯上')
   })
+
+  it('running 时有方形 shimmer 占位与连续动画 class', async () => {
+    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '正在生成图片' } as ToolEvent)
+    const shimmer = host.querySelector('.ig-card-shimmer')
+    expect(shimmer).toBeTruthy()
+    expect(shimmer!.classList.contains('ig-card-shimmer-animate')).toBe(true)
+  })
+
+  it('从 running 变成 ready 且有图片地址时播放百叶窗，animationend 后移除', async () => {
+    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '正在生成图片' } as ToolEvent)
+    expect(host.querySelector('.ig-card-shimmer')).toBeTruthy()
+
+    await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" />))
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+
+    const reveal = host.querySelector('.ig-card-reveal')
+    expect(reveal).toBeTruthy()
+    expect(reveal!.classList.contains('ig-card-reveal-animate')).toBe(true)
+
+    // 动画结束挂在最后一条条带上，避免前几条提前清遮罩。
+    const lastStrip = reveal!.querySelector('span:last-child')
+    expect(lastStrip).toBeTruthy()
+    await act(async () => {
+      lastStrip!.dispatchEvent(new Event('animationend', { bubbles: true }))
+    })
+    expect(host.querySelector('.ig-card-reveal')).toBeNull()
+  })
+
+  it('直接以 ready 挂载时没有百叶窗 class', async () => {
+    await render(toolEvent(ok))
+    expect(host.querySelector('.ig-card-reveal')).toBeNull()
+    expect(host.querySelector('.ig-card-shimmer')).toBeNull()
+  })
+
+  it('没有图片地址时不开始百叶窗动画', async () => {
+    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '生成中' } as ToolEvent)
+    // 成功结果但缩略图尚未就绪（openArtifact 挂起）：不应出现 reveal。
+    let resolveOpen: (v: unknown) => void = () => {}
+    api.openArtifact.mockReset().mockImplementation(() => new Promise((resolve) => { resolveOpen = resolve }))
+    await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" />))
+    await act(async () => { await Promise.resolve() })
+    expect(host.querySelector('.ig-card-reveal')).toBeNull()
+    await act(async () => {
+      resolveOpen({ reference: 'ref-late', sessionId: 'S', generation: 'g', path: ok.images![0].path, url: 'http://127.0.0.1:9/late' })
+      await Promise.resolve()
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(host.querySelector('.ig-card-reveal')).toBeTruthy()
+  })
+
+  it('prefers-reduced-motion 时不挂连续动画 class', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: String(query).includes('prefers-reduced-motion'),
+      media: query,
+      onchange: null,
+      addListener: () => {},
+      removeListener: () => {},
+      addEventListener: () => {},
+      removeEventListener: () => {},
+      dispatchEvent: () => false,
+    }))
+    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '正在生成图片' } as ToolEvent)
+    const shimmer = host.querySelector('.ig-card-shimmer')
+    expect(shimmer).toBeTruthy()
+    expect(shimmer!.classList.contains('ig-card-shimmer-animate')).toBe(false)
+
+    await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" />))
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    expect(host.querySelector('.ig-card-reveal')).toBeNull()
+  })
 })

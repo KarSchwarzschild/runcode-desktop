@@ -29,8 +29,16 @@ export function ImageGenerationPreview() {
       <section className="flex flex-col gap-3">
         <h2 className="text-[13px] text-muted">生成结果卡片</h2>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
-          <GeneratedImageCard tool={tool(undefined, 'progress', '正在生成图片')} sessionId="preview" />
-          <GeneratedImageCard tool={tool(base)} sessionId="preview" />
+          {/* 加载中：方形 shimmer 占位（连续扫光；reduced-motion 下无连续动画） */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-faint">生成中 · shimmer</span>
+            <GeneratedImageCard tool={tool(undefined, 'progress', '一双高跟鞋在地毯上')} sessionId="preview" />
+          </div>
+          {/* 历史/直接完成：静态缩略图，不播百叶窗 */}
+          <div className="flex flex-col gap-1">
+            <span className="text-[11px] text-faint">历史完成 · 无百叶窗</span>
+            <GeneratedImageCard tool={tool(base)} sessionId="preview" />
+          </div>
           {/* 未生成：失败/未知/取消等统一文案 */}
           <GeneratedImageCard tool={tool({ ...base, status: 'failed', code: 'forbidden', images: [], requestId: '', message: '内部原因不应出现在卡片' }, 'failed')} sessionId="preview" />
           {/* 文件不存在：曾成功但 OpenArtifact 失败（画廊无宿主时也会落到这一支） */}
@@ -38,6 +46,9 @@ export function ImageGenerationPreview() {
           <GeneratedImageCard tool={tool({ ...base, status: 'unknown', images: [], message: '内部' }, 'failed')} sessionId="preview" />
           <GeneratedImageCard tool={tool({ ...base, status: 'save_failed', images: [], message: '内部' }, 'failed')} sessionId="preview" />
         </div>
+        <p className="text-[11px] text-faint">
+          百叶窗只在同一卡片实例从「生成中」切到有缩略图 URL 时播放；本画廊无法模拟该时序，真机刚生成时可见。
+        </p>
       </section>
       <section className="flex flex-col gap-3 max-w-[900px]">
         <h2 className="text-[13px] text-muted">输入框工具条（已无生图开关；生图设置入口改在助手回复尾注）</h2>

@@ -9,6 +9,7 @@ import {
 import { fmtBytes } from '@/core/format'
 import { Icon } from '@/ui/icons'
 import { ArtifactActionsContext } from './artifact-actions'
+import './generated-image-card.css'
 
 // useVisible：进入视口才申请预览引用，避免长历史每张卡都占着引用。
 function useVisible(ref: RefObject<HTMLElement>): boolean {
@@ -32,16 +33,38 @@ function useVisible(ref: RefObject<HTMLElement>): boolean {
   return visible
 }
 
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(() =>
+    typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches,
+  )
+  useEffect(() => {
+    if (typeof matchMedia === 'undefined') return
+    const mq = matchMedia('(prefers-reduced-motion: reduce)')
+    const onChange = () => setReduced(mq.matches)
+    mq.addEventListener?.('change', onChange)
+    return () => mq.removeEventListener?.('change', onChange)
+  }, [])
+  return reduced
+}
+
 type Thumb = { path: string; url: string; failed: boolean }
+
+const REVEAL_STRIPS = 8
 
 export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: ToolEvent; sessionId: string; onOpenFile?: (relPath: string) => void }) {
   const actions = useContext(ArtifactActionsContext)
   const rootRef = useRef<HTMLDivElement>(null)
   const visible = useVisible(rootRef)
+  const reduceMotion = usePrefersReducedMotion()
   const result = isImageGenerationResult(tool.data) ? tool.data : null
   const image = result?.status === 'succeeded' ? result.images?.[0] : undefined
   const path = image?.path ?? ''
   const [thumb, setThumb] = useState<Thumb | null>(null)
+  const [revealing, setRevealing] = useState(false)
+  const revealRootRef = useRef<HTMLDivElement>(null)
+  // 挂载期间见过 running 才播百叶窗；历史回放直接静态图。
+  const sawRunningRef = useRef(false)
+  const revealForUrlRef = useRef('')
 
   useEffect(() => {
     if (!visible || !path || !sessionId) return
@@ -74,6 +97,33 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
     thumbFailed: !!current?.failed,
   })
 
+  if (cardState === 'running') {
+    sawRunningRef.current = true
+  }
+
+  useEffect(() => {
+    if (reduceMotion) {
+      setRevealing(false)
+      return
+    }
+    if (cardState !== 'ready' || !current?.url) return
+    if (!sawRunningRef.current) return
+    if (revealForUrlRef.current === current.url) return
+    revealForUrlRef.current = current.url
+    setRevealing(true)
+  }, [cardState, current?.url, reduceMotion])
+
+  // 原生 animationend：最后一条条带结束后再摘遮罩（避免前几条提前清掉）。
+  useEffect(() => {
+    if (!revealing || reduceMotion) return
+    const root = revealRootRef.current
+    const last = root?.querySelector('span:last-child')
+    if (!last) return
+    const done = () => setRevealing(false)
+    last.addEventListener('animationend', done)
+    return () => last.removeEventListener('animationend', done)
+  }, [revealing, reduceMotion])
+
   return (
     <div ref={rootRef} className="border border-line2 rounded-card bg-surface p-3 flex flex-col gap-2 max-w-[440px] shadow-xs">
       <div className="flex items-center gap-2 text-[13px]">
@@ -95,6 +145,13 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
         </p>
       ) : null}
 
+      {cardState === 'running' && (
+        <div
+          className={`ig-card-shimmer flex-none w-[96px] h-[96px] rounded-lg border border-line2${reduceMotion ? '' : ' ig-card-shimmer-animate'}`}
+          aria-hidden
+        />
+      )}
+
       {(cardState === 'not-generated' || cardState === 'missing') && (
         <p className="text-[12px] text-muted break-words">
           {imageGenerationFailureLabel(cardState, result?.model)}
@@ -107,11 +164,22 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
             current?.url ? (
               <button
                 type="button"
-                className="flex-none w-[96px] h-[96px] rounded-lg overflow-hidden border border-line2 bg-inset cursor-zoom-in hover:border-primary/50 transition"
+                className="ig-card-thumb flex-none w-[96px] h-[96px] rounded-lg overflow-hidden border border-line2 bg-inset cursor-zoom-in hover:border-primary/50 transition"
                 title="在预览面板打开"
                 onClick={() => onOpenFile?.(path)}
               >
                 <img src={current.url} alt="" className="block w-full h-full object-cover" />
+                {revealing ? (
+                  <div
+                    ref={revealRootRef}
+                    className={`ig-card-reveal${reduceMotion ? '' : ' ig-card-reveal-animate'}`}
+                    aria-hidden
+                  >
+                    {Array.from({ length: REVEAL_STRIPS }, (_, i) => (
+                      <span key={i} />
+                    ))}
+                  </div>
+                ) : null}
               </button>
             ) : (
               <div className="flex-none w-[96px] h-[96px] rounded-lg border border-line2 bg-inset flex items-center justify-center text-[11px] text-faint">载入中…</div>
