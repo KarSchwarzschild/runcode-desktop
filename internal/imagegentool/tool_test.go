@@ -311,3 +311,31 @@ func TestDescriptionStatesWhenToCallAndAvailability(t *testing.T) {
 		t.Fatalf("unavailable description: %s", d)
 	}
 }
+
+// TestDescriptionSteersMultimodalRouting 锁定方案 A：仅靠 Description 区分
+// 「逻辑/网页/几何图走 Mermaid·SVG·HTML」与「写实/海报走本工具」，避免流程图误打生图。
+func TestDescriptionSteersMultimodalRouting(t *testing.T) {
+	snap := readySnapshot()
+	tl := newTool(&fakeHost{}, &snap)
+	desc := tl.Description()
+	for _, want := range []string{
+		"Mermaid", "SVG", "HTML",
+		"流程图", "时序图", "架构图",
+		"不要调用",
+		"海报", "写实", "插画",
+		"导出",
+	} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("available description missing routing cue %q: %s", want, desc)
+		}
+	}
+	snap.Enabled, snap.Available, snap.Reason = false, false, "尚未选择生图模型"
+	d := tl.Description()
+	if !strings.Contains(d, "请勿调用") || !strings.Contains(d, "尚未选择生图模型") {
+		t.Fatalf("unavailable description must keep early exit: %s", d)
+	}
+	// 不可用时仍可保留路由提示，但不得丢掉既有“请勿调用”后缀语义。
+	if strings.Contains(d, "image-model") {
+		t.Fatalf("unavailable description must not list a ready model: %s", d)
+	}
+}
