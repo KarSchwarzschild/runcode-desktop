@@ -55,6 +55,34 @@ func TestImageGenerationReplayMergesLedgerByToolUseID(t *testing.T) {
 	}
 }
 
+func TestImageGenerationReplayPreservesDisplayIntent(t *testing.T) {
+	ws := t.TempDir()
+	withIntent := replayResult("gen_intent", "succeeded")
+	withIntent.DisplayIntent = "一双高跟鞋在地毯上"
+	rec := imageGenerationLedger{
+		GenerationID: "gen_intent", SessionID: "sess_1", TurnID: "turn_intent", QuestionID: "q_i",
+		ToolUseID: "tu_i", Model: "image-only-b64", Size: "1024x1024", Status: "submitted", AccountingStatus: "unverified",
+	}
+	rec = rec.finalized(withIntent)
+	if err := writeImageGenerationLedger(ws, rec); err != nil {
+		t.Fatal(err)
+	}
+	out := imageGenerationBlocks(ws, "sess_1", []ResumedBlock{
+		{Kind: "user", QuestionID: "q_i", Text: "画鞋"},
+		toolBlock("tu_i", replayResult("gen_intent", "succeeded")),
+	})
+	got := out[1].Tool.ImageGeneration
+	if got == nil || got.DisplayIntent != "一双高跟鞋在地毯上" {
+		t.Fatalf("replay lost DisplayIntent: %+v", got)
+	}
+
+	// 旧账本／旧工具正文没有该字段时保持空，不猜测。
+	legacy := imageGenerationBlocks(t.TempDir(), "fork", []ResumedBlock{toolBlock("tu_old", replayResult("gen_old", "succeeded"))})
+	if legacy[0].Tool.ImageGeneration.DisplayIntent != "" {
+		t.Fatalf("legacy invented DisplayIntent: %+v", legacy[0].Tool.ImageGeneration)
+	}
+}
+
 func TestImageGenerationReplayRecoversUnwrittenToolUnderOriginalQuestion(t *testing.T) {
 	ws := t.TempDir()
 	// 图已落盘且账本已终态，但进程在工具结果写入历史前中断——回放须按原提问补回。

@@ -97,6 +97,7 @@ type ImageGenerationResult struct {
 	Size             string                    `json:"size"`
 	Images           []ImageGenerationArtifact `json:"images"`
 	Message          string                    `json:"message,omitempty"`
+	DisplayIntent    string                    `json:"displayIntent,omitempty"` // 清洗后一句话意图；出图前／回放用，不含完整 prompt
 	RequestID        string                    `json:"requestId,omitempty"`
 	SubmissionStatus string                    `json:"submissionStatus,omitempty"`
 	AccountingStatus string                    `json:"accountingStatus"`

@@ -194,6 +194,82 @@ func TestToolConcurrentRunsEnterHostOnce(t *testing.T) {
 	}
 }
 
+func TestSanitizeDisplayIntent(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"  高跟鞋  ", "高跟鞋"},
+		{"一双\n新鞋\t在地毯上", "一双 新鞋 在地毯上"},
+		{"海报 C:\\Users\\a\\x.png 完成", "海报 完成"},
+		{"见 /tmp/out.png 与 D:/ws/a.jpg", "见 与"},
+		{"C:/a.png", ""},
+		{"只有路径 C:/a.png", "只有路径"},
+		{strings.Repeat("画", MaxDisplayIntentRunes+10), strings.Repeat("画", MaxDisplayIntentRunes)},
+	}
+	for _, tc := range cases {
+		if got := sanitizeDisplayIntent(tc.in); got != tc.want {
+			t.Fatalf("sanitizeDisplayIntent(%q)=%q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestToolProgressAndResultCarryDisplayIntent(t *testing.T) {
+	h := &fakeHost{}
+	snap := readySnapshot()
+	events := make(chan tool.Event, 8)
+	prompt := "完整提示词不应出现在进度事件里，包含密钥TOKEN"
+	raw := json.RawMessage(`{"prompt":"` + prompt + `","displayIntent":"一双\n高跟鞋 见 C:\\tmp\\a.png"}`)
+	r, err := newTool(h, &snap).Run(context.Background(), raw, callCtx("u-intent"), events)
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(events)
+	wantIntent := "一双 高跟鞋 见"
+	var progress []string
+	for ev := range events {
+		if ev.Type == tool.EventTypeProgress && ev.Message != "" && ev.Data == nil {
+			progress = append(progress, ev.Message)
+		}
+	}
+	if len(progress) == 0 || progress[0] != wantIntent {
+		t.Fatalf("first progress = %v, want %q", progress, wantIntent)
+	}
+	for _, m := range progress {
+		if strings.Contains(m, prompt) || strings.Contains(m, "TOKEN") || strings.Contains(m, "C:") {
+			t.Fatalf("progress leaked prompt/path: %q", m)
+		}
+	}
+	out := decodeResult(t, r)
+	if out.DisplayIntent != wantIntent {
+		t.Fatalf("result DisplayIntent = %q, want %q", out.DisplayIntent, wantIntent)
+	}
+	h.mu.Lock()
+	gotIn := h.last
+	h.mu.Unlock()
+	if gotIn.DisplayIntent != wantIntent || gotIn.Prompt != prompt {
+		t.Fatalf("host input = %+v", gotIn)
+	}
+
+	// 缺失意图时进度仍为默认文案，结果不带 DisplayIntent。
+	events2 := make(chan tool.Event, 8)
+	snap.TurnID = "turn_2"
+	r2, _ := newTool(h, &snap).Run(context.Background(), json.RawMessage(`{"prompt":"海报"}`), callCtx("u-no-intent"), events2)
+	close(events2)
+	var first string
+	for ev := range events2 {
+		if ev.Type == tool.EventTypeProgress && ev.Data == nil {
+			first = ev.Message
+			break
+		}
+	}
+	if first != "正在生成图片" {
+		t.Fatalf("default progress = %q", first)
+	}
+	if decodeResult(t, r2).DisplayIntent != "" {
+		t.Fatalf("unexpected DisplayIntent on missing input: %+v", decodeResult(t, r2))
+	}
+}
+
 func TestToolPublishesResultAsEventData(t *testing.T) {
 	h := &fakeHost{}
 	snap := readySnapshot()

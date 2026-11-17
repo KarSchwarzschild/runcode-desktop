@@ -108,4 +108,16 @@ describe('GeneratedImageCard', () => {
     expect(host.textContent).toContain('正在生成图片')
     expect(host.textContent).not.toMatch(/\d+%/)
   })
+
+  it('生成中显示 tool.message 意图行；完成后显示 result.displayIntent；缺失则不画意图行', async () => {
+    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '一双高跟鞋在地毯上' } as ToolEvent)
+    expect(host.textContent).toContain('一双高跟鞋在地毯上')
+
+    await render(toolEvent({ ...ok, displayIntent: '完成后的意图说明' }))
+    expect(host.textContent).toContain('完成后的意图说明')
+
+    await render(toolEvent({ ...ok, displayIntent: undefined }))
+    expect(host.textContent).not.toContain('完成后的意图说明')
+    expect(host.textContent).not.toContain('一双高跟鞋在地毯上')
+  })
 })

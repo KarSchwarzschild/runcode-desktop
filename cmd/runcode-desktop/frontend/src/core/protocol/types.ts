@@ -464,6 +464,7 @@ export interface ImageGenerationResult {
   size: string;
   images: ImageGenerationArtifact[] | null;
   message?: string;
+  displayIntent?: string;
   requestId?: string;
   submissionStatus?: string;
   accountingStatus: string;

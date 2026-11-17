@@ -1,6 +1,6 @@
 // Package imagegentool 实现桌面侧 image_generate ExtraTool。
 //
-// 模型只能提交 prompt 与可选 size。实际使用的模型、租户、账号与网关由宿主按独立
+// 模型只能提交 prompt、可选 size 与可选 displayIntent。实际使用的模型、租户、账号与网关由宿主按独立
 // 回合冻结（Snapshot）；宿主回调负责权威复核、持久化提交账本与唯一一次 POST。
 // 本工具只管输入契约、每回合一次生成预算、同 ToolUseID 回放，以及把业务失败写成
 // 结果而不是可重试的 Go error——unknown／取消／保存失败都不能换种方式再发。
@@ -27,6 +27,8 @@ type Input struct {
 	Size   string
 	// SizeNote 在请求尺寸被就近调整时填写，写入工具结果 Message，供模型转告用户。
 	SizeNote string
+	// DisplayIntent 是清洗后的一句话画面意图；缺失或清洗为空则为空串。
+	DisplayIntent string
 }
 
 // CallMeta 是一次调用的可信执行身份（会话／消息／工具调用／回合）。
@@ -190,7 +192,11 @@ func (t *Tool) Run(ctx context.Context, raw json.RawMessage, tc *tool.Context, e
 	t.spent[snap.TurnID] = tc.ToolUseID
 	t.mu.Unlock()
 
-	emit(events, tool.Event{Type: tool.EventTypeProgress, ToolName: Name, ToolUseID: tc.ToolUseID, Message: "正在生成图片"})
+	progressMsg := "正在生成图片"
+	if in.DisplayIntent != "" {
+		progressMsg = in.DisplayIntent
+	}
+	emit(events, tool.Event{Type: tool.EventTypeProgress, ToolName: Name, ToolUseID: tc.ToolUseID, Message: progressMsg})
 	meta := CallMeta{SessionID: tc.SessionID, MessageID: tc.MessageID, ToolUseID: tc.ToolUseID, TurnID: snap.TurnID, Invocation: invocation}
 	result, err := t.Host.Generate(ctx, in, meta)
 	if err != nil {
@@ -198,6 +204,9 @@ func (t *Tool) Run(ctx context.Context, raw json.RawMessage, tc *tool.Context, e
 			Status: "unknown", Code: "unknown_outcome", Model: snap.Model, Size: in.Size,
 			Message: "生成过程中断，无法确认上游是否已生成或计费，请勿重复提交",
 		}
+	}
+	if in.DisplayIntent != "" {
+		result.DisplayIntent = in.DisplayIntent
 	}
 	if note := strings.TrimSpace(in.SizeNote); note != "" {
 		if strings.TrimSpace(result.Message) == "" {
@@ -325,11 +334,12 @@ func emit(events chan<- tool.Event, ev tool.Event) {
 }
 
 type rawInput struct {
-	Prompt *string `json:"prompt"`
-	Size   string  `json:"size"`
+	Prompt        *string `json:"prompt"`
+	Size          string  `json:"size"`
+	DisplayIntent string  `json:"displayIntent"`
 }
 
-var errInvalidInput = errors.New("参数无效：只接受 prompt 与可选的 size")
+var errInvalidInput = errors.New("参数无效：只接受 prompt、可选的 size 与可选的 displayIntent")
 
 func decodeInput(raw json.RawMessage) (rawInput, error) {
 	var in rawInput
@@ -342,6 +352,52 @@ func decodeInput(raw json.RawMessage) (rawInput, error) {
 		return rawInput{}, errInvalidInput
 	}
 	return in, nil
+}
+
+// sanitizeDisplayIntent 只在 Go 边界清洗一次：单行、去路径与控制字符、限长；
+// 清洗后为空视为缺失。前端只做截短显示，不再写第二套规则。
+func sanitizeDisplayIntent(raw string) string {
+	s := strings.TrimSpace(raw)
+	if s == "" || !utf8.ValidString(s) {
+		return ""
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == '\n' || r == '\r' || r == '\t':
+			b.WriteByte(' ')
+		case r < 0x20 || r == 0x7f:
+			// 丢掉其它控制字符，不回显到卡片。
+		default:
+			b.WriteRune(r)
+		}
+	}
+	kept := make([]string, 0, 8)
+	for _, tok := range strings.Fields(b.String()) {
+		if looksLikePathToken(tok) {
+			continue
+		}
+		kept = append(kept, tok)
+	}
+	out := strings.Join(kept, " ")
+	if n := utf8.RuneCountInString(out); n > MaxDisplayIntentRunes {
+		out = string([]rune(out)[:MaxDisplayIntentRunes])
+	}
+	return strings.TrimSpace(out)
+}
+
+func looksLikePathToken(tok string) bool {
+	if strings.ContainsAny(tok, `/\`) {
+		return true
+	}
+	if len(tok) >= 2 {
+		c0, c1 := tok[0], tok[1]
+		if c1 == ':' && ((c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z')) {
+			return true
+		}
+	}
+	return false
 }
 
 func parseInput(raw json.RawMessage, snap Snapshot) (Input, error) {
@@ -359,6 +415,7 @@ func parseInput(raw json.RawMessage, snap Snapshot) (Input, error) {
 	if utf8.RuneCountInString(prompt) > MaxPromptRunes {
 		return Input{}, fmt.Errorf("prompt 超过 %d 字上限", MaxPromptRunes)
 	}
+	intent := sanitizeDisplayIntent(in.DisplayIntent)
 	size := canonicalizeSize(in.Size)
 	if size == "" {
 		size = canonicalizeSize(snap.Size)
@@ -370,19 +427,19 @@ func parseInput(raw json.RawMessage, snap Snapshot) (Input, error) {
 		if size != "" && size != only {
 			note = sizeRemapNote(size, only, snap.SupportedSizes)
 		}
-		return Input{Prompt: prompt, Size: only, SizeNote: note}, nil
+		return Input{Prompt: prompt, Size: only, SizeNote: note, DisplayIntent: intent}, nil
 	}
 	// 空尺寸表示不固定，交给网关按模型能力兜底。
 	if size == "" {
-		return Input{Prompt: prompt, Size: ""}, nil
+		return Input{Prompt: prompt, Size: "", DisplayIntent: intent}, nil
 	}
 	if slices.Contains(snap.SupportedSizes, size) {
-		return Input{Prompt: prompt, Size: size}, nil
+		return Input{Prompt: prompt, Size: size, DisplayIntent: intent}, nil
 	}
 	// 用户/模型指定了不兼容尺寸：就近匹配，并附说明供最终回复转述。
 	if len(snap.SupportedSizes) == 0 {
 		return Input{}, fmt.Errorf("尺寸 %q 不在可用范围内", size)
 	}
 	chosen := closestSupportedSize(size, snap.SupportedSizes)
-	return Input{Prompt: prompt, Size: chosen, SizeNote: sizeRemapNote(size, chosen, snap.SupportedSizes)}, nil
+	return Input{Prompt: prompt, Size: chosen, SizeNote: sizeRemapNote(size, chosen, snap.SupportedSizes), DisplayIntent: intent}, nil
 }

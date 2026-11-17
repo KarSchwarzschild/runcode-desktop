@@ -83,9 +83,17 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
         {cardState === 'ready' && <span className="text-[12px] text-muted flex-none">已生成</span>}
       </div>
 
+      {/* 意图行：生成中读 progress message；完成后读结果里的清洗字段；缺失不画。 */}
       {cardState === 'running' && (
-        <p className="text-[12px] text-muted">{tool.message || '正在生成图片'}…</p>
+        <p className="text-[12px] text-muted truncate" title={tool.message || undefined}>
+          {tool.message || '正在生成图片'}…
+        </p>
       )}
+      {cardState !== 'running' && result?.displayIntent ? (
+        <p className="text-[12px] text-muted truncate" title={result.displayIntent}>
+          {result.displayIntent}
+        </p>
+      ) : null}
 
       {(cardState === 'not-generated' || cardState === 'missing') && (
         <p className="text-[12px] text-muted break-words">
