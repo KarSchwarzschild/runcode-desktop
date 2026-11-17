@@ -75,6 +75,20 @@ type ImageGenerationArtifact struct {
 	Height   int    `json:"height"`
 }
 
+// 本地标注画板保存上限（前后端共用，经 protogen 下发前端）。
+const (
+	ImageEditMaxEdge  = 4096
+	ImageEditMaxBytes = 16 << 20
+)
+
+// SaveImageGenerationEditRequest 把画板合成的 PNG 存为同一 generation 目录下的新副本。
+// SourcePath 必须是本会话工作区 生成图片/<generationId>/ 下已有图片（含 edited-*.png）。
+type SaveImageGenerationEditRequest struct {
+	SessionID  string `json:"sessionId"`
+	SourcePath string `json:"sourcePath"`
+	PNGBase64  string `json:"pngBase64"`
+}
+
 // 生图请求的本地提交边界。它只回答客户端是否进入 HTTP Do，不承诺网络字节
 // 是否送达、Bridge/Core 是否收到、图片是否生成或是否扣费。
 const (

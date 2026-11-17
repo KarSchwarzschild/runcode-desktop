@@ -2,13 +2,14 @@
 // 成功只保留缩略图、宽高/大小/格式与三个文件操作；失败仅两种中性文案。
 // 不展示文件名、完整路径、requestId、Message、Code、SubmissionStatus、计费与堆栈。
 import { useContext, useEffect, useRef, useState, type RefObject } from 'react'
-import { openArtifact, releaseArtifact, type ToolEvent } from '@/core/bridge'
+import { openArtifact, releaseArtifact, type ImageGenerationArtifact, type ToolEvent } from '@/core/bridge'
 import {
   imageGenerationCardState, imageGenerationFailureLabel, isImageGenerationResult,
 } from '@/core/image-generation'
 import { fmtBytes } from '@/core/format'
 import { Icon } from '@/ui/icons'
 import { ArtifactActionsContext } from './artifact-actions'
+import { ImageEditCanvas } from './image-edit-canvas'
 import './generated-image-card.css'
 
 // useVisible：进入视口才申请预览引用，避免长历史每张卡都占着引用。
@@ -58,7 +59,11 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
   const reduceMotion = usePrefersReducedMotion()
   const result = isImageGenerationResult(tool.data) ? tool.data : null
   const image = result?.status === 'succeeded' ? result.images?.[0] : undefined
-  const path = image?.path ?? ''
+  const sourcePath = image?.path ?? ''
+  // 保存标注后改绑到最新 edited 副本；原图路径仍留在工具结果里。
+  const [edited, setEdited] = useState<ImageGenerationArtifact | null>(null)
+  const path = edited?.path || sourcePath
+  const [editing, setEditing] = useState(false)
   const [thumb, setThumb] = useState<Thumb | null>(null)
   const [revealing, setRevealing] = useState(false)
   const revealRootRef = useRef<HTMLDivElement>(null)
@@ -96,6 +101,10 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
     thumbReadable: !!current?.url,
     thumbFailed: !!current?.failed,
   })
+  const metaW = edited?.width || image?.width
+  const metaH = edited?.height || image?.height
+  const metaBytes = edited?.bytes || image?.bytes
+  const metaMime = edited?.mimeType || image?.mimeType || ''
 
   if (cardState === 'running') {
     sawRunningRef.current = true
@@ -165,8 +174,8 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
               <button
                 type="button"
                 className="ig-card-thumb flex-none w-[96px] h-[96px] rounded-lg overflow-hidden border border-line2 bg-inset cursor-zoom-in hover:border-primary/50 transition"
-                title="在预览面板打开"
-                onClick={() => onOpenFile?.(path)}
+                title="打开标注画板"
+                onClick={() => setEditing(true)}
               >
                 <img src={current.url} alt="" className="block w-full h-full object-cover" />
                 {revealing ? (
@@ -188,7 +197,7 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
             <div className="flex-none w-[96px] h-[96px] rounded-lg border border-dashed border-line2 bg-inset flex items-center justify-center text-[11px] text-faint">缩略图</div>
           )}
           <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-            <div className="text-[11px] text-faint">{image.width} × {image.height} · {fmtBytes(image.bytes)} · {formatLabel(image.mimeType)}</div>
+            <div className="text-[11px] text-faint">{metaW} × {metaH} · {fmtBytes(metaBytes ?? 0)} · {formatLabel(metaMime)}</div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]">
               <button type="button" className="text-primary hover:underline" onClick={() => onOpenFile?.(path)}>预览</button>
               <button type="button" className="text-muted hover:text-ink" onClick={() => { actions.reveal(path).catch(() => {}) }}>在文件夹中显示</button>
@@ -197,6 +206,18 @@ export function GeneratedImageCard({ tool, sessionId, onOpenFile }: { tool: Tool
           </div>
         </div>
       )}
+
+      {editing && current?.url && path ? (
+        <ImageEditCanvas
+          sessionId={sessionId}
+          sourcePath={path}
+          imageUrl={current.url}
+          naturalWidth={metaW ?? 0}
+          naturalHeight={metaH ?? 0}
+          onClose={() => setEditing(false)}
+          onSaved={(art) => { setEdited(art); setEditing(false) }}
+        />
+      ) : null}
     </div>
   )
 }

@@ -58,7 +58,9 @@ describe('GeneratedImageCard', () => {
     expect(host.textContent).not.toContain('brg-1')
     expect(host.textContent).not.toContain('计费待核验')
     expect(host.textContent).not.toMatch(/text-red/)
-    await act(async () => host.querySelector('img')!.closest('button')!.click())
+    // 「预览」仍走 onOpenFile；缩略图点击打开标注画板。
+    const preview = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '预览')
+    await act(async () => { preview!.click() })
     expect(onOpen).toHaveBeenCalledWith('生成图片/gen_1/image.png')
   })
 

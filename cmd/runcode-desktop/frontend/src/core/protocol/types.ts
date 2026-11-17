@@ -954,6 +954,13 @@ export interface SaveCustomModelRequest {
   clearAPIKey?: boolean;
 }
 
+// Mirrors protocol.SaveImageGenerationEditRequest. SaveImageGenerationEditRequest 把画板合成的 PNG 存为同一 generation 目录下的新副本。 SourcePath 必须是本会话工作区 生成图片/<generationId>/ 下已有图片（含 edited-*.png）。
+export interface SaveImageGenerationEditRequest {
+  sessionId: string;
+  sourcePath: string;
+  pngBase64: string;
+}
+
 // Mirrors protocol.SaveImageGenerationSettingsRequest. SaveImageGenerationSettingsRequest 替换某一作用域的默认。DefaultModel 为 nil 表示清除。不带 Bridge／账号字段：宿主从当前身份推导作用域，并拒绝过期 ScopeID。
 export interface SaveImageGenerationSettingsRequest {
   tenantId: string;

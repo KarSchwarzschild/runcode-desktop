@@ -1,4 +1,4 @@
-﻿package protocol
+package protocol
 
 import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 
@@ -17,14 +17,14 @@ import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 
 // CommandKinds 按名字给每条命令分类。
 var CommandKinds = map[string]hostproto.CommandKind{
-	"GetModelContextSettings":     hostproto.CommandQuery,
-	"SaveModelContextSettings":    hostproto.CommandIdempotentSet,
-	"GetVisionSettings":           hostproto.CommandQuery,
-	"SaveVisionSettings":          hostproto.CommandTrigger,
-	"SetPlatformImageCapability":  hostproto.CommandTrigger,
-	"GetQuestion":                 hostproto.CommandQuery,
-	"ForkQuestion":                hostproto.CommandTrigger,
-	"SubmitQuestion":              hostproto.CommandTrigger,
+	"GetModelContextSettings":    hostproto.CommandQuery,
+	"SaveModelContextSettings":   hostproto.CommandIdempotentSet,
+	"GetVisionSettings":          hostproto.CommandQuery,
+	"SaveVisionSettings":         hostproto.CommandTrigger,
+	"SetPlatformImageCapability": hostproto.CommandTrigger,
+	"GetQuestion":                hostproto.CommandQuery,
+	"ForkQuestion":               hostproto.CommandTrigger,
+	"SubmitQuestion":             hostproto.CommandTrigger,
 	// Queries (read-only, safely retriable).
 	"ActiveTenant":            hostproto.CommandQuery,
 	"CodexModels":             hostproto.CommandQuery,
@@ -161,6 +161,7 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"ListImageGenerationModels":   hostproto.CommandQuery,
 	"GetImageGenerationSettings":  hostproto.CommandQuery,
 	"SaveImageGenerationSettings": hostproto.CommandIdempotentSet,
+	"SaveImageGenerationEdit":     hostproto.CommandTrigger,
 	"GetSessionImageGeneration":   hostproto.CommandQuery,
 	"SetSessionImageGeneration":   hostproto.CommandIdempotentSet,
 
