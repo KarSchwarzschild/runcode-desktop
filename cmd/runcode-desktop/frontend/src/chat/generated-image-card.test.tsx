@@ -27,7 +27,6 @@ beforeEach(() => {
   root = createRoot(host)
   api.openArtifact.mockReset().mockResolvedValue({ reference: 'ref-1', sessionId: 'S', generation: 'g', path: ok.images![0].path, url: 'http://127.0.0.1:9/ref-1' })
   api.releaseArtifact.mockReset().mockResolvedValue(undefined)
-  // Cards request a preview reference only once visible; report visible at once.
   vi.stubGlobal('IntersectionObserver', class {
     constructor(private cb: IntersectionObserverCallback) {}
     observe(el: Element) { this.cb([{ isIntersecting: true, target: el } as IntersectionObserverEntry], this as unknown as IntersectionObserver) }
@@ -48,17 +47,18 @@ async function render(tool: ToolEvent, sessionId = 'S', onOpenFile = vi.fn()) {
 }
 
 describe('GeneratedImageCard', () => {
-  it('成功结果直接显示缩略图，不依赖回答正文提及路径，并用来源会话申请预览', async () => {
+  it('成功卡片只保留元信息与操作，不含文件名/路径/内部字段', async () => {
     const onOpen = await render(toolEvent(ok), 'S')
     expect(api.openArtifact).toHaveBeenCalledWith('S', '生成图片/gen_1/image.png')
-    const img = host.querySelector('img')!
-    expect(img.getAttribute('src')).toBe('http://127.0.0.1:9/ref-1')
-    expect(img.closest('button')!.className).toContain('w-[96px]')
-    expect(host.textContent).toContain('image-model')
+    expect(host.querySelector('img')!.getAttribute('src')).toBe('http://127.0.0.1:9/ref-1')
     expect(host.textContent).toContain('1024 × 1024')
+    expect(host.textContent).toContain('PNG')
+    expect(host.textContent).not.toContain('image.png')
+    expect(host.textContent).not.toContain('生成图片/gen_1')
+    expect(host.textContent).not.toContain('brg-1')
     expect(host.textContent).not.toContain('计费待核验')
-    expect(host.textContent).not.toContain('关联 ID')
-    await act(async () => img.closest('button')!.click())
+    expect(host.textContent).not.toMatch(/text-red/)
+    await act(async () => host.querySelector('img')!.closest('button')!.click())
     expect(onOpen).toHaveBeenCalledWith('生成图片/gen_1/image.png')
   })
 
@@ -72,46 +72,40 @@ describe('GeneratedImageCard', () => {
     expect(api.releaseArtifact).toHaveBeenCalledTimes(2)
   })
 
-  it('文件已删除时显示文件不存在，不自动重新生成', async () => {
-    api.openArtifact.mockRejectedValue(new Error(JSON.stringify({ code: 'not_found', message: 'gone' })))
+  it('读不到文件时用「文件不存在」文案，不展示错误原文', async () => {
+    api.openArtifact.mockRejectedValue(new Error(JSON.stringify({ code: 'not_found', message: 'gone-secret' })))
     await render(toolEvent(ok))
-    expect(host.textContent).toContain('文件不存在')
+    expect(host.textContent).toContain('生成图片 文件不存在 image-model')
+    expect(host.textContent).not.toContain('gone-secret')
     expect(host.querySelector('img')).toBeNull()
-    expect(api.openArtifact).toHaveBeenCalledTimes(1)
-    expect([...host.querySelectorAll('button')].some((b) => /重试|重新生成/.test(b.textContent ?? ''))).toBe(false)
+    expect(host.innerHTML).not.toContain('text-red')
   })
 
-  it('结果未知只显示状态和提示，不申请预览、不给重试按钮', async () => {
-    await render(toolEvent({ ...ok, status: 'unknown', code: 'unknown_outcome', images: [], message: '生成结果无法确认，可能已生成或计费，请勿重复提交' }, 'failed'))
+  it('失败结果用「未生成」中性文案，不含 Message/Code/SubmissionStatus', async () => {
+    await render(toolEvent({
+      ...ok, status: 'unknown', code: 'unknown_outcome', images: [],
+      message: '生成结果无法确认，可能已生成或计费，请勿重复提交',
+    }, 'failed'))
     expect(api.openArtifact).not.toHaveBeenCalled()
-    expect(host.textContent).toContain('结果未知')
-    expect(host.textContent).toContain('可能已生成')
-    expect(host.textContent).not.toContain('计费待核验')
-    expect(host.textContent).not.toContain('关联 ID')
-    expect([...host.querySelectorAll('button')].some((b) => /重试|重新生成/.test(b.textContent ?? ''))).toBe(false)
-    expect(host.textContent).not.toMatch(/免费|不收费/)
+    expect(host.textContent).toContain('生成图片 未生成 image-model')
+    expect(host.textContent).not.toContain('可能已生成')
+    expect(host.textContent).not.toContain('unknown_outcome')
+    expect(host.textContent).not.toContain('brg-1')
+    expect(host.innerHTML).not.toContain('text-red')
   })
 
-  it('明确未提交时显示未提交请求，不把它误报为计费待核验', async () => {
-    await render(toolEvent({ ...ok, status: 'failed', code: 'auth', submissionStatus: 'not_submitted', images: [], message: '调用身份信息缺失' }, 'failed'))
-    expect(api.openArtifact).not.toHaveBeenCalled()
-    expect(host.textContent).toContain('未提交生成请求')
-    expect(host.textContent).not.toContain('计费待核验')
-    expect(host.textContent).not.toContain('关联 ID')
+  it('明确未提交也归为未生成，不展示内部提交状态词', async () => {
+    await render(toolEvent({
+      ...ok, status: 'failed', code: 'auth', submissionStatus: 'not_submitted', images: [], message: '调用身份信息缺失',
+    }, 'failed'))
+    expect(host.textContent).toContain('生成图片 未生成 image-model')
+    expect(host.textContent).not.toContain('未提交生成请求')
+    expect(host.textContent).not.toContain('调用身份信息缺失')
   })
 
-  it('进行中只显示真实阶段，不显示虚假百分比', async () => {
+  it('进行中只显示阶段文案，不显示百分比', async () => {
     await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '正在生成图片' } as ToolEvent)
     expect(host.textContent).toContain('正在生成图片')
     expect(host.textContent).not.toMatch(/\d+%/)
-  })
-
-  it('没有来源会话时不猜测会话，也不显示会话缺失告警文案', async () => {
-    await render(toolEvent(ok), '')
-    expect(api.openArtifact).not.toHaveBeenCalled()
-    expect(host.textContent).not.toContain('无法确定图片所属会话')
-    expect(host.textContent).not.toContain('计费待核验')
-    expect(host.textContent).not.toContain('关联 ID')
-    expect(host.textContent).toContain('image.png')
   })
 })

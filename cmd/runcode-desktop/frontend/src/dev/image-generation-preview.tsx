@@ -31,10 +31,12 @@ export function ImageGenerationPreview() {
         <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
           <GeneratedImageCard tool={tool(undefined, 'progress', '正在生成图片')} sessionId="preview" />
           <GeneratedImageCard tool={tool(base)} sessionId="preview" />
-          <GeneratedImageCard tool={tool({ ...base, status: 'unknown', code: 'unknown_outcome', images: [], message: '生成结果无法确认，可能已生成或计费，请勿重复提交；如需核查请联系管理员' }, 'failed')} sessionId="preview" />
-          <GeneratedImageCard tool={tool({ ...base, status: 'save_failed', code: 'save_failed', images: [], message: '已收到生成结果，但下载或保存失败，计费待核验；不会自动重新生成' }, 'failed')} sessionId="preview" />
-          <GeneratedImageCard tool={tool({ ...base, status: 'failed', code: 'forbidden', images: [], requestId: '', message: '当前账号或租户无权使用该生图模型，本次未生成图片' }, 'failed')} sessionId="preview" />
-          <GeneratedImageCard tool={tool({ ...base, status: 'cancelled', images: [], requestId: '', message: '已停止等待；请求已发出，上游可能已生成或计费' }, 'failed')} sessionId="preview" />
+          {/* 未生成：失败/未知/取消等统一文案 */}
+          <GeneratedImageCard tool={tool({ ...base, status: 'failed', code: 'forbidden', images: [], requestId: '', message: '内部原因不应出现在卡片' }, 'failed')} sessionId="preview" />
+          {/* 文件不存在：曾成功但 OpenArtifact 失败（画廊无宿主时也会落到这一支） */}
+          <GeneratedImageCard tool={tool(base)} sessionId="preview-missing" />
+          <GeneratedImageCard tool={tool({ ...base, status: 'unknown', images: [], message: '内部' }, 'failed')} sessionId="preview" />
+          <GeneratedImageCard tool={tool({ ...base, status: 'save_failed', images: [], message: '内部' }, 'failed')} sessionId="preview" />
         </div>
       </section>
       <section className="flex flex-col gap-3 max-w-[900px]">

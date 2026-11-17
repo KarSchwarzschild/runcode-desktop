@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { ImageGenerationCatalog, ImageGenerationResult, PassportModel } from './bridge'
 import {
   accountingLabel, allowsUnfixedSize, coerceDraftSize, defaultDraftSize,
-  imageGenerationModelKey, imageGenerationResultSummary, isChatModel, isImageGenerationModel, submissionLabel,
-  isImageGenerationResult, settingsSelection,
+  imageGenerationCardState, imageGenerationFailureLabel, imageGenerationModelKey,
+  isChatModel, isImageGenerationModel, isImageGenerationResult, settingsSelection,
 } from './image-generation'
 
 const profile = { available: true, supportedSizes: ['1024x1024', '2048x2048'], defaultSize: '1024x1024', responseFormats: ['url'] }
@@ -80,18 +80,21 @@ describe('results', () => {
     expect(accountingLabel(undefined)).toBe('计费待核验')
     expect(accountingLabel('paid')).toBe('计费待核验')
     expect(accountingLabel('verified')).toBe('本次计费已人工核对')
-    for (const status of ['failed', 'unknown', 'cancelled', 'save_failed']) {
-      expect(imageGenerationResultSummary({ ...ok, status, images: [] })).not.toMatch(/免费|不收费|未扣费/)
+  })
+  it('卡片状态：成功可读为 ready，读失败为 missing，其它未交付为 not-generated', () => {
+    expect(imageGenerationCardState(null, { toolEnded: false })).toBe('running')
+    expect(imageGenerationCardState(null, { toolEnded: true })).toBe('not-generated')
+    expect(imageGenerationCardState(ok, { toolEnded: true, thumbReadable: true })).toBe('ready')
+    expect(imageGenerationCardState(ok, { toolEnded: true, thumbFailed: true })).toBe('missing')
+    for (const status of ['failed', 'unknown', 'cancelled', 'save_failed'] as const) {
+      expect(imageGenerationCardState({ ...ok, status, images: [] }, { toolEnded: true })).toBe('not-generated')
     }
+    expect(imageGenerationCardState({ ...ok, status: 'failed', submissionStatus: 'not_submitted', images: [] }, { toolEnded: true })).toBe('not-generated')
   })
-  it('仅本地明确未进入发送边界时显示未提交，历史缺失保持保守', () => {
-    expect(submissionLabel('not_submitted')).toBe('未提交生成请求')
-    expect(submissionLabel('attempted')).toBe('')
-    expect(submissionLabel('unknown')).toBe('')
-    expect(submissionLabel(undefined)).toBe('')
-  })
-  it('未知与保存失败如实说明可能已生成', () => {
-    expect(imageGenerationResultSummary({ ...ok, status: 'unknown', images: [] })).toContain('可能已生成')
-    expect(imageGenerationResultSummary({ ...ok, status: 'save_failed', images: [] })).toContain('保存失败')
+  it('两种失败文案与模型名兜底', () => {
+    expect(imageGenerationFailureLabel('not-generated', 'seedream')).toBe('生成图片 未生成 seedream')
+    expect(imageGenerationFailureLabel('missing', 'seedream')).toBe('生成图片 文件不存在 seedream')
+    expect(imageGenerationFailureLabel('not-generated', '')).toBe('生成图片 未生成 未设置模型')
+    expect(imageGenerationFailureLabel('missing', null)).toBe('生成图片 文件不存在 未设置模型')
   })
 })

@@ -18,6 +18,13 @@ it('keeps generated-image-unrelated assistant svg fences on the inline preview p
   expect(html).not.toContain('language-svg')
 })
 
+it('does not render ThinkingPanel while keeping thinking data on the block type', () => {
+  const html = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 't1', text: '回答', thinking: '秘密推理过程', streaming: false, ts: '' }} />)
+  expect(html).toContain('回答')
+  expect(html).not.toContain('秘密推理过程')
+  expect(html).not.toContain('思考')
+})
+
 it('shows frozen imagegen footnote on completed assistant replies only', () => {
   const note = { modelLabel: 'img-a', sizeLabel: '不固定尺寸（由提示词和生图模型能力共同决定）' }
   const done = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a1', text: '好的', streaming: false, ts: '', imageGenerationNote: note }} onOpenImageGenerationSettings={() => {}} />)

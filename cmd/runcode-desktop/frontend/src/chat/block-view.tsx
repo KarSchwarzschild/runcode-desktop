@@ -15,7 +15,6 @@ import { useStickToBottom } from '@/hooks/use-stick-to-bottom'
 import { type RecordingMark } from '@/recorder/minutes'
 import { type Block, retryReasonLabel } from './blocks'
 import { BotRow } from './bot-row'
-import { ThinkingPanel } from './thinking-panel'
 import { AgentTaskCard } from './agent-task'
 import { ExecutionCard } from './execution-card'
 import { RecordingCard } from './recorder-card'
@@ -65,36 +64,32 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
         </div>
       )
     case 'assistant': {
-      const hasThinking = (block.thinking ?? '').trim() !== ''
+      // thinking 字段仍保留在 block 上（回放/压缩），界面不再渲染思考栏。
       const hasText = block.text.trim() !== ''
-      // The model is still thinking and hasn't begun the answer — the thinking panel
-      // carries the live caret, so the (empty) answer area is suppressed until text
-      // starts, avoiding a stray second caret.
-      const thinkingActive = block.streaming && hasThinking && !hasText
-      // A turn may produce an assistant message with no text (tool-only) or just
-      // whitespace; don't render an empty bubble — unless there's reasoning to show.
-      if (!block.streaming && !hasText && !hasThinking) return null
+      // 无正文的已完成回合不画空气泡（纯工具回合由工具卡承担）。
+      if (!block.streaming && !hasText) return null
       return (
         <BotRow>
           <div className="flex flex-col gap-2">
-            {hasThinking && <ThinkingPanel text={block.thinking ?? ''} streaming={thinkingActive} />}
-            {!thinkingActive && (hasText || block.streaming) && (
+            {(hasText || block.streaming) && (
               <div
                 ref={block.streaming ? aScroll.ref : undefined}
                 onScroll={block.streaming ? aScroll.onScroll : undefined}
                 className={`text-[15px] text-ink2 leading-[1.75] break-words${block.streaming ? ' max-h-[58vh] overflow-y-auto pr-1' : ''}`}
               >
-                <AssistantMarkdown
-                  messageId={block.id}
-                  streaming={block.streaming}
-                  textOnly={textOnly}
-                  sessionId={sessionId}
-                  onOpenFile={onOpenFile}
-                  resolveFile={resolveFile}
-                  onContentHeightChange={onContentHeightChange}
-                >
-                  {block.text}
-                </AssistantMarkdown>
+                {hasText && (
+                  <AssistantMarkdown
+                    messageId={block.id}
+                    streaming={block.streaming}
+                    textOnly={textOnly}
+                    sessionId={sessionId}
+                    onOpenFile={onOpenFile}
+                    resolveFile={resolveFile}
+                    onContentHeightChange={onContentHeightChange}
+                  >
+                    {block.text}
+                  </AssistantMarkdown>
+                )}
                 {block.streaming && <span className="caret">▍</span>}
               </div>
             )}

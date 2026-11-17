@@ -65,7 +65,7 @@ export function isImageGenerationResult(data: unknown): data is ImageGenerationR
 }
 
 // accountingLabel 只描述人工观察的证据状态。缺失、未知值都按待核验处理——任何
-// 结果状态（失败、取消、未知）都不能推出“免费”。
+// 结果状态（失败、取消、未知）都不能推出“免费”。卡片 UI 不再展示本标签。
 export function accountingLabel(status?: string): string {
   switch (status) {
     case 'verified': return '本次计费已人工核对'
@@ -75,28 +75,30 @@ export function accountingLabel(status?: string): string {
   }
 }
 
-// 只有宿主明确证明尚未进入 HTTP Do 时才显示未提交；历史缺字段和非法值按
-// unknown，继续保留结果／计费待核验提示，不能从错误码或 requestId 反推。
-export function submissionLabel(status?: string): string {
-  return status === 'not_submitted' ? '未提交生成请求' : ''
-}
+/** 卡片四态：生成中 / 可读缩略图 / 本次未交付图 / 曾成功但文件现已不可读。 */
+export type ImageGenerationCardState = 'running' | 'ready' | 'not-generated' | 'missing'
 
-export const IMAGE_GENERATION_STATUS_LABEL: Record<string, string> = {
-  succeeded: '已生成',
-  failed: '未生成',
-  unknown: '结果未知',
-  cancelled: '已停止等待',
-  save_failed: '保存失败',
-}
-
-export function imageGenerationResultSummary(r: ImageGenerationResult): string {
-  if (r.submissionStatus === 'not_submitted') return `未提交生成请求${r.message ? `：${r.message}` : ''}`
-  switch (r.status) {
-    case 'succeeded': return '图片已生成并保存到工作区'
-    case 'failed': return r.message || '图片未生成'
-    case 'unknown': return r.message || '生成服务未返回可确认的结果，可能已生成或计费，请勿重复提交'
-    case 'cancelled': return r.message || '已停止等待；上游可能已生成或计费'
-    case 'save_failed': return r.message || '已收到生成结果，下载或保存失败，计费待核验'
-    default: return r.message || r.status
+/**
+ * imageGenerationCardState 把工具结果与缩略图读取结果收成卡片状态。
+ * missing 仅当 status=succeeded 且 OpenArtifact 失败；其它未交付一律 not-generated。
+ */
+export function imageGenerationCardState(
+  result: ImageGenerationResult | null | undefined,
+  opts: { toolEnded: boolean; thumbReadable?: boolean; thumbFailed?: boolean },
+): ImageGenerationCardState {
+  if (!result) return opts.toolEnded ? 'not-generated' : 'running'
+  if (result.status === 'succeeded') {
+    if (opts.thumbFailed) return 'missing'
+    if (opts.thumbReadable) return 'ready'
+    // 成功结果尚在拉缩略图：仍按 ready 排版（占位），不落成「未生成」。
+    return 'ready'
   }
+  return 'not-generated'
+}
+
+/** 两种用户可见失败文案（中性色展示）；模型名空时用「未设置模型」。 */
+export function imageGenerationFailureLabel(state: 'not-generated' | 'missing', model?: string | null): string {
+  const name = (model ?? '').trim() || '未设置模型'
+  if (state === 'missing') return `生成图片 文件不存在 ${name}`
+  return `生成图片 未生成 ${name}`
 }
