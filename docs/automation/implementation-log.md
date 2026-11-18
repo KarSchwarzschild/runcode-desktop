@@ -61,4 +61,13 @@ Step 0 complete.
 | Race | `go test -race` failed with Windows `0xc0000139` (toolchain DLL); non-race suite green |
 | Files | `internal/automation/{errors,store_types,migrations,store,store_test}.go` |
 
-Next: Step 3 scheduler service.
+## Step 3 — scheduler service
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): schedule bounded background runs` |
+| Tests | `go test ./internal/automation -count=3` → PASS |
+| Files | `internal/automation/{service,runner,service_test,fake_clock_test}.go`; Recover leaves queued for re-check |
+| Notes | Global active=1; per-task queued≤1; miss>60s aggregated; queue wait>60s → busy; 60m timeout holds slot until Fact; Observe non-blocking |
+
+Next: Step 4 desktop runner + identity isolation.

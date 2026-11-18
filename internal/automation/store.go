@@ -406,10 +406,12 @@ func (s *Store) ListRuns(ctx context.Context, filter RunFilter) (RunPage, error)
 }
 
 func (s *Store) Recover(ctx context.Context, now time.Time) error {
+	// submitting/running/waiting_permission → interrupted; do not resubmit.
+	// queued stays queued for the service to re-check the 60s window.
 	_, err := s.db.ExecContext(ctx, `UPDATE runs SET status=?, reason=?, finished_at_utc=?, run_revision=run_revision+1
-		WHERE status IN (?,?,?,?)`,
+		WHERE status IN (?,?,?)`,
 		RunInterrupted, "recovered_after_crash", fmtTime(now.UTC()),
-		RunQueued, RunSubmitting, RunRunning, RunWaitingPermission,
+		RunSubmitting, RunRunning, RunWaitingPermission,
 	)
 	return err
 }
