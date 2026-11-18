@@ -2,7 +2,7 @@
 // 资源按来源 session+path 申请 ArtifactReference；动画资格绑定 toolUseID，不绑临时 URL。
 import {
   useEffect, useId, useLayoutEffect, useRef, useState,
-  type RefObject, type ReactNode,
+  type Ref, type RefObject, type ReactNode,
 } from 'react'
 import {
   openArtifact, releaseArtifact, errCode,
@@ -105,11 +105,11 @@ export function GeneratedImagePreview({
   onHeightChange?: () => void
   onView?: () => void
   onAnnotate?: () => void
-  stageRef?: RefObject<HTMLDivElement | null>
+  stageRef?: Ref<HTMLDivElement | null>
 }) {
   const rootRef = useRef<HTMLDivElement>(null)
   const localStageRef = useRef<HTMLDivElement>(null)
-  const stage = stageRef ?? localStageRef
+  const stage = (stageRef ?? localStageRef) as Ref<HTMLDivElement>
   const visible = useVisible(rootRef)
   const reduceMotion = usePrefersReducedMotion()
   const titleId = useId()
@@ -229,10 +229,11 @@ export function GeneratedImagePreview({
     )
   } else if (readyUrl) {
     // 已有 URL：挂 img 解码；未 decode 前叠扫光，decode 成功后再播揭示／开放交互。
-    const showShimmer = !resource.decoded || running
+    const decoded = resource.status === 'ready' && resource.decoded
+    const showShimmer = !decoded || running
     body = (
       <div
-        ref={stage}
+        ref={stage as Ref<HTMLDivElement>}
         className="ig-preview-stage group relative mx-auto rounded-[12px] border border-line2 bg-surface2 overflow-hidden"
         style={{ width: display.width, height: display.height }}
       >
@@ -248,7 +249,7 @@ export function GeneratedImagePreview({
             alt=""
             width={display.width}
             height={display.height}
-            className={`block w-full h-full object-contain${resource.decoded ? '' : ' opacity-0'}`}
+            className={`block w-full h-full object-contain${decoded ? '' : ' opacity-0'}`}
             onLoad={(e) => {
               const img = e.currentTarget
               const finish = () => {

@@ -37,6 +37,8 @@ export function ChatPane({
   onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled,
   onOpenImageGenerationSettings,
   sessionId,
+  onRasterImageView,
+  onRasterImageAnnotate,
 }: {
   textOnly?: boolean
   onRetryQuestion?: (id: string) => void
@@ -71,6 +73,8 @@ export function ChatPane({
   onGenerateMinutes?: (mark: RecordingMark) => void
   onOpenImageGenerationSettings?: () => void
   sessionId?: string
+  onRasterImageView?: (image: import('@/core/bridge').ImageGenerationArtifact, toolUseId: string) => void
+  onRasterImageAnnotate?: (image: import('@/core/bridge').ImageGenerationArtifact, toolUseId: string) => void
 }) {
   const groups = groupBlocks(blocks)
   // 栅格生图展示投影：合并指向本条产物的 open_preview，避免执行卡重复占行。
@@ -134,7 +138,7 @@ export function ChatPane({
           />
         </div>
       )}
-      <div className="flex-1 overflow-y-auto bg-surface px-6 pt-3 pb-8" ref={scrollRef} onScroll={handleScroll}>
+      <div className="flex-1 overflow-y-auto bg-surface px-6 pt-3 pb-8" data-chat-scroll="" ref={scrollRef} onScroll={handleScroll}>
         {/* HTML 内联预览名额挂在本消息区：跨消息共享 liveFrames，切会话随子树卸载释放。 */}
         <InlinePreviewBudgetProvider>
         <div className="mx-auto max-w-[1200px] flex flex-col gap-6">
@@ -176,7 +180,15 @@ export function ChatPane({
             ) : g.kind === 'skill' ? (
               <BotRow key={g.id}><SkillCard tool={g.tool} /></BotRow>
             ) : g.kind === 'image' ? (
-              <BotRow key={g.id}><GeneratedImageCard tool={g.tool} sessionId={g.sessionId} onOpenFile={onOpenFile} /></BotRow>
+              <BotRow key={g.id}>
+                <GeneratedImageCard
+                  tool={g.tool}
+                  sessionId={g.sessionId}
+                  onOpenFile={onOpenFile}
+                  onView={(image) => onRasterImageView?.(image, g.tool.toolUseID ?? g.id)}
+                  onAnnotate={(image) => onRasterImageAnnotate?.(image, g.tool.toolUseID ?? g.id)}
+                />
+              </BotRow>
             ) : g.kind === 'taskgroup' ? (
               <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} sessionId={sessionId} /></BotRow>
             ) : (

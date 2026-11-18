@@ -74,7 +74,7 @@ describe('GeneratedImageCard', () => {
     const onOpen = vi.fn()
     await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" onOpenFile={onOpen} />))
     await act(async () => { await Promise.resolve() })
-    const preview = Array.from(host.querySelectorAll('[data-generated-image-card] button')).find((b) => b.textContent === '预览')
+    const preview = Array.from(host.querySelectorAll('[data-generated-image-card] button')).find((b) => b.textContent === '预览') as HTMLButtonElement | undefined
     expect(preview).toBeTruthy()
     await act(async () => { preview!.click() })
     expect(onOpen).not.toHaveBeenCalled()

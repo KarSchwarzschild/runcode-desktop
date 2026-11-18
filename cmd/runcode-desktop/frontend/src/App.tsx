@@ -5,7 +5,7 @@ import { useQuestionRetry } from '@/session/use-question-retry'
 // App 只做两件事：把各个 hook 接起来（会话 / 对话 / 权限队列 / 预览栏 / 文件），
 // 以及按当前视图摆放 shell 组件。任何具体逻辑都不在这里——需要改行为时去
 // session/ 下对应的 hook，需要改样子去 shell/ 或各页面。
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type ComponentProps } from 'react'
 import { usePersistentBool } from '@/hooks/use-persistent-state'
 import { errText, getImageGenerationSettings, loadConfig, passportLogout, type SessionInfo } from '@/core/bridge'
 import { formatImageGenerationNote, type AssistantImageGenerationNote } from '@/chat/image-generation-note'
@@ -47,6 +47,9 @@ import { SettingsPage } from '@/pages/settings'
 import type { SettingsSectionId } from '@/pages/settings/navigation-model'
 import { StartForm } from '@/pages/start'
 import { UsagePage } from '@/pages/usage'
+import { GeneratedImageViewerProvider, useGeneratedImageViewer } from '@/chat/generated-image-viewer-context'
+import { GeneratedImageViewerHost } from '@/chat/generated-image-viewer'
+import type { ImageGenerationArtifact } from '@/core/bridge'
 
 export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
 
@@ -84,6 +87,7 @@ export default function App() {
   const permissions = usePermissionQueue(focusedId)
   // sudo 密码框：请求可能来自任何一条会话（不只是当前聚焦的），所以挂在最外层。
   const askpass = useAskpass()
+  const imageViewerSuspended = Boolean(permissions.pending || askpass.current)
   const toolSessionId = focusedId
   const workspace = useWorkspaceFiles(toolSessionId, () => infoRef.current?.cwd ?? '')
   const preview = usePreviewPanel(focusedId, toast.show)
@@ -248,8 +252,9 @@ export default function App() {
   }))
 
   return (
-    // 页面与侧栏各自滚动；窗口根截住越界内容，标题栏和底部用户区不能随文档移动。
-    <div className="relative flex flex-col h-screen overflow-hidden">
+    <GeneratedImageViewerProvider suspended={imageViewerSuspended}>
+    {/* 页面与侧栏各自滚动；窗口根截住越界内容，标题栏和底部用户区不能随文档移动。 */}
+    <div id="app-background" className="relative flex flex-col h-screen overflow-hidden">
       <TitleBar />
       <div className="flex flex-1 min-h-0">
         <Sidebar
@@ -363,36 +368,39 @@ export default function App() {
             <UsagePage passport={passport} onOpenSettings={() => openSettings('passport')} />
           ) : (
             <>
-              <ArtifactActionsContext.Provider value={preview.actions}><ChatPane
-                textOnly={restrictedConversation}
-                onRetryQuestion={(id) => void questionRetry.retry(id)}
-                onEditQuestion={(id) => void questionRetry.edit(id)}
-                questionActionsDisabled={questionRetry.disabled}
-                blocks={conversation.blocks}
-                busy={conversation.busy}
-                cwd={session.info?.cwd}
-                userName={userName}
-                plan={conversation.plan}
-                planOpen={conversation.planOpen}
-                onPlanToggle={conversation.setPlanOpen}
-                planning={planning}
-                harmAllows={conversation.harmAllows}
-                oaBlocked={conversation.oaBlocked}
-                revertedEdits={conversation.revertedEdits}
-                files={workspace.files}
-                tabs={preview.tabs}
-                scrollRef={conversation.scrollRef}
-                onScroll={conversation.onChatScroll}
-                onAnswer={(text) => void conversation.send(text, [])}
-                onOpenFile={preview.openFile}
-                onReviewEdit={preview.openDiff}
-                onUndoEdit={(id) => void conversation.undo(id)}
-                resolveFile={workspace.resolve}
-                recorderCard={restrictedConversation ? undefined : <LiveRecorderCard rec={recorder} onOpenWindow={() => void showRecorderWindow()} />}
-                onGenerateMinutes={(m) => void sendRecordingRequest(m, 'doc')}
-                onOpenImageGenerationSettings={() => openSettings('image-generation')}
-                sessionId={session.info?.sessionId}
-              /></ArtifactActionsContext.Provider>
+              <ArtifactActionsContext.Provider value={preview.actions}>
+                <ChatPaneWithRasterViewer
+                  textOnly={restrictedConversation}
+                  onRetryQuestion={(id) => void questionRetry.retry(id)}
+                  onEditQuestion={(id) => void questionRetry.edit(id)}
+                  questionActionsDisabled={questionRetry.disabled}
+                  blocks={conversation.blocks}
+                  busy={conversation.busy}
+                  cwd={session.info?.cwd}
+                  userName={userName}
+                  plan={conversation.plan}
+                  planOpen={conversation.planOpen}
+                  onPlanToggle={conversation.setPlanOpen}
+                  planning={planning}
+                  harmAllows={conversation.harmAllows}
+                  oaBlocked={conversation.oaBlocked}
+                  revertedEdits={conversation.revertedEdits}
+                  files={workspace.files}
+                  tabs={preview.tabs}
+                  scrollRef={conversation.scrollRef}
+                  onScroll={conversation.onChatScroll}
+                  onAnswer={(text) => void conversation.send(text, [])}
+                  onOpenFile={preview.openFile}
+                  onReviewEdit={preview.openDiff}
+                  onUndoEdit={(id) => void conversation.undo(id)}
+                  resolveFile={workspace.resolve}
+                  recorderCard={restrictedConversation ? undefined : <LiveRecorderCard rec={recorder} onOpenWindow={() => void showRecorderWindow()} />}
+                  onGenerateMinutes={(m) => void sendRecordingRequest(m, 'doc')}
+                  onOpenImageGenerationSettings={() => openSettings('image-generation')}
+                  sessionId={session.info?.sessionId}
+                  sessionGeneration={String((session.info as { generation?: string } | null)?.generation ?? '')}
+                />
+              </ArtifactActionsContext.Provider>
 
               {permissions.pending && (
                 <PermissionModal
@@ -465,6 +473,34 @@ export default function App() {
           onCancel={() => askpass.cancel(askpass.current!.id)}
         />
       )}
+      <GeneratedImageViewerHost />
     </div>
+    </GeneratedImageViewerProvider>
+  )
+}
+
+/** Provider 子树内打开栅格生图查看器，避免 App 钩子早于 Provider。 */
+function ChatPaneWithRasterViewer(
+  props: ComponentProps<typeof ChatPane> & { sessionGeneration: string },
+) {
+  const viewer = useGeneratedImageViewer()
+  const { sessionGeneration, sessionId, ...rest } = props
+  const open = (image: ImageGenerationArtifact, toolUseId: string, mode: 'view' | 'annotate') => {
+    if (!sessionId) return
+    viewer.tryOpen({
+      sessionId,
+      sessionGeneration,
+      toolUseId,
+      image,
+      alt: '生成图片',
+    }, mode, document.activeElement instanceof HTMLElement ? document.activeElement : null)
+  }
+  return (
+    <ChatPane
+      {...rest}
+      sessionId={sessionId}
+      onRasterImageView={(image, toolUseId) => open(image, toolUseId, 'view')}
+      onRasterImageAnnotate={(image, toolUseId) => open(image, toolUseId, 'annotate')}
+    />
   )
 }
