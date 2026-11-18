@@ -7,9 +7,10 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { sanitizeSvg } from '@/preview/static-svg'
 import { renderStaticHtml, HTML_PREVIEW_SANDBOX, measureDocumentHeight, createHeightGovernor } from '@/preview/static-html'
 import { renderMermaid } from '@/preview/static-mermaid-loader'
-import { contentDigest, PREVIEW_LIMITS, type StaticPreviewKind } from '@/preview/static-detect'
+import { contentDigest, htmlInlineScale, PREVIEW_LIMITS, type StaticPreviewKind } from '@/preview/static-detect'
 import { logPreviewFailure, previewFailureHint } from '@/preview/preview-failure'
 import { noteInlineFile, type InlineFileStatus } from '@/session/inline-preview-status'
+import { copyText } from '@/core/bridge'
 import { Icon } from '@/ui/icons'
 import { Popover } from '@/ui/popover'
 import { IconBtn } from '@/preview/icon-btn'
@@ -64,11 +65,13 @@ export function InlinePreview({
   const [view, setView] = useState<'preview' | 'source'>('preview')
   const [viewOpen, setViewOpen] = useState(false)
   const [lightboxOpen, setLightboxOpen] = useState(false)
+  const [copied, setCopied] = useState(false)
   const urlRef = useRef<string | null>(null)
   const notify = useRef(onHeightChange)
   notify.current = onHeightChange
   // 代次：源变更／卸载后迟到的异步结果不得回填。
   const genRef = useRef(0)
+  const copyTimer = useRef<number | null>(null)
 
   // 路径列表用稳定键，避免父组件每次新数组引用导致重渲循环。
   const pathsKey = relatedPaths?.join('\0') ?? ''
@@ -162,6 +165,10 @@ export function InlinePreview({
     if (ready) notify.current?.()
   }, [ready])
 
+  useEffect(() => () => {
+    if (copyTimer.current != null) window.clearTimeout(copyTimer.current)
+  }, [])
+
   const title = PREVIEW_TITLE[kind]
   const imageReady = ready && ready.kind !== 'html' ? ready : null
   const canFullscreen = targetFullscreen(imageReady, view)
@@ -171,6 +178,18 @@ export function InlinePreview({
     onOpenCodePreview(codePreviewTarget({
       kind, source, title, sessionId, messageId, previewId, relatedPaths,
     }))
+  }
+  const onCopySource = () => {
+    void (async () => {
+      try {
+        await copyText(source)
+        setCopied(true)
+        if (copyTimer.current != null) window.clearTimeout(copyTimer.current)
+        copyTimer.current = window.setTimeout(() => setCopied(false), 1600)
+      } catch {
+        setCopied(false)
+      }
+    })()
   }
   const titleNode = kind === 'html' && onOpenCodePreview ? (
     <button
@@ -187,9 +206,21 @@ export function InlinePreview({
   const header = ready ? (
     <div className="relative flex items-center gap-2 min-h-9 px-2.5 border-b border-line2 bg-surface">
       {titleNode}
+      {/* 复制仅源码态出现，样式与「视图」同系幽灵按钮（非黑底）。 */}
+      {view === 'source' ? (
+        <button
+          type="button"
+          className={HEADER_TOOL_BTN}
+          title="复制源码"
+          onClick={onCopySource}
+        >
+          <Icon name="copy" size={12} />
+          {copied ? '已复制' : '复制'}
+        </button>
+      ) : null}
       <button
         type="button"
-        className="flex-none inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] text-muted hover:text-ink hover:bg-surface2"
+        className={HEADER_TOOL_BTN}
         aria-expanded={viewOpen}
         onClick={() => setViewOpen((open) => !open)}
       >
@@ -240,7 +271,7 @@ export function InlinePreview({
       <div className="my-2 overflow-visible rounded-lg border border-line2 bg-surface">
         {header}
         {view === 'source' ? (
-          <div className="p-2.5">{defaultNode}</div>
+          <SourceShell>{defaultNode}</SourceShell>
         ) : (
           <HtmlPreviewGate
             srcdoc={ready.srcdoc}
@@ -260,37 +291,19 @@ export function InlinePreview({
     <div className="my-2 overflow-visible rounded-lg border border-line2 bg-surface">
       {header}
       {view === 'source' ? (
-        <div className="p-2.5">{defaultNode}</div>
+        <SourceShell>{defaultNode}</SourceShell>
       ) : (
         <div className="p-2 overflow-hidden rounded-b-lg">
-          {onOpenCodePreview ? (
-            <button
-              type="button"
-              className="block w-full bg-transparent border-0 p-0 cursor-pointer"
-              title="在右侧预览打开"
-              onClick={openSidePreview}
-            >
-              <img
-                src={ready.url}
-                alt={`${title}图`}
-                width={ready.width}
-                height={ready.height}
-                style={INLINE_IMAGE_STYLE}
-                className="block max-w-full w-auto h-auto mx-auto object-contain"
-                onLoad={() => notify.current?.()}
-              />
-            </button>
-          ) : (
-            <img
-              src={ready.url}
-              alt={`${title}图`}
-              width={ready.width}
-              height={ready.height}
-              style={INLINE_IMAGE_STYLE}
-              className="block max-w-full w-auto h-auto mx-auto object-contain"
-              onLoad={() => notify.current?.()}
-            />
-          )}
+          {/* 图面不再单击开右侧专用预览（尤其 Mermaid inline-static）；全屏走顶栏。 */}
+          <img
+            src={ready.url}
+            alt={`${title}图`}
+            width={ready.width}
+            height={ready.height}
+            style={INLINE_IMAGE_STYLE}
+            className="block max-w-full w-auto h-auto mx-auto object-contain"
+            onLoad={() => notify.current?.()}
+          />
         </div>
       )}
       <ImageLightbox
@@ -304,8 +317,22 @@ export function InlinePreview({
   )
 }
 
+/** 顶栏幽灵工具钮：与「视图」同级，不用黑底主按钮。 */
+const HEADER_TOOL_BTN = 'flex-none inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] text-muted hover:text-ink hover:bg-surface2'
 const VIEW_ITEM = 'block w-full text-left px-3 py-2 text-[12px] text-ink2 hover:bg-surface2'
 const ACTIVE_VIEW_ITEM = 'text-primary bg-primarysoft'
+
+/** 源码视图：限高 + 纵向滚动 + 显示折行；复制走 header 的原始 source，不依赖选区。 */
+function SourceShell({ children }: { children: ReactNode }) {
+  return (
+    <div
+      data-inline-source-shell
+      className="p-2.5 max-h-[min(50vh,480px)] overflow-y-auto overflow-x-hidden break-words whitespace-pre-wrap [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_code]:whitespace-pre-wrap [&_code]:break-words"
+    >
+      {children}
+    </div>
+  )
+}
 
 function targetFullscreen(ready: Extract<Ready, { kind: 'svg' | 'mermaid' }> | null, view: 'preview' | 'source'): boolean {
   return !!ready && view === 'preview'
@@ -371,13 +398,28 @@ function HtmlFrame({
   onHeightChange?: () => void
   onMeasured?: (height: number) => void
 }) {
+  const shellRef = useRef<HTMLDivElement>(null)
   const ref = useRef<HTMLIFrameElement>(null)
   const gov = useRef(createHeightGovernor({ max: PREVIEW_LIMITS.htmlMaxHeight }))
-  const [box, setBox] = useState({ height: 120, scroll: false })
+  const designW = PREVIEW_LIMITS.htmlDesignWidth
+  const maxVisual = PREVIEW_LIMITS.htmlInlineMaxHeight
+  const [contentH, setContentH] = useState(120)
+  const [availW, setAvailW] = useState<number>(designW)
 
   useEffect(() => {
     gov.current.reset()
-    setBox({ height: 120, scroll: false })
+    setContentH(120)
+  }, [srcdoc])
+
+  useEffect(() => {
+    const el = shellRef.current
+    if (!el) return
+    const sync = () => setAvailW(Math.max(1, el.clientWidth))
+    sync()
+    if (typeof ResizeObserver === 'undefined') return
+    const ro = new ResizeObserver(() => sync())
+    ro.observe(el)
+    return () => ro.disconnect()
   }, [srcdoc])
 
   useEffect(() => {
@@ -388,9 +430,13 @@ function HtmlFrame({
       const doc = frame.contentDocument
       if (!doc?.body) return
       const next = gov.current.observe(measureDocumentHeight(doc))
-      setBox(next)
-      onMeasured?.(next.height)
-      doc.documentElement.style.overflow = next.scroll ? 'auto' : 'hidden'
+      const scale = htmlInlineScale(shellRef.current?.clientWidth ?? availW, designW)
+      const visual = Math.min(maxVisual, Math.ceil(next.height * scale))
+      setContentH(next.height)
+      onMeasured?.(visual)
+      // 主滚动在外壳；iframe 内隐藏滚动，避免双重滚轮。
+      doc.documentElement.style.overflow = 'hidden'
+      if (doc.body) doc.body.style.overflow = 'hidden'
       onHeightChange?.()
     }
     const onLoad = () => {
@@ -407,21 +453,34 @@ function HtmlFrame({
       frame.removeEventListener('load', onLoad)
       ro?.disconnect()
     }
-  }, [srcdoc, onHeightChange, onMeasured])
+  }, [srcdoc, onHeightChange, onMeasured, availW, designW, maxVisual])
+
+  const scale = htmlInlineScale(availW, designW)
+  const scaledH = Math.ceil(contentH * scale)
+  const shellH = Math.min(maxVisual, scaledH)
 
   return (
     <div
-      className={`overflow-hidden bg-surface${box.scroll ? ' overflow-y-auto' : ''}`}
-      style={{ maxHeight: box.scroll ? PREVIEW_LIMITS.htmlMaxHeight : undefined }}
+      ref={shellRef}
+      data-html-inline-shell
+      className="w-full max-w-full overflow-x-hidden overflow-y-auto bg-surface"
+      style={{ maxHeight: maxVisual, height: shellH }}
     >
-      <iframe
-        ref={ref}
-        title="静态预览"
-        sandbox={HTML_PREVIEW_SANDBOX}
-        srcDoc={srcdoc}
-        className="block w-full border-0 bg-white"
-        style={{ height: box.height }}
-      />
+      <div style={{ width: designW * scale, height: scaledH, overflow: 'hidden' }}>
+        <iframe
+          ref={ref}
+          title="静态预览"
+          sandbox={HTML_PREVIEW_SANDBOX}
+          srcDoc={srcdoc}
+          className="block border-0 bg-white"
+          style={{
+            width: designW,
+            height: contentH,
+            transform: `scale(${scale})`,
+            transformOrigin: 'top left',
+          }}
+        />
+      </div>
     </div>
   )
 }

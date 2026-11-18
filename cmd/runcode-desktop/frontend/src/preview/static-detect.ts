@@ -14,9 +14,20 @@ export const PREVIEW_LIMITS = {
   mermaidEdges: 400,
   mermaidStatements: 600,
   perMessage: 6,
+  /** iframe 内容量高上限（防百分比高度反馈）；内联可视高度见 htmlInlineMaxHeight。 */
   htmlMaxHeight: 2400,
+  /** 对话内 HTML 预览外壳可视高度上限（px）；超出外层纵向滚动。 */
+  htmlInlineMaxHeight: 560,
+  /** 内联 HTML 按移动页设计宽等比缩放后铺满壳宽（可放大）。 */
+  htmlDesignWidth: 390,
   liveFrames: 4,
 } as const
+
+/** 内联 HTML 等比缩放：按壳宽铺满设计宽（可 >1），避免宽列右侧大块留白。 */
+export function htmlInlineScale(availableWidth: number, designWidth: number = PREVIEW_LIMITS.htmlDesignWidth): number {
+  if (!(availableWidth > 0) || !(designWidth > 0)) return 1
+  return availableWidth / designWidth
+}
 
 const HTML_LANGS = new Set(['html', 'htm', 'h5'])
 const SVG_LANGS = new Set(['svg', 'xml', 'svg+xml', 'image/svg+xml'])

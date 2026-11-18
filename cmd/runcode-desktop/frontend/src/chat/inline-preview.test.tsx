@@ -4,11 +4,19 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InlinePreview } from './inline-preview'
 import { InlinePreviewBudgetProvider } from './inline-preview-budget'
+import { PREVIEW_LIMITS, htmlInlineScale } from '@/preview/static-detect'
 
 const mermaid = vi.hoisted(() => ({ render: vi.fn() }))
+const bridge = vi.hoisted(() => ({
+  copyText: vi.fn(async (_text: string) => {}),
+}))
 vi.mock('@/preview/static-mermaid-loader', () => ({
   renderMermaid: (...args: unknown[]) => mermaid.render(...args),
 }))
+vi.mock('@/core/bridge', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/core/bridge')>()
+  return { ...actual, copyText: (text: string) => bridge.copyText(text) }
+})
 
 let host: HTMLDivElement
 let root: Root
@@ -225,7 +233,7 @@ describe('InlinePreview lifecycle', () => {
     expect(document.body.querySelector('[role="dialog"]')).toBeNull()
   })
 
-  it('单击 SVG 图面打开右侧代码预览，并使用唯一关联文件', async () => {
+  it('SVG／Mermaid 图面单击不再打开右侧预览；全屏仍可用；HTML 仍从标题进入', async () => {
     const open = vi.fn()
     await act(async () => {
       root.render(createElement(InlinePreview, {
@@ -239,16 +247,12 @@ describe('InlinePreview lifecycle', () => {
         onOpenCodePreview: open,
       }))
     })
-    await act(async () => (host.querySelector('img') as HTMLImageElement).click())
-    expect(open).toHaveBeenCalledWith(expect.objectContaining({
-      kind: 'file',
-      relPath: 'charts/a.svg',
-      ownerKey: 'file:S:charts/a.svg',
-    }))
-  })
+    const svgImg = host.querySelector('img') as HTMLImageElement
+    expect(svgImg.closest('button[title="在右侧预览打开"]')).toBeNull()
+    await act(async () => svgImg.click())
+    expect(open).not.toHaveBeenCalled()
+    expect(host.querySelector('button[title="全屏"]')).toBeTruthy()
 
-  it('Mermaid 和没有文件的 SVG 单击使用内存静态预览，HTML 从标题进入', async () => {
-    const open = vi.fn()
     mermaid.render.mockResolvedValue({
       ok: true,
       svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>',
@@ -269,11 +273,7 @@ describe('InlinePreview lifecycle', () => {
     })
     await act(async () => { await Promise.resolve() })
     await act(async () => (host.querySelector('img') as HTMLImageElement).click())
-    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({
-      kind: 'inline-static',
-      ownerKey: 'inline:S:m1:0:10',
-      sourceKind: 'mermaid',
-    }))
+    expect(open).not.toHaveBeenCalled()
 
     await act(async () => {
       root.render(createElement(InlinePreviewBudgetProvider, null,
@@ -452,5 +452,122 @@ describe('InlinePreview lifecycle', () => {
     expect(host.textContent).toContain('SOURCE')
     expect(host.textContent).toContain('未显示预览')
     expect(host.textContent).not.toContain('internal-stack-secret')
+  })
+
+  it('预览态无复制；源码态出现幽灵复制钮且写入原始 source', async () => {
+    bridge.copyText.mockClear()
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'svg', source: svgOk, defaultNode: createElement('code', null, 'SOURCE'),
+      }))
+    })
+    expect(host.querySelector('button[title="复制源码"]')).toBeNull()
+    expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent?.includes('复制'))).toBe(false)
+
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    const copyBtn = host.querySelector('button[title="复制源码"]') as HTMLButtonElement
+    expect(copyBtn).toBeTruthy()
+    expect(copyBtn.className).not.toMatch(/bg-ink/)
+    expect(copyBtn.className).toMatch(/text-muted/)
+    await act(async () => copyBtn.click())
+    expect(bridge.copyText).toHaveBeenCalledWith(svgOk)
+
+    mermaid.render.mockResolvedValue({
+      ok: true,
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>',
+      width: 20,
+      height: 10,
+    })
+    const mmd = 'flowchart LR\nA-->B'
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'mermaid', source: mmd, defaultNode: createElement('code', null, 'SOURCE'),
+      }))
+    })
+    await act(async () => { await Promise.resolve() })
+    // 同 root 重渲会保留 view state；先切回预览态再断言复制隐藏。
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示图表') as HTMLButtonElement).click())
+    expect(host.querySelector('button[title="复制源码"]')).toBeNull()
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    bridge.copyText.mockClear()
+    await act(async () => (host.querySelector('button[title="复制源码"]') as HTMLButtonElement).click())
+    expect(bridge.copyText).toHaveBeenCalledWith(mmd)
+
+    const html = '<!doctype html><html><body><p>页面</p></body></html>'
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html', source: html, defaultNode: createElement('code', null, 'SOURCE'),
+        }),
+      ))
+    })
+    await act(async () => { await Promise.resolve() })
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示页面') as HTMLButtonElement).click())
+    expect(host.querySelector('button[title="复制源码"]')).toBeNull()
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    bridge.copyText.mockClear()
+    await act(async () => (host.querySelector('button[title="复制源码"]') as HTMLButtonElement).click())
+    expect(bridge.copyText).toHaveBeenCalledWith(html)
+  })
+
+  it('源码视图限高并可显示折行，复制仍走原始 source', async () => {
+    bridge.copyText.mockClear()
+    const longLine = 'x'.repeat(200)
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'svg',
+        source: svgOk,
+        defaultNode: createElement('pre', null, longLine),
+      }))
+    })
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    const shell = host.querySelector('[data-inline-source-shell]') as HTMLElement
+    expect(shell).toBeTruthy()
+    expect(shell.className).toMatch(/overflow-y-auto/)
+    expect(shell.className).toMatch(/break-words|whitespace-pre-wrap|overflow-wrap/)
+    expect(shell.style.maxHeight || shell.className).toBeTruthy()
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('复制')) as HTMLButtonElement).click())
+    expect(bridge.copyText).toHaveBeenCalledWith(svgOk)
+  })
+
+  it('htmlInlineScale 按壳宽铺满设计宽（可 >1），窄宽度时缩小', () => {
+    expect(htmlInlineScale(390, 390)).toBe(1)
+    expect(htmlInlineScale(780, 390)).toBe(2)
+    expect(htmlInlineScale(195, 390)).toBe(0.5)
+    expect(PREVIEW_LIMITS.htmlInlineMaxHeight).toBeLessThan(PREVIEW_LIMITS.htmlMaxHeight)
+    expect(PREVIEW_LIMITS.htmlDesignWidth).toBeGreaterThanOrEqual(320)
+  })
+
+  it('HTML iframe 外壳使用内联限高与缩放标记', async () => {
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(private cb: IntersectionObserverCallback) {}
+      observe(el: Element) {
+        this.cb([{ isIntersecting: true, target: el } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+      }
+      unobserve() {}
+      disconnect() {}
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html',
+          source: '<!doctype html><html><body><p>页面</p></body></html>',
+          defaultNode: createElement('code', null, 'SOURCE'),
+        }),
+      ))
+    })
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    const shell = host.querySelector('[data-html-inline-shell]') as HTMLElement
+    expect(shell).toBeTruthy()
+    expect(shell.className).toMatch(/overflow-y-auto/)
+    expect(Number.parseInt(shell.style.maxHeight || '0', 10)).toBe(PREVIEW_LIMITS.htmlInlineMaxHeight)
+    expect(host.querySelector('iframe')).toBeTruthy()
   })
 })
