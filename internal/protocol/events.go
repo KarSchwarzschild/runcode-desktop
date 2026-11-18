@@ -39,4 +39,18 @@ const (
 	// 一个红色的"执行失败"——系统正在自动恢复,这一轮随后会被整个重跑。界面按
 	// ToolUseID 精确改写那一张卡片,不靠匹配错误文案(措辞一改匹配就静默失效)。
 	EventOABlocked = "oa:blocked"
+	// EventAutomationTaskChanged carries AutomationTaskChanged after a task
+	// row is persisted. The payload is omitted when its owner is no longer
+	// authorized. sessionId on the envelope stays empty.
+	EventAutomationTaskChanged = "automation:task_changed"
+	// EventAutomationRunChanged carries AutomationRunChanged after a run row
+	// is persisted.
+	EventAutomationRunChanged = "automation:run_changed"
+	// EventAutomationServiceChanged carries AutomationServiceChanged when the
+	// task store or background capability changes.
+	EventAutomationServiceChanged = "automation:service_changed"
+	// EventAutomationContextChanged carries AutomationContextChanged when the
+	// authorized owner set changes. It is sent before any later task content
+	// and does not include tasks.
+	EventAutomationContextChanged = "automation:context_changed"
 )

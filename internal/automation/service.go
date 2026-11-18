@@ -73,13 +73,28 @@ func (s *Service) Start(ctx context.Context) error {
 
 	now := s.clock.Now()
 	if err := s.store.Recover(ctx, now); err != nil {
+		s.abortStart()
 		return err
 	}
 	if err := s.reloadQueued(ctx, now); err != nil {
+		s.abortStart()
 		return err
 	}
 	go s.loop(ctx)
 	return nil
+}
+
+// abortStart undoes a Start that failed before the loop existed.
+// done is closed only by the loop, so Stop must not be used here.
+func (s *Service) abortStart() {
+	s.mu.Lock()
+	cancel := s.cancel
+	s.cancel = nil
+	s.started = false
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 func (s *Service) Stop() {
@@ -496,6 +511,12 @@ func (s *Service) claimDueIntoQueue(ctx context.Context, now time.Time) {
 		}
 		cs = append(cs, c)
 	}
+	if err := rows.Err(); err != nil {
+		return
+	}
+	if err := rows.Close(); err != nil {
+		return
+	}
 	for _, c := range cs {
 		s.mu.Lock()
 		busySame := s.active != nil && s.active.TaskID == c.id
@@ -688,6 +709,12 @@ func (s *Service) reloadQueued(ctx context.Context, now time.Time) error {
 			return err
 		}
 		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
 	}
 	for _, id := range ids {
 		run, err := s.store.getRun(ctx, id)

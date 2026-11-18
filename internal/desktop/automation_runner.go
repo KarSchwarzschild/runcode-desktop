@@ -55,7 +55,7 @@ func (r automationRunner) Start(ctx context.Context, task automation.Task, run a
 			return automation.Submission{}, err
 		}
 	}
-	a.installAutomationLease(sessionID, run.ID, created, profile)
+	a.installAutomationLease(sessionID, run.ID, created, profile, task.OwnerScope)
 	a.startMu.Unlock()
 
 	if automationAfterLease != nil {

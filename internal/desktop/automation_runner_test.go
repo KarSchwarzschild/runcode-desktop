@@ -490,7 +490,7 @@ func TestAutomationStoppedTurnEndNotSuccess(t *testing.T) {
 				t.Fatal(err)
 			}
 			run := waitAutomationRun(t, store, taskID, func(r automation.Run) bool { return r.Status == automation.RunQueued })
-			app.installAutomationLease(sessionID, run.ID, false, "")
+			app.installAutomationLease(sessionID, run.ID, false, "", "")
 			tc.emit(sessionID)
 			got := waitAutomationRun(t, store, taskID, func(r automation.Run) bool { return r.Status == tc.status })
 			if tc.reason != "" && got.Reason != tc.reason {

@@ -21,6 +21,7 @@ type automationLease struct {
 	Generation   int64
 	Created      bool
 	CodexProfile string
+	OwnerScope   string
 }
 
 type automationTerminal struct {
@@ -116,12 +117,12 @@ func (a *App) automationSubmit() automationSubmitRecord {
 	return a.auto.submit
 }
 
-func (a *App) installAutomationLease(sessionID, runID string, created bool, profile string) {
+func (a *App) installAutomationLease(sessionID, runID string, created bool, profile, owner string) {
 	a.auto.mu.Lock()
 	a.auto.initLocked()
 	a.auto.nextGen++
 	a.auto.leases[sessionID] = &automationLease{
-		RunID: runID, Generation: a.auto.nextGen, Created: created, CodexProfile: profile,
+		RunID: runID, Generation: a.auto.nextGen, Created: created, CodexProfile: profile, OwnerScope: owner,
 	}
 	a.auto.mu.Unlock()
 }

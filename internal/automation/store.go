@@ -50,6 +50,126 @@ func (s *Store) Close() error {
 	return s.db.Close()
 }
 
+// TaskForOwners returns a task only when its owner is in the allowed set.
+// A foreign id is ErrNotFound and the task body is not returned.
+func (s *Store) TaskForOwners(ctx context.Context, id string, owners []string) (Task, error) {
+	task, err := s.getTask(ctx, id)
+	if err != nil {
+		return Task{}, err
+	}
+	if !ownerAllowed(task.OwnerScope, owners) {
+		return Task{}, ErrNotFound
+	}
+	return task, nil
+}
+
+// TaskByClientRequest finds the task created by one client request id.
+func (s *Store) TaskByClientRequest(ctx context.Context, owner, clientRequestID string) (Task, error) {
+	return s.getTaskByClientRequest(ctx, owner, clientRequestID)
+}
+
+// TaskByClientRequestForOwners returns an already authorized task for a
+// client request id. A later model change must not create a second task.
+func (s *Store) TaskByClientRequestForOwners(ctx context.Context, clientRequestID string, owners []string) (Task, error) {
+	clientRequestID = strings.TrimSpace(clientRequestID)
+	if clientRequestID == "" || len(owners) == 0 {
+		return Task{}, ErrNotFound
+	}
+	clause, args := ownerPlaceholders(owners)
+	rows, err := s.db.QueryContext(ctx, `SELECT id FROM tasks WHERE client_request_id=? AND owner_scope IN `+clause+` ORDER BY created_at_utc, id`,
+		append([]any{clientRequestID}, args...)...)
+	if err != nil {
+		return Task{}, err
+	}
+	defer rows.Close()
+	var id string
+	if rows.Next() {
+		if err := rows.Scan(&id); err != nil {
+			return Task{}, err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return Task{}, err
+	}
+	if err := rows.Close(); err != nil {
+		return Task{}, err
+	}
+	if id == "" {
+		return Task{}, ErrNotFound
+	}
+	return s.getTask(ctx, id)
+}
+
+// RunForOwners returns a run only when its task owner is allowed.
+func (s *Store) RunForOwners(ctx context.Context, id string, owners []string) (Run, error) {
+	run, err := s.getRun(ctx, id)
+	if err != nil {
+		return Run{}, err
+	}
+	task, err := s.getTask(ctx, run.TaskID)
+	if err != nil {
+		return Run{}, err
+	}
+	if !ownerAllowed(task.OwnerScope, owners) {
+		return Run{}, ErrNotFound
+	}
+	return run, nil
+}
+
+// LinkForOwners returns the session link for a task and session.
+// Zero or several rows are ErrNotFound so the caller cannot guess a workspace.
+func (s *Store) LinkForOwners(ctx context.Context, taskID, sessionID string, owners []string) (SessionLink, error) {
+	if strings.TrimSpace(taskID) == "" || strings.TrimSpace(sessionID) == "" || len(owners) == 0 {
+		return SessionLink{}, ErrNotFound
+	}
+	clause, args := ownerPlaceholders(owners)
+	q := `SELECT owner_scope, workspace, session_id, task_id, task_name FROM session_links
+		WHERE task_id=? AND session_id=? AND owner_scope IN ` + clause
+	rows, err := s.db.QueryContext(ctx, q, append([]any{taskID, sessionID}, args...)...)
+	if err != nil {
+		return SessionLink{}, err
+	}
+	defer rows.Close()
+	var found []SessionLink
+	for rows.Next() {
+		var link SessionLink
+		if err := rows.Scan(&link.OwnerScope, &link.Workspace, &link.SessionID, &link.TaskID, &link.TaskName); err != nil {
+			return SessionLink{}, err
+		}
+		found = append(found, link)
+	}
+	if err := rows.Err(); err != nil {
+		return SessionLink{}, err
+	}
+	if len(found) != 1 {
+		return SessionLink{}, ErrNotFound
+	}
+	return found[0], nil
+}
+
+// HasUnfinishedRun reports a queued or active run for the task.
+func (s *Store) HasUnfinishedRun(ctx context.Context, taskID string) (bool, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE task_id=? AND status IN (?,?,?,?)`,
+		taskID, RunQueued, RunSubmitting, RunRunning, RunWaitingPermission).Scan(&n)
+	return n > 0, err
+}
+
+func ownerPlaceholders(owners []string) (string, []any) {
+	args := make([]any, 0, len(owners))
+	var b strings.Builder
+	b.WriteByte('(')
+	for i, owner := range owners {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		b.WriteByte('?')
+		args = append(args, owner)
+	}
+	b.WriteByte(')')
+	return b.String(), args
+}
+
 func (s *Store) CreateTask(ctx context.Context, task Task) (Task, error) {
 	if task.ID == "" || task.OwnerScope == "" || task.ClientRequestID == "" {
 		return Task{}, fmt.Errorf("automation: task id/owner/clientRequestId required")

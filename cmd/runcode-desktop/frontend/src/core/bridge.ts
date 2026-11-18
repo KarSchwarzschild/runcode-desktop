@@ -9,6 +9,9 @@
 // the Wails runtime directly, and runtime access stays here + in the generated
 // events module.
 
+import { onEnvelope as onCoreEnvelope, type EventMap } from './protocol/events'
+import type { AutomationEventSource, Envelope as WireEnvelope } from './protocol/types'
+
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
   ConversationInfo as SessionInfo,
@@ -105,8 +108,21 @@ export { Events, ToolEventTypes, Decisions, ErrCodes, PlanStages, PlanStates, Sk
 export type { PassportTenant } from './protocol/types'
 
 // ---- events (generated; unwraps the Envelope exactly like the old helpers) ----
-export { onEvent, onEnvelope } from './protocol/events'
-export type { EventMap } from './protocol/events'
+// onEnvelope is wrapped so automation runs can carry AutomationEventSource
+// beside the Core envelope. sessionId, seq, and payload stay the generated wire.
+export { onEvent } from './protocol/events'
+export type { EventMap }
+
+export type DesktopEnvelope<P> = WireEnvelope<P> & { automationSource?: AutomationEventSource }
+
+export function onEnvelope<K extends keyof EventMap>(
+  event: K,
+  handler: (data: DesktopEnvelope<EventMap[K]>) => void,
+): () => void {
+  return onCoreEnvelope(event, (data) => {
+    handler(data as DesktopEnvelope<EventMap[K]>)
+  })
+}
 
 // ---- commands (generated; same lowerCamel names the old helpers used) ---------
 export {
@@ -376,3 +392,18 @@ export type {
   UsageRowQuality, UsageRequestRow, UsageRequestsPage, UsageDimensionRow, UsageDimensionsPage,
 } from './protocol/types'
 export { getUsageOverview, getUsageRequests, getUsageDimensions } from './protocol/commands'
+
+// ---- 自动化任务：命令与类型都来自生成协议；页面只从这里调用 ----------------------
+export type {
+  AutomationBindingSummary, AutomationContext, AutomationContextChanged, AutomationConversationResult,
+  AutomationDefaults, AutomationEventSource, AutomationModelSummary, AutomationOrigin, AutomationRun,
+  AutomationRunChanged, AutomationRunPage, AutomationSchedule, AutomationServiceChanged, AutomationSessionResult,
+  AutomationTask, AutomationTaskChanged, AutomationTaskDraft, AutomationTaskPage, AutomationTaskResult,
+  CreateAutomationTaskRequest, ListAutomationRunsRequest, ListAutomationTasksRequest, OpenAutomationSessionRequest,
+  SessionAutomationRunsRequest, SetAutomationTaskPausedRequest, UpdateAutomationTaskRequest,
+} from './protocol/types'
+export {
+  getAutomationDefaults, listAutomationTasks, createAutomationTask, updateAutomationTask,
+  setAutomationTaskPaused, listAutomationRuns, listSessionAutomationRuns, getAutomationConversation,
+  openAutomationSession, closeMainWindow, requestAppExit,
+} from './protocol/commands'

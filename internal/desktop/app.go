@@ -273,6 +273,8 @@ type App struct {
 	usageStore *localusage.Store
 	// auto 是自动化任务的会话租约。Emit 只往这里记事实；关会话在独立 worker。
 	auto automationHost
+	// autoCtl 是任务库可用性和身份代际。它和 auto 分开，避免在主机发射锁里做存储 IO。
+	autoCtl autoCtl
 }
 
 // New returns an App that emits events to sink. Session events are enveloped
@@ -322,6 +324,7 @@ func newWithBuild(sink EventSink, build host.BuildFunc) *App {
 		a.mu.Lock()
 		a.passportUser = nil
 		a.mu.Unlock()
+		a.noteAutomationIdentity()
 		a.sink.Emit(EventPassportChanged, PassportStatus{})
 	})
 	a.tokens.loadPersisted()
@@ -408,6 +411,8 @@ func (a *App) Startup() {
 	if err := a.initLocalUsage(); err != nil {
 		debugLog("local usage init: %v", err)
 	}
+	// 自动化任务库失败不阻断聊天。New 不做这件事，避免测试和工具构造 App 时写库。
+	a.initAutomation()
 }
 
 // hostSinkAdapter forwards host envelopes to the shell sink under the
@@ -430,11 +435,13 @@ func (s hostSinkAdapter) Emit(env protocol.Envelope) {
 	}
 	// 自动化事实只进内存队列。这里不能写库，也不能关会话：Emit 持有主机的
 	// 会话发射锁，堵住就会把整条会话的事件停住。
+	// 终态观察会删掉租约，所以外发包装必须先把租约抄出来。
+	lease, leased := s.app.automationLease(env.SessionID)
 	s.app.observeAutomationEnvelope(env)
 	// Record the turn lifecycle to the diagnostic log before forwarding, so a turn
 	// that fails or ends empty is traceable even when nothing renders in the UI.
 	logEnvelope(env)
-	s.app.out.Emit(env.Event, env)
+	s.app.forwardAutomationEnvelope(env, lease, leased)
 }
 
 // noteTurnDone clears the in-flight mirror when a session's turn finishes

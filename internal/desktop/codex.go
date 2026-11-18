@@ -385,6 +385,7 @@ func (a *App) CodexAwaitLogin() (CodexStatus, error) {
 		return CodexStatus{}, wireError(err)
 	}
 	a.codex.Set(tokens)
+	a.noteAutomationIdentity()
 	return a.codex.Status(), nil
 }
 
@@ -424,6 +425,7 @@ func (a *App) CodexModels() ([]CodexModel, error) {
 // CodexLogout 退出 ChatGPT 账号：清空并删掉落盘令牌。
 func (a *App) CodexLogout() CodexStatus {
 	a.codex.Clear()
+	a.noteAutomationIdentity()
 	return a.codex.Status()
 }
 

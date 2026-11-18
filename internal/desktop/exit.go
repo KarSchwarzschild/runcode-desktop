@@ -50,6 +50,7 @@ func (a *App) PrepareExit(limit time.Duration) bool {
 				debugLog("exit: close sessions: %v", err)
 			}
 			wg.Wait()
+			a.stopAutomation(ctx)
 			if err == nil {
 				a.closeLocalUsage()
 			}

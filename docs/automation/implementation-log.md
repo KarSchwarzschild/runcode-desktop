@@ -88,3 +88,33 @@ Notes:
 - Not accepted here: a real Passport, Codex, or OA round trip, or the Windows race detector.
 
 Next: Step 5 command facade and protocol.
+
+## Step 5 — desktop commands and events
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): expose scoped task commands and events` |
+| Tests | `go test ./internal/desktop ./internal/automation ./internal/protocol -count=1` → PASS (`desktop` 45.952s, `automation` 1.398s, `protocol` no test files) |
+| Protocol | `go run ./tools/protogen` then `go run ./tools/protogen --check` → PASS |
+| Frontend | `npm run typecheck` in `cmd/runcode-desktop/frontend` → PASS |
+| Race | Not run. Step 2 `-race` on this Windows toolchain exits `0xc0000139`. This step does not claim a race PASS. |
+| Files | `internal/desktop/{automation,automation_test,app,exit,passport,codex,protocol_aliases,automation_lease,automation_runner,automation_runner_test}.go`; `internal/protocol/{automation,commands,events,session,conversation}.go`; `internal/automation/{store,service}.go`; `tools/protogen/extract.go`; generated `frontend/src/core/protocol/{types,commands,events}.ts`; `frontend/src/core/bridge.ts` |
+
+Notes:
+
+- `New` does not open the task database. `Startup` opens `UserConfigDir/runcode/automation/<AppProduct()>/automations.sqlite3`, then Recover and Service.Start. A bad product segment or open/start failure leaves chat usable and `defaults.available=false` with a reason that does not include the path. `PrepareExit` stops the service before closing the store. `HoldAdmission`, `PrepareShutdown`, and `ExitSummary` stay reachable for Step 10.
+- The authorized owner set is host-computed. A non-empty client `ownerScope` is rejected. Local static/Codex API-key tasks stay on `local:<product>:<user hash>` when the selected model changes. Passport and Codex OAuth owners join the set only with a subject (and, for Passport, a tenant and bridge). The same subject with a new `jti` does not bump the epoch. Login, logout, and tenant change bump the epoch and emit `automation:context_changed` before later content.
+- `defaults.bindingVersion` is an in-memory stamp of the current binding digest and static credential revision. The value stored on the task stays schema `BindingVersion` 1, because run validation requires that constant. Create checks an existing `clientRequestId` across still-authorized owners before it checks the stamp, so a later key change returns the original task instead of creating a second one.
+- Data commands re-check the context after an optional pre-return hook. Task and run events are emitted only after persist, and only while that owner is still authorized. Host envelopes keep Core `seq` and payload. `automationSource.context` is the context at emit time. An unauthorized lease still finishes internally and is not forwarded. Process automation events use an empty `sessionId`.
+- `GetAutomationConversation` does not change focus. A busy or not-ready live session returns `historyPending=true` and `blocks=[]`. An idle in-manager session is read under `WithIdleSession` and passed through `IdentifyQuestions`. A missing transcript is `not_found`. `OpenAutomationSession` on a live session only focuses it. A closed session is resumed from the session link's workspace.
+- Successful create records the workspace with `mergeRecentWorkspaces` and `updateRawConfig` only. It does not change CWD, Resume, or the connection. If that write fails, the task remains and the result warning says the directory history was not updated.
+- SQLite uses one connection. Listing ids and then loading each row while that result set was still open deadlocked `TaskByClientRequestForOwners`, `claimDueIntoQueue`, and `reloadQueued`. Those paths now close the rows before the follow-up query.
+- `bridge.onEnvelope` returns `DesktopEnvelope<P>`. Generated `events.ts` still delivers the Core `Envelope`. Pages call the new commands through `bridge`, not `Call.ByName`.
+
+Deferred:
+
+- Step 6 fills `OpenSessionInfo` / `SessionSummary` / `ConversationInfo.automation` from `session_link` and projects execution cards. Step 5 only adds the optional field. Kind stays `agent`.
+- Step 10 supplies the Windows `WindowController`, tray, and confirm-exit. A nil controller returns `automation_unavailable`. `BackgroundSupported` stays false.
+- No real Passport, Codex, or OA round trip. No race-detector PASS.
+
+Next: Step 6 execution cards, history projection, and cross-workspace open.

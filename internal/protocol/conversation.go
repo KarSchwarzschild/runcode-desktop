@@ -22,4 +22,6 @@ type ConversationInfo struct {
 	// PreviewBaseURL is the loopback static-server root for previewing workspace
 	// files (empty if the server could not start). e.g. "http://127.0.0.1:52713/".
 	PreviewBaseURL string `json:"previewBaseURL"`
+	// Automation 是可选的时钟来源。缺省表示普通会话，Kind 保持原值。
+	Automation *AutomationOrigin `json:"automation,omitempty"`
 }

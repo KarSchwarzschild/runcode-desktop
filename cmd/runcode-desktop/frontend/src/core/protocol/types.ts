@@ -13,6 +13,10 @@ export const Events = {
   AskpassRequest: 'askpass:request',
   AssistantDelta: 'assistant:delta',
   AssistantThinking: 'assistant:thinking',
+  AutomationContextChanged: 'automation:context_changed',
+  AutomationRunChanged: 'automation:run_changed',
+  AutomationServiceChanged: 'automation:service_changed',
+  AutomationTaskChanged: 'automation:task_changed',
   ContextCompaction: 'context:compaction',
   ContextUsage: 'context:usage',
   DirectoryAccessChanged: 'directory:changed',
@@ -68,6 +72,11 @@ export type Decision = (typeof Decisions)[keyof typeof Decisions] | (string & {}
 
 // Mirrors the protocol.ErrCode* constants. Error codes carried by protocol.Error; clients switch on code.
 export const ErrCodes = {
+  AutomationBindingInvalid: 'automation_binding_invalid',
+  AutomationConflict: 'automation_conflict',
+  AutomationContextChanged: 'automation_context_changed',
+  AutomationTaskActive: 'automation_task_active',
+  AutomationUnavailable: 'automation_unavailable',
   Busy: 'busy',
   Internal: 'internal',
   InvalidArgument: 'invalid_argument',
@@ -257,6 +266,176 @@ export interface AssistantDelta {
   text: string;
 }
 
+// Mirrors protocol.AutomationBindingSummary. AutomationBindingSummary is the desensitized frozen connection.
+export interface AutomationBindingSummary {
+  modelKind: string;
+  modelName: string;
+  bridge?: string;
+  tenantId?: string;
+  permissionMode?: string;
+  bindingVersion: number;
+}
+
+// Mirrors protocol.AutomationContext. AutomationContext is the opaque view id plus the process identity epoch.
+export interface AutomationContext {
+  viewId: string;
+  epoch: number;
+}
+
+// Mirrors protocol.AutomationContextChanged. AutomationContextChanged is the payload of automation:context_changed.
+export interface AutomationContextChanged {
+  context: AutomationContext;
+}
+
+// Mirrors protocol.AutomationConversationResult. AutomationConversationResult is a read-only history fetch.
+export interface AutomationConversationResult {
+  context: AutomationContext;
+  workspace: string;
+  sessionId: string;
+  blocks: ResumedBlock[] | null;
+  historyPending: boolean;
+}
+
+// Mirrors protocol.AutomationDefaults. AutomationDefaults is the context bootstrap.
+export interface AutomationDefaults {
+  context: AutomationContext;
+  available: boolean;
+  unavailableReason?: string;
+  recentWorkspaces: string[] | null;
+  model: AutomationModelSummary;
+  permissionMode?: string;
+  backgroundSupported: boolean;
+  bindingVersion: number;
+}
+
+// Mirrors protocol.AutomationEventSource. AutomationEventSource marks a host envelope that belongs to a leased run.
+export interface AutomationEventSource {
+  context: AutomationContext;
+  runId: string;
+  leaseGeneration: number;
+}
+
+// Mirrors protocol.AutomationModelSummary. AutomationModelSummary is the model the create form is bound to.
+export interface AutomationModelSummary {
+  kind?: string;
+  name?: string;
+  permissionMode?: string;
+  bridge?: string;
+  tenantId?: string;
+}
+
+// Mirrors protocol.AutomationOrigin. AutomationOrigin is the optional clock source on a chat session DTO.
+export interface AutomationOrigin {
+  taskId: string;
+  taskName: string;
+}
+
+// Mirrors protocol.AutomationRun. AutomationRun is one occurrence.
+export interface AutomationRun {
+  id: string;
+  taskId: string;
+  taskRevision: number;
+  runRevision: number;
+  status: string;
+  reason?: string;
+  sessionId?: string;
+  questionId?: string;
+  scheduledAtUTC: string;
+  startedAtUTC?: string;
+  finishedAtUTC?: string;
+  summary?: string;
+  missedCount?: number;
+  name?: string;
+  prompt?: string;
+  workspace?: string;
+  executionMode?: string;
+  schedule: AutomationSchedule;
+}
+
+// Mirrors protocol.AutomationRunChanged. AutomationRunChanged is the payload of automation:run_changed.
+export interface AutomationRunChanged {
+  context: AutomationContext;
+  run: AutomationRun;
+}
+
+// Mirrors protocol.AutomationRunPage. AutomationRunPage is one run page.
+export interface AutomationRunPage {
+  context: AutomationContext;
+  items: AutomationRun[] | null;
+  nextCursor?: string;
+}
+
+// Mirrors protocol.AutomationSchedule. AutomationSchedule is the user-facing time rule.
+export interface AutomationSchedule {
+  mode: string;
+  timeZone: string;
+  startDate: string;
+  timeOfDay: string;
+  weekdays?: number[] | null;
+  monthDay?: number;
+  interval?: number;
+}
+
+// Mirrors protocol.AutomationServiceChanged. AutomationServiceChanged is the payload of automation:service_changed.
+export interface AutomationServiceChanged {
+  context: AutomationContext;
+  available: boolean;
+  backgroundSupported: boolean;
+  reason?: string;
+}
+
+// Mirrors protocol.AutomationSessionResult. AutomationSessionResult focuses a linked session.
+export interface AutomationSessionResult {
+  context: AutomationContext;
+  session: ResumedSession;
+  historyPending: boolean;
+}
+
+// Mirrors protocol.AutomationTask. AutomationTask is the desensitized task snapshot.
+export interface AutomationTask {
+  id: string;
+  revision: number;
+  name: string;
+  prompt: string;
+  workspace: string;
+  executionMode: string;
+  schedule: AutomationSchedule;
+  state: string;
+  nextRunAtUTC?: string;
+  blockedReason?: string;
+  lastRun?: AutomationRun;
+  binding: AutomationBindingSummary;
+}
+
+// Mirrors protocol.AutomationTaskChanged. AutomationTaskChanged is the payload of automation:task_changed.
+export interface AutomationTaskChanged {
+  context: AutomationContext;
+  task: AutomationTask;
+}
+
+// Mirrors protocol.AutomationTaskDraft. AutomationTaskDraft is the editable create/update body.
+export interface AutomationTaskDraft {
+  name: string;
+  prompt: string;
+  workspace: string;
+  executionMode: string;
+  schedule: AutomationSchedule;
+}
+
+// Mirrors protocol.AutomationTaskPage. AutomationTaskPage is one page.
+export interface AutomationTaskPage {
+  context: AutomationContext;
+  items: AutomationTask[] | null;
+  nextCursor?: string;
+}
+
+// Mirrors protocol.AutomationTaskResult. AutomationTaskResult is one task plus the context it was read under.
+export interface AutomationTaskResult {
+  context: AutomationContext;
+  task: AutomationTask;
+  warning?: string;
+}
+
 // Mirrors protocol.CodexDeviceCode. CodexDeviceCode 是发起登录后要展示给用户的东西：把 UserCode 显示出来，让他在 VerificationURL 那个页面里输入。ExpiresAt 之后这串码作废，要重新发起。
 export interface CodexDeviceCode {
   userCode: string;
@@ -327,6 +506,16 @@ export interface ConversationInfo {
   outputPricePerMTok: number;
   pricingSource: string;
   previewBaseURL: string;
+  automation?: AutomationOrigin;
+}
+
+// Mirrors protocol.CreateAutomationTaskRequest. CreateAutomationTaskRequest creates one task.
+export interface CreateAutomationTaskRequest {
+  context: AutomationContext;
+  clientRequestId: string;
+  expectedBindingVersion: number;
+  draft: AutomationTaskDraft;
+  ownerScope?: string;
 }
 
 // Mirrors protocol.CustomModel. CustomModel 是用户自定义的直连模型接入点，与通行证平台模型并列显示在模型 选择器里。Provider 通常是引擎 provider registry 的名称（openai/ openai-responses/anthropic），由 llm.IsRegistered 校验而非本仓库的名单；旧配置 没有该字段时由桌面端按 openai 兼容处理。 唯一的例外是 "codex"：它是**外壳层**的服务商，引擎注册表里没有这个名字。 桌面端在解析时把它翻译成 openai-responses（Codex 说的就是 Responses 协议）， 并把 Base URL 指向本地那个负责补凭据与指纹头的小代理，见 internal/codexproxy。密钥字段仅用于桌面端持久化， ListCustomModels 对外返回时必须清空，只通过 HasAPIKey 暴露是否已配置。
@@ -340,6 +529,7 @@ export interface CustomModel {
   authMode?: string;
   apiKey?: string;
   apiKeyProtected?: string;
+  credentialRevision?: number;
 }
 
 // Mirrors protocol.DirectoryAccessChanged. DirectoryAccessChanged 使某一工作区的目录视图失效。
@@ -484,6 +674,25 @@ export interface Info {
   appVersion?: string;
 }
 
+// Mirrors protocol.ListAutomationRunsRequest. ListAutomationRunsRequest lists one task's runs, newest first.
+export interface ListAutomationRunsRequest {
+  context: AutomationContext;
+  taskId: string;
+  cursor?: string;
+  limit?: number;
+  ownerScope?: string;
+}
+
+// Mirrors protocol.ListAutomationTasksRequest. ListAutomationTasksRequest lists tasks in the host-injected owner set.
+export interface ListAutomationTasksRequest {
+  context: AutomationContext;
+  state?: string;
+  query?: string;
+  cursor?: string;
+  limit?: number;
+  ownerScope?: string;
+}
+
 // Mirrors protocol.MCPServerInfo. MCPServerInfo is one configured MCP server plus its live connection state, for the UI's MCP management page.
 export interface MCPServerInfo {
   name: string;
@@ -596,6 +805,14 @@ export interface OABlocked {
   localModel: string;
 }
 
+// Mirrors protocol.OpenAutomationSessionRequest. OpenAutomationSessionRequest addresses a run through its task.
+export interface OpenAutomationSessionRequest {
+  context: AutomationContext;
+  taskId: string;
+  runId: string;
+  ownerScope?: string;
+}
+
 // Mirrors protocol.OpenSessionInfo. OpenSessionInfo 描述**此刻开着**的一条会话，供界面画会话列表。 与 SessionSummary 的分工：那个是工作区里**存下来**的历史会话（标题、时间、 回合数），这个是当前进程里活着的会话。界面上是两栏：「打开中」与「历史」。 只带后端独有的事实。标题走 session:renamed 事件与 SessionSummary，待审批数在 前端的授权队列里——都不必在这里重复一遍，重复就会出现两个版本互相矛盾。
 export interface OpenSessionInfo {
   kind?: string;
@@ -603,6 +820,7 @@ export interface OpenSessionInfo {
   workspace: string;
   running: boolean;
   focused: boolean;
+  automation?: AutomationOrigin;
 }
 
 // Mirrors protocol.OutputLine. OutputLine is a single sanitized, bounded line of tool output for UI display.
@@ -998,6 +1216,16 @@ export interface SecretStorage {
   fix?: string;
 }
 
+// Mirrors protocol.SessionAutomationRunsRequest. SessionAutomationRunsRequest lists runs linked to one workspace session.
+export interface SessionAutomationRunsRequest {
+  context: AutomationContext;
+  workspace: string;
+  sessionId: string;
+  cursor?: string;
+  limit?: number;
+  ownerScope?: string;
+}
+
 // Mirrors protocol.SessionImageGenerationView. SessionImageGenerationView 是单会话开关视图。Enabled 是用户选择；Available 表示下一回合能否真正生成，不能时带 Reason。
 export interface SessionImageGenerationView {
   sessionId: string;
@@ -1038,6 +1266,16 @@ export interface SessionSummary {
   title: string;
   when: string;
   turns: number;
+  automation?: AutomationOrigin;
+}
+
+// Mirrors protocol.SetAutomationTaskPausedRequest. SetAutomationTaskPausedRequest sets the paused bit.
+export interface SetAutomationTaskPausedRequest {
+  context: AutomationContext;
+  taskId: string;
+  expectedRevision: number;
+  paused: boolean;
+  ownerScope?: string;
 }
 
 // Mirrors protocol.SetPlatformImageCapabilityRequest. SetPlatformImageCapabilityRequest updates one override; nil removes it.
@@ -1226,6 +1464,15 @@ export interface TurnError {
 
 // Mirrors protocol.TurnQueued. TurnQueued announces that a submitted turn is waiting for a concurrency slot.
 export interface TurnQueued {
+}
+
+// Mirrors protocol.UpdateAutomationTaskRequest. UpdateAutomationTaskRequest replaces the editable fields.
+export interface UpdateAutomationTaskRequest {
+  context: AutomationContext;
+  taskId: string;
+  expectedRevision: number;
+  draft: AutomationTaskDraft;
+  ownerScope?: string;
 }
 
 // Mirrors protocol.UpdateInfo. UpdateInfo 是更新器的完整状态，也是唯一的对外形状。 它同时是 UpdateStatus()（纯读，不联网）的返回值和 EventUpdate 的载荷：读一次拿到 的东西和后续推送过来的东西是同一种，前端不必为「初始态」和「更新态」写两套解析。

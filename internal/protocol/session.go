@@ -73,6 +73,8 @@ type OpenSessionInfo struct {
 	Running bool `json:"running"`
 	// Focused 表示它是当前看得见的那条。
 	Focused bool `json:"focused"`
+	// Automation 是可选的时钟来源。缺省表示普通会话，Kind 保持原值。
+	Automation *AutomationOrigin `json:"automation,omitempty"`
 }
 
 // SessionSummary describes a saved session for the sidebar's recent list.
@@ -82,6 +84,8 @@ type SessionSummary struct {
 	Title string `json:"title"`
 	When  string `json:"when"`
 	Turns int    `json:"turns"`
+	// Automation 是可选的时钟来源。缺省表示普通历史，Kind 保持原值。
+	Automation *AutomationOrigin `json:"automation,omitempty"`
 }
 
 // ResumedBlock is one rendered item of a reopened conversation. Its kinds mirror
