@@ -42,4 +42,23 @@ npm 11.19.0
 | `npm run lint` (frontend) | PASS |
 | `npm test` (vitest) | **1 fail / 902 pass** — `inline-file-preview.test.tsx` expects img click → open side preview (known stale vs `59cb3ee`; not part of automation). Logs in `_baseline/` |
 
-Step 0 complete. Next: Step 1 schedule types.
+Step 0 complete.
+
+## Step 1 — schedule
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): add validated schedule calculation` |
+| Tests | `go test ./internal/automation -run 'TestNextOccurrence|TestScheduleDST|TestValidateSchedule|TestCountOccurrencesBounded' -count=1` → PASS |
+| Files | `internal/automation/{types,schedule,schedule_test}.go` |
+
+## Step 2 — store
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): persist tasks runs and session links` |
+| Tests | `go test ./internal/automation -run TestStore -count=1` → PASS |
+| Race | `go test -race` failed with Windows `0xc0000139` (toolchain DLL); non-race suite green |
+| Files | `internal/automation/{errors,store_types,migrations,store,store_test}.go` |
+
+Next: Step 3 scheduler service.
