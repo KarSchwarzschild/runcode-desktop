@@ -2,8 +2,9 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import type { Block } from './blocks'
 import {
-  formatImageGenerationNote, loadImageGenerationNoteMap, rehydrateAssistantNotes,
-  saveImageGenerationNote, stampTurnAssistantNote, UNFIXED_SIZE_LABEL, questionIdForUserBlock,
+  displayImageGenerationSizeLabel, formatImageGenerationNote, loadImageGenerationNoteMap,
+  rehydrateAssistantNotes, saveImageGenerationNote, scrubImageGenerationAssistantText,
+  stampTurnAssistantNote, UNFIXED_SIZE_LABEL, questionIdForUserBlock,
 } from './image-generation-note'
 
 const asst = (id: string, patch: Partial<Extract<Block, { kind: 'assistant' }>> = {}): Block => ({
@@ -16,11 +17,18 @@ describe('formatImageGenerationNote', () => {
     expect(formatImageGenerationNote({ modelName: '', size: '' })).toEqual({
       modelLabel: '未设置', sizeLabel: UNFIXED_SIZE_LABEL,
     })
+    expect(UNFIXED_SIZE_LABEL).toBe('不固定尺寸')
   })
   it('keeps fixed size literal', () => {
     expect(formatImageGenerationNote({ modelName: 'img-a', size: '1024x1024' })).toEqual({
       modelLabel: 'img-a', sizeLabel: '1024x1024',
     })
+  })
+  it('display strips legacy outbound-size footnote', () => {
+    expect(displayImageGenerationSizeLabel('不固定尺寸（未指定时出站补最小正方形）')).toBe('不固定尺寸')
+  })
+  it('scrubs desktop preview boilerplate', () => {
+    expect(scrubImageGenerationAssistantText('已生成，已在桌面预览中打开。继续')).toBe('已生成。继续')
   })
 })
 

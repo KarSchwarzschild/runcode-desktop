@@ -17,7 +17,7 @@ const REVEAL_FALLBACK_MS = 700
 
 export type PreviewDisplaySize = { width: number; height: number; provisional: boolean }
 
-/** 等比缩放：Wcap=min(480,C) Hcap=min(360,0.42×vh)，不放大小图。 */
+/** 等比缩放：Wcap=min(480,C) Hcap=min(480,0.55×vh)，正方形可到 480；不放大小图。 */
 export function computePreviewDisplaySize(
   naturalW: number,
   naturalH: number,
@@ -28,7 +28,7 @@ export function computePreviewDisplaySize(
   const h = Math.max(1, naturalH)
   const C = Math.max(1, containerW)
   const Wcap = Math.min(480, C)
-  const Hcap = Math.min(360, 0.42 * Math.max(1, viewportH))
+  const Hcap = Math.min(480, 0.55 * Math.max(1, viewportH))
   const s = Math.min(1, Wcap / w, Hcap / h)
   return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)), provisional: false }
 }
@@ -165,7 +165,6 @@ export function GeneratedImagePreview({
   const hint = parseSizeHint(tool)
   const naturalW = image?.width || hint?.w || 1024
   const naturalH = image?.height || hint?.h || 1024
-  const provisional = !image?.width || !image?.height
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
   const display = computePreviewDisplaySize(naturalW, naturalH, boxW, vh)
   const title = running ? '预览图片' : `预览 ${basename(path) || 'image.png'}`
@@ -323,9 +322,6 @@ export function GeneratedImagePreview({
           <Icon name="chevron-down" size={12} className={collapsed ? '-rotate-90 transition' : 'transition'} />
           {title}
         </button>
-        {provisional && running ? (
-          <span className="text-[11px] text-faint">尺寸待确定</span>
-        ) : null}
       </div>
       {!collapsed ? <div className="mt-3" aria-labelledby={titleId}>{body}</div> : null}
     </div>

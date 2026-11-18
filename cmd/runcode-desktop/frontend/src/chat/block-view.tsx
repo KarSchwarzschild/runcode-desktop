@@ -18,6 +18,10 @@ import { BotRow } from './bot-row'
 import { AgentTaskCard } from './agent-task'
 import { ExecutionCard } from './execution-card'
 import { RecordingCard } from './recorder-card'
+import {
+  displayImageGenerationSizeLabel,
+  scrubImageGenerationAssistantText,
+} from './image-generation-note'
 
 export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings, sessionId }: {
   textOnly?: boolean
@@ -87,7 +91,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                     resolveFile={resolveFile}
                     onContentHeightChange={onContentHeightChange}
                   >
-                    {block.text}
+                    {scrubImageGenerationAssistantText(block.text)}
                   </AssistantMarkdown>
                 )}
                 {block.streaming && <span className="caret">▍</span>}
@@ -98,7 +102,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                 <span>
                   当前使用的生图模型：{block.imageGenerationNote.modelLabel}
                   {' · '}
-                  生图尺寸：{block.imageGenerationNote.sizeLabel}
+                  生图尺寸：{displayImageGenerationSizeLabel(block.imageGenerationNote.sizeLabel)}
                 </span>
                 {onOpenImageGenerationSettings ? (
                   <button type="button" onClick={onOpenImageGenerationSettings} className="text-primary hover:underline cursor-pointer bg-transparent border-0 p-0 text-[12px]">

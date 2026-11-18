@@ -29,10 +29,21 @@ it('shows frozen imagegen footnote on completed assistant replies only', () => {
   const note = { modelLabel: 'img-a', sizeLabel: '不固定尺寸（未指定时出站补最小正方形）' }
   const done = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a1', text: '好的', streaming: false, ts: '', imageGenerationNote: note }} onOpenImageGenerationSettings={() => {}} />)
   expect(done).toContain('当前使用的生图模型：img-a')
-  expect(done).toContain('生图尺寸：')
+  expect(done).toContain('生图尺寸：不固定尺寸')
+  expect(done).not.toContain('未指定时出站补最小正方形')
   expect(done).toContain('修改生图设置')
   const streaming = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a2', text: '好', streaming: true, ts: '', imageGenerationNote: note }} />)
   expect(streaming).not.toContain('修改生图设置')
+})
+
+it('strips desktop-preview boilerplate from assistant text', () => {
+  const html = renderToStaticMarkup(<BlockView block={{
+    kind: 'assistant', id: 'a1',
+    text: '已生成一只可爱的猫咪照片（2048×2048），已在桌面预览中打开。\n图片已保存到工作区。',
+    streaming: false, ts: '',
+  }} />)
+  expect(html).toContain('已生成一只可爱的猫咪照片（2048×2048）。')
+  expect(html).not.toContain('已在桌面预览中打开')
 })
 
 describe('retry notice', () => {

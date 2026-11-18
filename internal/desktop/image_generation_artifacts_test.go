@@ -108,7 +108,7 @@ func TestImageGenerationArtifactSavesVerifiedFormats(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			wantPath := "生成图片/gen_" + tc.name + "/image." + tc.ext
+			wantPath := "生成图片/gen_" + tc.name + "/image_" + tc.name + "." + tc.ext
 			if art.Path != wantPath || art.MIMEType != tc.mime || art.Width != tc.width || art.Height != tc.height || art.Bytes != int64(len(tc.data)) {
 				t.Fatalf("artifact = %+v", art)
 			}
@@ -117,6 +117,15 @@ func TestImageGenerationArtifactSavesVerifiedFormats(t *testing.T) {
 				t.Fatalf("saved bytes differ: %v", err)
 			}
 		})
+	}
+}
+
+func TestGeneratedImageFileName(t *testing.T) {
+	if got := generatedImageFileName("gen_a4c50251ddeb890ef460e44f", "jpg"); got != "image_a4c50251ddeb890ef460e44f.jpg" {
+		t.Fatalf("got %q", got)
+	}
+	if got := generatedImageFileName("customid", "png"); got != "image_customid.png" {
+		t.Fatalf("got %q", got)
 	}
 }
 
@@ -135,7 +144,7 @@ func TestImageGenerationArtifactDownloadsWithoutCredentials(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if art.Path != "生成图片/gen_url/image.png" {
+	if art.Path != "生成图片/gen_url/image_url.png" {
 		t.Fatalf("artifact = %+v", art)
 	}
 	for _, h := range []string{"Authorization", "X-Internal-Service-Key", "Cookie"} {
@@ -207,7 +216,7 @@ func TestImageGenerationArtifactRedirectAndOverwrite(t *testing.T) {
 	if _, err := saveGeneratedImage(context.Background(), ws, "gen_once", b64Item(jpegBytes(t))); err == nil {
 		t.Fatal("existing generation directory reused")
 	}
-	got, _ := os.ReadFile(filepath.Join(ws, "生成图片", "gen_once", "image.png"))
+	got, _ := os.ReadFile(filepath.Join(ws, "生成图片", "gen_once", "image_once.png"))
 	if !bytes.Equal(got, png) {
 		t.Fatal("existing image overwritten")
 	}

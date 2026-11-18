@@ -1,6 +1,6 @@
 // GeneratedImageCard：栅格生图信息卡（无缩略图）+ 下方等比例预览舞台。
-// 「预览」只滚动定位并展开下方舞台，不开侧栏；查看／标注由预览区触发。
-import { useContext, useRef, useState } from 'react'
+// 查看／标注由预览区触发；信息卡不再放「预览」按钮。
+import { useContext, useState } from 'react'
 import type { ImageGenerationArtifact, ToolEvent } from '@/core/bridge'
 import {
   imageGenerationCardState, imageGenerationFailureLabel, isImageGenerationResult,
@@ -23,7 +23,6 @@ export function GeneratedImageCard({
   onAnnotate?: (image: ImageGenerationArtifact) => void
 }) {
   const actions = useContext(ArtifactActionsContext)
-  const previewAnchorRef = useRef<HTMLDivElement>(null)
   const [collapsed, setCollapsed] = useState(false)
   const result = isImageGenerationResult(tool.data) ? tool.data : null
   if (!isRasterImageGeneration(tool, result)) return null
@@ -44,11 +43,6 @@ export function GeneratedImageCard({
   const intent = cardState === 'running'
     ? (tool.message || '')
     : (result?.displayIntent || '')
-
-  const scrollToPreview = () => {
-    setCollapsed(false)
-    previewAnchorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-  }
 
   const metaParts: string[] = []
   if (metaW && metaH) metaParts.push(`${metaW} × ${metaH}`)
@@ -94,7 +88,6 @@ export function GeneratedImageCard({
 
         {cardState === 'ready' && path ? (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] leading-5">
-            <ActionBtn icon="eye" label="预览" onClick={scrollToPreview} />
             <ActionBtn icon="folder" label="在文件夹中显示" onClick={() => { void actions.reveal(path).catch(() => {}) }} />
             <ActionBtn icon="external-link" label="用系统程序打开" onClick={() => { void actions.external(path).catch(() => {}) }} />
           </div>
@@ -102,17 +95,15 @@ export function GeneratedImageCard({
       </div>
 
       {showPreviewStage ? (
-        <div ref={previewAnchorRef}>
-          <GeneratedImagePreview
-            tool={tool}
-            sessionId={sessionId}
-            image={image}
-            collapsed={collapsed}
-            onToggleCollapse={() => setCollapsed((v) => !v)}
-            onView={() => { if (image) onView?.(image) }}
-            onAnnotate={() => { if (image) onAnnotate?.(image) }}
-          />
-        </div>
+        <GeneratedImagePreview
+          tool={tool}
+          sessionId={sessionId}
+          image={image}
+          collapsed={collapsed}
+          onToggleCollapse={() => setCollapsed((v) => !v)}
+          onView={() => { if (image) onView?.(image) }}
+          onAnnotate={() => { if (image) onAnnotate?.(image) }}
+        />
       ) : null}
     </div>
   )

@@ -6,7 +6,22 @@ export type AssistantImageGenerationNote = {
   sizeLabel: string
 }
 
-export const UNFIXED_SIZE_LABEL = '不固定尺寸（未指定时出站补最小正方形）'
+export const UNFIXED_SIZE_LABEL = '不固定尺寸'
+
+/** 展示用尺寸文案：去掉旧版出站兜底说明，避免脚注过长。 */
+export function displayImageGenerationSizeLabel(label: string): string {
+  const cleaned = label.replace(/（未指定时出站补最小正方形）/g, '').trim()
+  return cleaned || UNFIXED_SIZE_LABEL
+}
+
+/** 去掉模型常见套话；客户端已在卡片下方展示预览，不必再提桌面预览面板。 */
+export function scrubImageGenerationAssistantText(text: string): string {
+  return text
+    .replace(/，已在桌面预览中打开。/g, '。')
+    .replace(/已在桌面预览中打开。/g, '')
+    .replace(/，已在桌面预览中打开/g, '')
+    .replace(/已在桌面预览中打开/g, '')
+}
 
 export function formatImageGenerationNote(input: { modelName?: string | null; size?: string | null }): AssistantImageGenerationNote {
   const model = (input.modelName ?? '').trim()

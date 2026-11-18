@@ -221,7 +221,8 @@ func saveGeneratedImage(ctx context.Context, workspace, generationID string, ite
 	if err := root.Mkdir(dir, 0o755); err != nil {
 		return appwire.ImageGenerationArtifact{}, errImageGenerationSave
 	}
-	rel := filepath.Join(dir, "image."+ext)
+	fileName := generatedImageFileName(generationID, ext)
+	rel := filepath.Join(dir, fileName)
 	f, err := root.OpenFile(rel, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
 		_ = root.Remove(dir)
@@ -236,10 +237,20 @@ func saveGeneratedImage(ctx context.Context, workspace, generationID string, ite
 		return appwire.ImageGenerationArtifact{}, errImageGenerationSave
 	}
 	return appwire.ImageGenerationArtifact{
-		Path:     path.Join(imageGenerationDir, generationID, "image."+ext),
+		Path:     path.Join(imageGenerationDir, generationID, fileName),
 		MIMEType: mime,
 		Bytes:    int64(len(data)),
 		Width:    width,
 		Height:   height,
 	}, nil
+}
+
+// generatedImageFileName 用上级 generation 目录的 UUID 段命名，避免多图都叫 image.jpg。
+// 目录 gen_<uuid> → image_<uuid>.<ext>；其它合法 id 则整段拼进文件名。
+func generatedImageFileName(generationID, ext string) string {
+	id := strings.TrimPrefix(generationID, "gen_")
+	if id == "" {
+		id = generationID
+	}
+	return "image_" + id + "." + ext
 }

@@ -63,22 +63,21 @@ describe('GeneratedImageCard', () => {
     expect(card.textContent).toContain('生成图片')
     expect(card.textContent).toContain('1024 × 1024')
     expect(card.textContent).toContain('PNG')
-    expect(card.textContent).toContain('预览')
+    expect(card.textContent).not.toContain('预览')
     expect(card.textContent).toContain('在文件夹中显示')
     expect(card.textContent).toContain('用系统程序打开')
     expect(card.textContent).not.toContain('brg-1')
     expect(host.querySelector('[data-generated-image-preview]')).toBeTruthy()
   })
 
-  it('「预览」定位下方舞台，不调用 onOpenFile 侧栏', async () => {
+  it('信息卡不含「预览」按钮，下方舞台仍在', async () => {
     const onOpen = vi.fn()
     await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" onOpenFile={onOpen} />))
     await act(async () => { await Promise.resolve() })
-    const preview = Array.from(host.querySelectorAll('[data-generated-image-card] button')).find((b) => b.textContent === '预览') as HTMLButtonElement | undefined
-    expect(preview).toBeTruthy()
-    await act(async () => { preview!.click() })
+    const previewBtn = Array.from(host.querySelectorAll('[data-generated-image-card] button')).find((b) => b.textContent === '预览')
+    expect(previewBtn).toBeUndefined()
+    expect(host.querySelector('[data-generated-image-preview]')).toBeTruthy()
     expect(onOpen).not.toHaveBeenCalled()
-    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
   })
 
   it('失败结果用「未生成」；无下方舞台；不含内部字段', async () => {
