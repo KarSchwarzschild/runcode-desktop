@@ -1,6 +1,6 @@
 ﻿// ChatPane 是对话流本身：顶部的计划进度胶囊、可滚动的消息区（把 groupBlocks 分好
 // 的组映射成各类卡片）、空态与"思考中"指示。纯展示——所有交互都经 props 回调。
-import { useCallback, useRef, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { Logo } from '@/ui/icons'
 import { BRAND } from '@/core/brand'
 import { shortenPath } from '@/core/paths'
@@ -11,6 +11,10 @@ import { AgentTaskGroup } from '@/chat/agent-task'
 import { AnalyzeCard } from '@/chat/analyze-card'
 import { SkillCard } from '@/chat/skill-card'
 import { GeneratedImageCard } from '@/chat/generated-image-card'
+import {
+  buildGeneratedImagePresentation,
+  isMergedRasterOpenPreview,
+} from '@/chat/generated-image-presentation'
 import { AskCard } from '@/chat/ask-card'
 import { BlockView } from '@/chat/block-view'
 import { BotRow } from '@/chat/bot-row'
@@ -69,6 +73,15 @@ export function ChatPane({
   sessionId?: string
 }) {
   const groups = groupBlocks(blocks)
+  // 栅格生图展示投影：合并指向本条产物的 open_preview，避免执行卡重复占行。
+  const imagePresentations = useMemo(() => {
+    if (!sessionId) return []
+    return buildGeneratedImagePresentation(blocks, cwd ?? '', {
+      sessionId,
+      sessionEpoch: 0,
+      selectedCopies: new Map(),
+    })
+  }, [blocks, cwd, sessionId])
   // 内联预览高度晚于文本：只在用户本来贴底时跟随。贴底状态由 ChatPane 自己维护，
   // 不经 App.tsx，避免与用量页等其它滚动容器抢同一份逻辑。
   const stick = useRef(true)
@@ -150,9 +163,11 @@ export function ChatPane({
             </div>
           )}
           {groups.map((g) =>
-            g.kind === 'exec' ? (
-              <BotRow key={g.id}><ExecutionCard tools={g.tools} harmAllows={harmAllows} oaBlocked={oaBlocked} /></BotRow>
-            ) : g.kind === 'ask' ? (
+            g.kind === 'exec' ? (() => {
+              const tools = g.tools.filter((t) => !isMergedRasterOpenPreview(t, imagePresentations, cwd ?? '', sessionId ?? ''))
+              if (tools.length === 0) return null
+              return <BotRow key={g.id}><ExecutionCard tools={tools} harmAllows={harmAllows} oaBlocked={oaBlocked} /></BotRow>
+            })() : g.kind === 'ask' ? (
               <BotRow key={g.id}><AskCard tool={g.tool} busy={busy} onAnswer={onAnswer} /></BotRow>
             ) : g.kind === 'edits' ? (
               <BotRow key={g.id}><EditedCards edits={g.edits} reverted={revertedEdits} onReview={onReviewEdit} onUndo={onUndoEdit} /></BotRow>

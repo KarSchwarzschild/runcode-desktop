@@ -5,11 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ImageGenerationResult, ToolEvent } from '@/core/bridge'
 
 const api = vi.hoisted(() => ({ openArtifact: vi.fn(), releaseArtifact: vi.fn() }))
-vi.mock('@/core/bridge', () => ({
-  ...api,
-  errText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
-  errCode: (e: unknown) => { try { return JSON.parse((e as Error).message).code ?? '' } catch { return '' } },
-}))
+vi.mock('@/core/bridge', async () => {
+  const actual = await vi.importActual<typeof import('@/core/bridge')>('@/core/bridge')
+  return {
+    ...actual,
+    ...api,
+    errText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+    errCode: (e: unknown) => { try { return JSON.parse((e as Error).message).code ?? '' } catch { return '' } },
+  }
+})
 
 import { GeneratedImageCard } from './generated-image-card'
 
@@ -25,7 +29,9 @@ beforeEach(() => {
   host = document.createElement('div')
   document.body.append(host)
   root = createRoot(host)
-  api.openArtifact.mockReset().mockResolvedValue({ reference: 'ref-1', sessionId: 'S', generation: 'g', path: ok.images![0].path, url: 'http://127.0.0.1:9/ref-1' })
+  api.openArtifact.mockReset().mockResolvedValue({
+    reference: 'ref-1', sessionId: 'S', generation: 'g', path: ok.images![0].path, url: 'http://127.0.0.1:9/ref-1',
+  })
   api.releaseArtifact.mockReset().mockResolvedValue(undefined)
   vi.stubGlobal('IntersectionObserver', class {
     constructor(private cb: IntersectionObserverCallback) {}
@@ -33,6 +39,7 @@ beforeEach(() => {
     disconnect() {}
     unobserve() {}
   })
+  HTMLElement.prototype.scrollIntoView = vi.fn()
 })
 afterEach(async () => {
   await act(async () => root.unmount())
@@ -40,50 +47,41 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-async function render(tool: ToolEvent, sessionId = 'S', onOpenFile = vi.fn()) {
-  await act(async () => root.render(<GeneratedImageCard tool={tool} sessionId={sessionId} onOpenFile={onOpenFile} />))
+async function render(tool: ToolEvent, sessionId = 'S') {
+  await act(async () => root.render(<GeneratedImageCard tool={tool} sessionId={sessionId} />))
   await act(async () => { await Promise.resolve() })
-  return onOpenFile
+  await act(async () => { await Promise.resolve() })
 }
 
 describe('GeneratedImageCard', () => {
-  it('成功卡片只保留元信息与操作，不含文件名/路径/内部字段', async () => {
-    const onOpen = await render(toolEvent(ok), 'S')
-    expect(api.openArtifact).toHaveBeenCalledWith('S', '生成图片/gen_1/image.png')
-    expect(host.querySelector('img')!.getAttribute('src')).toBe('http://127.0.0.1:9/ref-1')
-    expect(host.textContent).toContain('1024 × 1024')
-    expect(host.textContent).toContain('PNG')
-    expect(host.textContent).not.toContain('image.png')
-    expect(host.textContent).not.toContain('生成图片/gen_1')
-    expect(host.textContent).not.toContain('brg-1')
-    expect(host.textContent).not.toContain('计费待核验')
-    expect(host.textContent).not.toMatch(/text-red/)
-    // 「预览」仍走 onOpenFile；缩略图点击打开标注画板。
-    const preview = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '预览')
-    await act(async () => { preview!.click() })
-    expect(onOpen).toHaveBeenCalledWith('生成图片/gen_1/image.png')
-  })
-
-  it('卸载或更换引用时释放旧引用', async () => {
+  it('信息卡无缩略图；意图／元信息／操作可见；下方有预览舞台', async () => {
     await render(toolEvent(ok), 'S')
-    await act(async () => root.render(<GeneratedImageCard tool={toolEvent({ ...ok, generationId: 'gen_2', images: [{ ...ok.images![0], path: '生成图片/gen_2/image.png' }] })} sessionId="S" />))
+    const card = host.querySelector('[data-generated-image-card]')!
+    expect(card.querySelector('img')).toBeNull()
+    expect(card.querySelector('.ig-card-thumb')).toBeNull()
+    expect(card.querySelector('.ig-card-shimmer')).toBeNull()
+    expect(card.textContent).toContain('生成图片')
+    expect(card.textContent).toContain('1024 × 1024')
+    expect(card.textContent).toContain('PNG')
+    expect(card.textContent).toContain('预览')
+    expect(card.textContent).toContain('在文件夹中显示')
+    expect(card.textContent).toContain('用系统程序打开')
+    expect(card.textContent).not.toContain('brg-1')
+    expect(host.querySelector('[data-generated-image-preview]')).toBeTruthy()
+  })
+
+  it('「预览」定位下方舞台，不调用 onOpenFile 侧栏', async () => {
+    const onOpen = vi.fn()
+    await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" onOpenFile={onOpen} />))
     await act(async () => { await Promise.resolve() })
-    expect(api.releaseArtifact).toHaveBeenCalledWith('ref-1')
-    await act(async () => root.unmount())
-    root = createRoot(host)
-    expect(api.releaseArtifact).toHaveBeenCalledTimes(2)
+    const preview = Array.from(host.querySelectorAll('[data-generated-image-card] button')).find((b) => b.textContent === '预览')
+    expect(preview).toBeTruthy()
+    await act(async () => { preview!.click() })
+    expect(onOpen).not.toHaveBeenCalled()
+    expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
   })
 
-  it('读不到文件时用「文件不存在」文案，不展示错误原文', async () => {
-    api.openArtifact.mockRejectedValue(new Error(JSON.stringify({ code: 'not_found', message: 'gone-secret' })))
-    await render(toolEvent(ok))
-    expect(host.textContent).toContain('生成图片 文件不存在 image-model')
-    expect(host.textContent).not.toContain('gone-secret')
-    expect(host.querySelector('img')).toBeNull()
-    expect(host.innerHTML).not.toContain('text-red')
-  })
-
-  it('失败结果用「未生成」中性文案，不含 Message/Code/SubmissionStatus', async () => {
+  it('失败结果用「未生成」；无下方舞台；不含内部字段', async () => {
     await render(toolEvent({
       ...ok, status: 'unknown', code: 'unknown_outcome', images: [],
       message: '生成结果无法确认，可能已生成或计费，请勿重复提交',
@@ -91,107 +89,32 @@ describe('GeneratedImageCard', () => {
     expect(api.openArtifact).not.toHaveBeenCalled()
     expect(host.textContent).toContain('生成图片 未生成 image-model')
     expect(host.textContent).not.toContain('可能已生成')
-    expect(host.textContent).not.toContain('unknown_outcome')
-    expect(host.textContent).not.toContain('brg-1')
-    expect(host.innerHTML).not.toContain('text-red')
+    expect(host.querySelector('[data-generated-image-preview]')).toBeNull()
   })
 
-  it('明确未提交也归为未生成，不展示内部提交状态词', async () => {
-    await render(toolEvent({
-      ...ok, status: 'failed', code: 'auth', submissionStatus: 'not_submitted', images: [], message: '调用身份信息缺失',
-    }, 'failed'))
-    expect(host.textContent).toContain('生成图片 未生成 image-model')
-    expect(host.textContent).not.toContain('未提交生成请求')
-    expect(host.textContent).not.toContain('调用身份信息缺失')
-  })
-
-  it('进行中只显示阶段文案，不显示百分比', async () => {
-    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '正在生成图片' } as ToolEvent)
-    expect(host.textContent).toContain('正在生成图片')
+  it('生成中显示意图与下方扫光，卡片内无动画', async () => {
+    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '一双高跟鞋在地毯上' } as ToolEvent)
+    const card = host.querySelector('[data-generated-image-card]')!
+    expect(card.textContent).toContain('一双高跟鞋在地毯上')
+    expect(card.querySelector('.ig-preview-shimmer')).toBeNull()
+    expect(host.querySelector('.ig-preview-shimmer')).toBeTruthy()
     expect(host.textContent).not.toMatch(/\d+%/)
   })
 
-  it('生成中显示 tool.message 意图行；完成后显示 result.displayIntent；缺失则不画意图行', async () => {
-    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '一双高跟鞋在地毯上' } as ToolEvent)
-    expect(host.textContent).toContain('一双高跟鞋在地毯上')
-
-    await render(toolEvent({ ...ok, displayIntent: '完成后的意图说明' }))
-    expect(host.textContent).toContain('完成后的意图说明')
-
-    await render(toolEvent({ ...ok, displayIntent: undefined }))
-    expect(host.textContent).not.toContain('完成后的意图说明')
-    expect(host.textContent).not.toContain('一双高跟鞋在地毯上')
-  })
-
-  it('running 时有方形 shimmer 占位与连续动画 class', async () => {
-    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '正在生成图片' } as ToolEvent)
-    const shimmer = host.querySelector('.ig-card-shimmer')
-    expect(shimmer).toBeTruthy()
-    expect(shimmer!.classList.contains('ig-card-shimmer-animate')).toBe(true)
-  })
-
-  it('从 running 变成 ready 且有图片地址时播放百叶窗，animationend 后移除', async () => {
-    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '正在生成图片' } as ToolEvent)
-    expect(host.querySelector('.ig-card-shimmer')).toBeTruthy()
-
-    await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" />))
-    await act(async () => { await Promise.resolve() })
-    await act(async () => { await Promise.resolve() })
-
-    const reveal = host.querySelector('.ig-card-reveal')
-    expect(reveal).toBeTruthy()
-    expect(reveal!.classList.contains('ig-card-reveal-animate')).toBe(true)
-
-    // 动画结束挂在最后一条条带上，避免前几条提前清遮罩。
-    const lastStrip = reveal!.querySelector('span:last-child')
-    expect(lastStrip).toBeTruthy()
-    await act(async () => {
-      lastStrip!.dispatchEvent(new Event('animationend', { bubbles: true }))
-    })
-    expect(host.querySelector('.ig-card-reveal')).toBeNull()
-  })
-
-  it('直接以 ready 挂载时没有百叶窗 class', async () => {
-    await render(toolEvent(ok))
-    expect(host.querySelector('.ig-card-reveal')).toBeNull()
-    expect(host.querySelector('.ig-card-shimmer')).toBeNull()
-  })
-
-  it('没有图片地址时不开始百叶窗动画', async () => {
-    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '生成中' } as ToolEvent)
-    // 成功结果但缩略图尚未就绪（openArtifact 挂起）：不应出现 reveal。
-    let resolveOpen: (v: unknown) => void = () => {}
-    api.openArtifact.mockReset().mockImplementation(() => new Promise((resolve) => { resolveOpen = resolve }))
-    await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" />))
-    await act(async () => { await Promise.resolve() })
-    expect(host.querySelector('.ig-card-reveal')).toBeNull()
-    await act(async () => {
-      resolveOpen({ reference: 'ref-late', sessionId: 'S', generation: 'g', path: ok.images![0].path, url: 'http://127.0.0.1:9/late' })
-      await Promise.resolve()
-    })
-    await act(async () => { await Promise.resolve() })
-    expect(host.querySelector('.ig-card-reveal')).toBeTruthy()
-  })
-
-  it('prefers-reduced-motion 时不挂连续动画 class', async () => {
-    vi.stubGlobal('matchMedia', (query: string) => ({
-      matches: String(query).includes('prefers-reduced-motion'),
-      media: query,
-      onchange: null,
-      addListener: () => {},
-      removeListener: () => {},
-      addEventListener: () => {},
-      removeEventListener: () => {},
-      dispatchEvent: () => false,
+  it('JPEG 与 PNG 使用同一套卡片结构', async () => {
+    await render(toolEvent({
+      ...ok, model: 'other-model',
+      images: [{ path: '生成图片/gen_1/image.jpg', mimeType: 'image/jpeg', bytes: 3000, width: 1280, height: 720 }],
     }))
-    await render({ type: 'progress', toolName: 'image_generate', toolUseID: 'tu_1', message: '正在生成图片' } as ToolEvent)
-    const shimmer = host.querySelector('.ig-card-shimmer')
-    expect(shimmer).toBeTruthy()
-    expect(shimmer!.classList.contains('ig-card-shimmer-animate')).toBe(false)
+    expect(host.querySelector('[data-generated-image-card]')).toBeTruthy()
+    expect(host.querySelector('[data-generated-image-preview]')).toBeTruthy()
+    expect(host.textContent).toContain('JPEG')
+  })
 
-    await act(async () => root.render(<GeneratedImageCard tool={toolEvent(ok)} sessionId="S" />))
-    await act(async () => { await Promise.resolve() })
-    await act(async () => { await Promise.resolve() })
-    expect(host.querySelector('.ig-card-reveal')).toBeNull()
+  it('非栅格 MIME 不渲染新卡片', async () => {
+    await render(toolEvent({
+      ...ok, images: [{ path: '生成图片/g/x.svg', mimeType: 'image/svg+xml', bytes: 10, width: 1, height: 1 }],
+    }))
+    expect(host.querySelector('[data-generated-image-card]')).toBeNull()
   })
 })

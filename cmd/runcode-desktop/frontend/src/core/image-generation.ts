@@ -5,6 +5,32 @@ import type { ImageGenerationCatalog, ImageGenerationResult, ImageGenerationSett
 
 export const IMAGE_GENERATION_TOOL = 'image_generate'
 
+/** 受支持的栅格 MIME；非栅格产物不进入新卡片／预览／查看器。 */
+export const RASTER_IMAGE_GENERATION_MIMES = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+])
+
+/**
+ * isRasterImageGeneration：栅格生图 UI 门控。
+ * 仅 toolName === image_generate；有结果时 MIME 须为受支持栅格；
+ * 生成中尚无结果时只凭工具名允许展示进行中预览。不按模型名判断。
+ */
+export function isRasterImageGeneration(
+  tool: { toolName?: string } | null | undefined,
+  result?: ImageGenerationResult | null,
+): boolean {
+  if ((tool?.toolName ?? '') !== IMAGE_GENERATION_TOOL) return false
+  if (!result) return true
+  if (!isImageGenerationResult(result)) return false
+  if (result.status !== 'succeeded') return true
+  const mime = (result.images?.[0]?.mimeType ?? '').trim().toLowerCase()
+  if (!mime) return false
+  return RASTER_IMAGE_GENERATION_MIMES.has(mime)
+}
+
 // isChatModel 是所有文本用途（对话、判定、子代理、上下文预算、识图）候选的统一入口。
 // 只有「声明了 image_generation 却没有 chat」才排除；没有能力字段的旧目录照旧当聊天模型。
 export function isChatModel(m: PassportModel): boolean {
@@ -75,22 +101,23 @@ export function accountingLabel(status?: string): string {
   }
 }
 
-/** 卡片四态：生成中 / 可读缩略图 / 本次未交付图 / 曾成功但文件现已不可读。 */
+/** 卡片四态：生成中 / 预览可读 / 本次未交付图 / 曾成功但文件现已不可读。 */
 export type ImageGenerationCardState = 'running' | 'ready' | 'not-generated' | 'missing'
 
 /**
- * imageGenerationCardState 把工具结果与缩略图读取结果收成卡片状态。
- * missing 仅当 status=succeeded 且 OpenArtifact 失败；其它未交付一律 not-generated。
+ * imageGenerationCardState 把工具结果与下方预览读取结果收成卡片状态。
+ * missing 仅当 status=succeeded 且确认 not_found；其它读取失败由预览区单独提示，
+ * 不把已完成生成改成「未生成」。
  */
 export function imageGenerationCardState(
   result: ImageGenerationResult | null | undefined,
-  opts: { toolEnded: boolean; thumbReadable?: boolean; thumbFailed?: boolean },
+  opts: { toolEnded: boolean; previewReadable?: boolean; previewMissing?: boolean },
 ): ImageGenerationCardState {
   if (!result) return opts.toolEnded ? 'not-generated' : 'running'
   if (result.status === 'succeeded') {
-    if (opts.thumbFailed) return 'missing'
-    if (opts.thumbReadable) return 'ready'
-    // 成功结果尚在拉缩略图：仍按 ready 排版（占位），不落成「未生成」。
+    if (opts.previewMissing) return 'missing'
+    if (opts.previewReadable) return 'ready'
+    // 成功结果尚在拉预览：仍按 ready 排版（占位），不落成「未生成」。
     return 'ready'
   }
   return 'not-generated'

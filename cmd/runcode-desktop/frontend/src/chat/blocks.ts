@@ -46,7 +46,7 @@ export type Group =
   // because a bare 加载技能 row says nothing: the call carries only a name, so
   // what the model actually picked up (and why) is only visible on a card.
   | { kind: 'skill'; id: string; tool: ToolEvent }
-  // image is one image_generate call: the result (thumbnail or honest status) is
+  // image is one image_generate call: the info card + below-preview stage is
   // the deliverable, so it is never folded into the compact tool list.
   | { kind: 'image'; id: string; tool: ToolEvent; sessionId: string }
   | { kind: 'edits'; id: string; edits: EditRecord[] }

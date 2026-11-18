@@ -244,8 +244,16 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         if (ev.toolName === 'open_preview') {
           const artifact = ev.data as import('@/core/bridge').ArtifactReference | undefined
           if (artifact?.reference) {
-            if (!ev.parentToolUseID && artifact.sessionId === sessionOf(env) && sessionOf(env) === focusedRef.current) cb.current.onOpenPreview(artifact)
-            else void releaseArtifact(artifact.reference).catch(() => {})
+            // 栅格生图产物走卡片下方预览，不自动开侧栏；仍释放本事件临时引用。
+            const rel = (artifact.path || '').replace(/\\/g, '/')
+            const rasterGenPath = /(^|\/)生成图片\//.test(rel)
+            if (rasterGenPath) {
+              void releaseArtifact(artifact.reference).catch(() => {})
+            } else if (!ev.parentToolUseID && artifact.sessionId === sessionOf(env) && sessionOf(env) === focusedRef.current) {
+              cb.current.onOpenPreview(artifact)
+            } else {
+              void releaseArtifact(artifact.reference).catch(() => {})
+            }
           }
         }
         blocksOf(sessionOf(env), (prev) => {

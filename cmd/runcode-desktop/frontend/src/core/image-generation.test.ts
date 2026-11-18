@@ -3,7 +3,8 @@ import type { ImageGenerationCatalog, ImageGenerationResult, PassportModel } fro
 import {
   accountingLabel, allowsUnfixedSize, coerceDraftSize, defaultDraftSize,
   imageGenerationCardState, imageGenerationFailureLabel, imageGenerationModelKey,
-  isChatModel, isImageGenerationModel, isImageGenerationResult, settingsSelection,
+  isChatModel, isImageGenerationModel, isImageGenerationResult, isRasterImageGeneration,
+  settingsSelection,
 } from './image-generation'
 
 const profile = { available: true, supportedSizes: ['1024x1024', '2048x2048'], defaultSize: '1024x1024', responseFormats: ['url'] }
@@ -81,11 +82,11 @@ describe('results', () => {
     expect(accountingLabel('paid')).toBe('计费待核验')
     expect(accountingLabel('verified')).toBe('本次计费已人工核对')
   })
-  it('卡片状态：成功可读为 ready，读失败为 missing，其它未交付为 not-generated', () => {
+  it('卡片状态：成功可读为 ready，not_found 为 missing，其它未交付为 not-generated', () => {
     expect(imageGenerationCardState(null, { toolEnded: false })).toBe('running')
     expect(imageGenerationCardState(null, { toolEnded: true })).toBe('not-generated')
-    expect(imageGenerationCardState(ok, { toolEnded: true, thumbReadable: true })).toBe('ready')
-    expect(imageGenerationCardState(ok, { toolEnded: true, thumbFailed: true })).toBe('missing')
+    expect(imageGenerationCardState(ok, { toolEnded: true, previewReadable: true })).toBe('ready')
+    expect(imageGenerationCardState(ok, { toolEnded: true, previewMissing: true })).toBe('missing')
     for (const status of ['failed', 'unknown', 'cancelled', 'save_failed'] as const) {
       expect(imageGenerationCardState({ ...ok, status, images: [] }, { toolEnded: true })).toBe('not-generated')
     }
@@ -96,5 +97,19 @@ describe('results', () => {
     expect(imageGenerationFailureLabel('missing', 'seedream')).toBe('生成图片 文件不存在 seedream')
     expect(imageGenerationFailureLabel('not-generated', '')).toBe('生成图片 未生成 未设置模型')
     expect(imageGenerationFailureLabel('missing', null)).toBe('生成图片 文件不存在 未设置模型')
+  })
+  it('栅格门控：只认 image_generate + 受支持 MIME，不按模型名', () => {
+    expect(isRasterImageGeneration({ toolName: 'image_generate' })).toBe(true)
+    expect(isRasterImageGeneration({ toolName: 'Read' })).toBe(false)
+    expect(isRasterImageGeneration({ toolName: 'image_generate' }, ok)).toBe(true)
+    expect(isRasterImageGeneration({ toolName: 'image_generate' }, {
+      ...ok, model: 'other-vendor', images: [{ ...ok.images![0], mimeType: 'image/jpeg' }],
+    })).toBe(true)
+    expect(isRasterImageGeneration({ toolName: 'image_generate' }, {
+      ...ok, images: [{ ...ok.images![0], mimeType: 'image/svg+xml' }],
+    })).toBe(false)
+    expect(isRasterImageGeneration({ toolName: 'image_generate' }, {
+      ...ok, status: 'failed', images: [],
+    })).toBe(true)
   })
 })
