@@ -68,7 +68,7 @@ describe('GeneratedImagePreview', () => {
     expect(host.textContent).toContain('预览图片')
   })
 
-  it('ready 图 decode 后才可交互；历史直挂不播揭示', async () => {
+  it('ready 图 decode 后才可交互；历史直挂不播揭示；角标仅图标', async () => {
     await act(async () => root.render(
       <GeneratedImagePreview tool={tool('completed')} sessionId="S" image={image} />,
     ))
@@ -76,11 +76,16 @@ describe('GeneratedImagePreview', () => {
     const img = host.querySelector('img')
     expect(img).toBeTruthy()
     expect(host.querySelector('.ig-preview-reveal')).toBeNull()
+    expect(host.querySelectorAll('.ig-preview-corner-btn')).toHaveLength(0)
     await act(async () => {
       img!.dispatchEvent(new Event('load'))
       await Promise.resolve()
     })
     expect(host.querySelector('.ig-preview-reveal')).toBeNull()
+    const corners = [...host.querySelectorAll('.ig-preview-corner-btn')]
+    expect(corners.map((el) => el.getAttribute('aria-label'))).toEqual([
+      '查看大图', '标注', '在文件夹中显示', '用系统程序打开',
+    ])
   })
 
   it('running→ready 且 decode 后播放揭示；animationend 清除', async () => {

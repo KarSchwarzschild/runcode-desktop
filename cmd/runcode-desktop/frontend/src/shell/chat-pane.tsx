@@ -10,12 +10,16 @@ import { diffStats, hasDiff } from '@/chat/tool-text'
 import { AgentTaskGroup } from '@/chat/agent-task'
 import { AnalyzeCard } from '@/chat/analyze-card'
 import { SkillCard } from '@/chat/skill-card'
-import { GeneratedImageCard } from '@/chat/generated-image-card'
+import { GeneratedImagePreview } from '@/chat/generated-image-preview'
 import {
   buildGeneratedImagePresentation,
   isMergedRasterOpenPreview,
 } from '@/chat/generated-image-presentation'
-import { isImageGenerateToolRunning } from '@/core/image-generation'
+import {
+  isImageGenerateToolRunning,
+  isImageGenerationResult,
+  shouldShowImageGenerationStage,
+} from '@/core/image-generation'
 import { AskCard } from '@/chat/ask-card'
 import { BlockView } from '@/chat/block-view'
 import { BotRow } from '@/chat/bot-row'
@@ -174,9 +178,31 @@ export function ChatPane({
           )}
           {groups.map((g) =>
             g.kind === 'exec' ? (() => {
-              const tools = g.tools.filter((t) => !isMergedRasterOpenPreview(t, imagePresentations, cwd ?? '', sessionId ?? ''))
-              if (tools.length === 0) return null
-              return <BotRow key={g.id}><ExecutionCard tools={tools} harmAllows={harmAllows} oaBlocked={oaBlocked} /></BotRow>
+              const kept = g.tools
+                .map((tool, i) => ({ tool, sessionId: g.sessionIds[i] ?? sessionId ?? '' }))
+                .filter(({ tool }) => !isMergedRasterOpenPreview(tool, imagePresentations, cwd ?? '', sessionId ?? ''))
+              if (kept.length === 0) return null
+              const tools = kept.map((k) => k.tool)
+              const stages = kept.filter(({ tool }) => shouldShowImageGenerationStage(tool))
+              return (
+                <BotRow key={g.id}>
+                  <ExecutionCard tools={tools} harmAllows={harmAllows} oaBlocked={oaBlocked} />
+                  {stages.map(({ tool, sessionId: sid }) => {
+                    const result = isImageGenerationResult(tool.data) ? tool.data : null
+                    const image = result?.status === 'succeeded' ? result.images?.[0] : undefined
+                    return (
+                      <GeneratedImagePreview
+                        key={tool.toolUseID ?? tool.toolName}
+                        tool={tool}
+                        sessionId={sid || sessionId || ''}
+                        image={image}
+                        onView={() => { if (image) onRasterImageView?.(image, tool.toolUseID ?? '') }}
+                        onAnnotate={() => { if (image) onRasterImageAnnotate?.(image, tool.toolUseID ?? '') }}
+                      />
+                    )
+                  })}
+                </BotRow>
+              )
             })() : g.kind === 'ask' ? (
               <BotRow key={g.id}><AskCard tool={g.tool} busy={busy} onAnswer={onAnswer} /></BotRow>
             ) : g.kind === 'edits' ? (
@@ -185,16 +211,6 @@ export function ChatPane({
               <BotRow key={g.id}><AnalyzeCard tool={g.tool} /></BotRow>
             ) : g.kind === 'skill' ? (
               <BotRow key={g.id}><SkillCard tool={g.tool} /></BotRow>
-            ) : g.kind === 'image' ? (
-              <BotRow key={g.id}>
-                <GeneratedImageCard
-                  tool={g.tool}
-                  sessionId={g.sessionId}
-                  onOpenFile={onOpenFile}
-                  onView={(image) => onRasterImageView?.(image, g.tool.toolUseID ?? g.id)}
-                  onAnnotate={(image) => onRasterImageAnnotate?.(image, g.tool.toolUseID ?? g.id)}
-                />
-              </BotRow>
             ) : g.kind === 'taskgroup' ? (
               <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} sessionId={sessionId} /></BotRow>
             ) : (
