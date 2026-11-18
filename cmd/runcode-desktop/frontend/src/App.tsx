@@ -31,6 +31,7 @@ import { PermissionModal } from '@/shell/permission-modal'
 import { AskpassModal } from '@/shell/askpass-modal'
 import { PreviewSide } from '@/shell/preview-side'
 import { Sidebar } from '@/shell/sidebar'
+import { AutomationWorkspaceDialog } from '@/pages/automation/workspace-dialog'
 import { Composer } from '@/composer'
 import type { ComposerEditorHandle } from '@/composer/inline-editor'
 import { type BuiltinAction } from '@/composer/scenario-bar'
@@ -70,6 +71,7 @@ export default function App() {
   // 侧栏折叠态：上提到这里，让折叠开关能放到主栏顶部状态条（「空闲」前），
   // 而侧栏本身按此 prop 变宽窄。
   const [sidebarCollapsed, toggleSidebar] = usePersistentBool('sidebar.collapsed', false)
+  const [automationOpen, setAutomationOpen] = useState(false)
 
   // infoRef 是给事件回调读当前会话用的镜像：订阅只注册一次，闭包里不能直接读
   // info 这个 state。
@@ -303,6 +305,7 @@ export default function App() {
           userName={userName}
           avatar={passport?.avatar}
           onLogout={() => void logout()}
+          onOpenAutomation={() => setAutomationOpen(true)}
         />
 
         <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-surface">
@@ -466,6 +469,7 @@ export default function App() {
           />
         )}
       </div>
+      <AutomationWorkspaceDialog open={automationOpen} onClose={() => setAutomationOpen(false)} />
       {installing && <InstallOverlay state={installing} />}
       {askpass.current && (
         <AskpassModal

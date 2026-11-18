@@ -229,6 +229,21 @@ export function Icon({ name, size = 18, className }: Props) {
           <circle cx="19" cy="12" r="1.6" />
         </svg>
       )
+    case 'more-grid':
+      return (
+        <svg {...common} {...stroke}>
+          <path d="M4 7h4M6 5v4" />
+          <path d="M16 7h4M18 5v4" />
+          <path d="M4 17h4M6 15v4" />
+          <path d="M16 17h4M18 15v4" />
+        </svg>
+      )
+    case 'close':
+      return (
+        <svg {...common} {...stroke}>
+          <path d="M6 6l12 12M18 6 6 18" />
+        </svg>
+      )
     case 'sparkles':
       return (
         <svg {...common} {...stroke}>

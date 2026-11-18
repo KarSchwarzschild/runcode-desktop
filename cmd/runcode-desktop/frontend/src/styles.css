@@ -205,3 +205,13 @@
   overflow: hidden;
   box-shadow: 0 2px 16px rgba(30, 35, 60, 0.14);
 }
+
+/* 自动化管理窗是盖在客户端上的模态，不是预览页。宽高是方案里的布局上限。 */
+.automation-window {
+  width: min(1120px, calc(100vw - 48px));
+  height: calc(100vh - 48px);
+  max-height: calc(100vh - 48px);
+}
+.automation-drawer {
+  width: min(440px, 100%);
+}

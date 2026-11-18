@@ -145,3 +145,24 @@ Deferred:
 - `?preview=tools` now includes an automation summary fixture. This session did not open that page in a browser.
 
 Next: Step 7 task list and the more-menu entry.
+
+## Step 7 — more menu and task manager
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): add more menu and task manager` |
+| Frontend | `npm.cmd test -- src/session/automation-state.test.ts src/shell/more-menu.test.tsx src/pages/automation/workspace-dialog.test.tsx` → PASS (3 files, 7 tests). `npm.cmd run typecheck` → PASS. `npm.cmd run lint` → PASS. |
+
+Notes:
+
+- “更多” sits under 市场. The icon is a four-plus grid in the existing stroke style. The menu registry currently has one entry, 自动化任务. Opening it does not change the chat view and does not call `openSession`, `pickWorkspaceFolder`, or `resumeSession`.
+- The manager is a modal on the app root, not a view and not a preview tab. It can open with no live session. Esc closes the create drawer first, then the window. Tab stays inside the dialog. Closing returns focus to the control that opened it and does not touch the composer draft.
+- List state is a reducer. An event that arrives before the snapshot is kept when its revision is higher. The same context ignores an older revision. A new context drops the cache and late responses. A slow page for the previous search does not replace the current query. Pages append without duplicating ids.
+- Tabs are 已开启 / 已暂停 / 已结束 / 全部. Search matches the current result set’s name and prompt only through the backend query. Empty search and a filter miss use different copy. The create control is centered when the list is empty and sits on the search row when it is not. The create drawer is a placeholder until Step 8 and does not save or run anything. The list formats `nextRunAt` for display and does not schedule work itself.
+
+Deferred:
+
+- Step 8 replaces the create placeholder with the seven schedule modes and the native workspace picker. Step 9 owns detail, pause/resume, and run history. Step 10 owns the tray, `WindowController`, and real exit. `BackgroundSupported` stays false.
+- No real Passport, Codex, or OA round trip. No race-detector PASS. This session did not open the manager in a browser; 1024×680 and 150% scaling remain a manual check.
+
+Next: Step 8 create form and native workspace picker.

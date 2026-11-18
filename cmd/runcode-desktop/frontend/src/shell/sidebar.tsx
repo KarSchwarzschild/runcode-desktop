@@ -4,6 +4,7 @@ import { ConfirmDialog } from '@/ui/confirm-dialog'
 import { Popover } from '@/ui/popover'
 import { basename } from '@/core/paths'
 import { type SessionSummary } from '@/core/bridge'
+import { MoreMenu } from './more-menu'
 
 // Sidebar 是主界面左栏：新建对话、页面导航、最近对话列表与工作区切换器。
 // 全部数据与动作经 props 注入（自身只持有弹层/确认框的局部状态），与 App 的
@@ -53,6 +54,7 @@ export function Sidebar({
   onNav,
   onNew,
   onResume,
+  onOpenAutomation,
   userName,
   avatar,
   onLogout,
@@ -72,6 +74,7 @@ export function Sidebar({
   onNav: (v: NavView) => void
   onNew: () => void
   onResume: (id: string) => void
+  onOpenAutomation: () => void
   // 已登录用户的展示名与头像;未登录为空——此时用户区照样渲染(里面装着设置/权限/
   // 记忆),只是不显示头像与「退出登录」。
   userName?: string
@@ -136,6 +139,7 @@ export function Sidebar({
             {!collapsed && n.label}
           </div>
         ))}
+        <MoreMenu collapsed={collapsed} onOpenAutomation={onOpenAutomation} />
       </nav>
       {collapsed ? (
         // 撑开中间，让工作区按钮保持贴底（展开态由最近对话列表的 flex-1 承担）。
