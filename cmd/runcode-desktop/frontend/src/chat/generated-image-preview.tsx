@@ -1,7 +1,7 @@
-// GeneratedImagePreview：卡片下方的等比例预览舞台（扫光／揭示／查看／标注入口）。
+// GeneratedImagePreview：执行卡行下的等比例预览舞台（扫光／揭示／角标操作）。
 // 资源按来源 session+path 申请 ArtifactReference；动画资格绑定 toolUseID，不绑临时 URL。
 import {
-  useEffect, useId, useLayoutEffect, useRef, useState,
+  useContext, useEffect, useId, useLayoutEffect, useRef, useState,
   type Ref, type RefObject, type ReactNode,
 } from 'react'
 import {
@@ -10,6 +10,7 @@ import {
 } from '@/core/bridge'
 import { basename } from '@/core/paths'
 import { Icon } from '@/ui/icons'
+import { ArtifactActionsContext } from './artifact-actions'
 import './generated-image-preview.css'
 
 const REVEAL_STRIPS = 8
@@ -17,7 +18,7 @@ const REVEAL_FALLBACK_MS = 700
 
 export type PreviewDisplaySize = { width: number; height: number; provisional: boolean }
 
-/** 等比缩放：Wcap=min(480,C) Hcap=min(480,0.55×vh)，正方形可到 480；不放大小图。 */
+/** 等比缩放：Wcap=min(560,C) Hcap=min(560,0.65×vh)，正方形可到对话内常见大图尺寸；不放大小图。 */
 export function computePreviewDisplaySize(
   naturalW: number,
   naturalH: number,
@@ -27,8 +28,8 @@ export function computePreviewDisplaySize(
   const w = Math.max(1, naturalW)
   const h = Math.max(1, naturalH)
   const C = Math.max(1, containerW)
-  const Wcap = Math.min(480, C)
-  const Hcap = Math.min(480, 0.55 * Math.max(1, viewportH))
+  const Wcap = Math.min(560, C)
+  const Hcap = Math.min(560, 0.65 * Math.max(1, viewportH))
   const s = Math.min(1, Wcap / w, Hcap / h)
   return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)), provisional: false }
 }
@@ -107,6 +108,7 @@ export function GeneratedImagePreview({
   onAnnotate?: () => void
   stageRef?: Ref<HTMLDivElement | null>
 }) {
+  const actions = useContext(ArtifactActionsContext)
   const rootRef = useRef<HTMLDivElement>(null)
   const localStageRef = useRef<HTMLDivElement>(null)
   const stage = (stageRef ?? localStageRef) as Ref<HTMLDivElement>
@@ -116,7 +118,7 @@ export function GeneratedImagePreview({
   const path = image?.path ?? ''
   const running = tool.type !== 'completed' && tool.type !== 'failed'
   const [resource, setResource] = useState<Resource>({ status: 'idle' })
-  const [boxW, setBoxW] = useState(480)
+  const [boxW, setBoxW] = useState(560)
   const [revealing, setRevealing] = useState(false)
   const revealRootRef = useRef<HTMLDivElement>(null)
   const sawRunningRef = useRef(false)
@@ -129,7 +131,8 @@ export function GeneratedImagePreview({
   useLayoutEffect(() => {
     const el = rootRef.current
     if (!el) return
-    const measure = () => setBoxW(Math.max(1, el.clientWidth - 32))
+    // 根节点无水平内边距，直接用满可用宽，避免再人为减 32 把舞台夹小。
+    const measure = () => setBoxW(Math.max(1, el.clientWidth))
     measure()
     if (typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(measure)
@@ -280,21 +283,11 @@ export function GeneratedImagePreview({
           </div>
         ) : null}
         {canInteract ? (
-          <div className="pointer-events-none absolute top-2 right-2 flex gap-1.5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-            <button
-              type="button"
-              className="pointer-events-auto inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] bg-surface/95 border border-line2 text-ink2 hover:text-primaryink"
-              onClick={() => onView?.()}
-            >
-              <Icon name="expand" size={14} /> 查看大图
-            </button>
-            <button
-              type="button"
-              className="pointer-events-auto inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] bg-surface/95 border border-line2 text-ink2 hover:text-primaryink"
-              onClick={() => onAnnotate?.()}
-            >
-              <Icon name="pencil" size={14} /> 标注
-            </button>
+          <div className="pointer-events-none absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+            <CornerIconBtn icon="expand" tip="查看大图" onClick={() => onView?.()} />
+            <CornerIconBtn icon="pencil" tip="标注" onClick={() => onAnnotate?.()} />
+            <CornerIconBtn icon="folder" tip="在文件夹中显示" onClick={() => { void actions.reveal(path).catch(() => {}) }} />
+            <CornerIconBtn icon="external-link" tip="用系统程序打开" onClick={() => { void actions.external(path).catch(() => {}) }} />
           </div>
         ) : null}
       </div>
@@ -325,5 +318,19 @@ export function GeneratedImagePreview({
       </div>
       {!collapsed ? <div className="mt-3" aria-labelledby={titleId}>{body}</div> : null}
     </div>
+  )
+}
+
+function CornerIconBtn({ icon, tip, onClick }: { icon: string; tip: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="ig-preview-corner-btn pointer-events-auto relative inline-flex items-center justify-center w-7 h-7 rounded-md bg-surface/95 border border-line2 text-ink2 hover:text-primaryink focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      aria-label={tip}
+      onClick={(e) => { e.stopPropagation(); onClick() }}
+    >
+      <Icon name={icon} size={14} />
+      <span className="ig-preview-corner-tip" role="tooltip">{tip}</span>
+    </button>
   )
 }

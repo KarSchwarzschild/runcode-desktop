@@ -336,15 +336,18 @@ it('keeps image-model usage separate across progress and completion', () => {
 
 describe('image generation blocks', () => {
   const result = { version: 1, generationId: 'g', status: 'succeeded', model: 'm', size: '1024x1024', accountingStatus: 'unverified', images: [{ path: '生成图片/g/image.png', mimeType: 'image/png', bytes: 1, width: 1, height: 1 }] }
-  it('生图工具独立成卡片，带来源会话，不并进可折叠的执行列表', () => {
+  it('生图工具并进执行列表，并保留来源会话 id', () => {
     const blocks: Block[] = [
       { kind: 'tool', id: 'a', tool: { type: 'completed', toolName: 'Read', toolUseID: 'r' } as ToolEvent },
       { kind: 'tool', id: 'b', sessionId: 'S', tool: { type: 'completed', toolName: 'image_generate', toolUseID: 'i', data: result } as ToolEvent },
       { kind: 'tool', id: 'c', tool: { type: 'completed', toolName: 'Grep', toolUseID: 'g' } as ToolEvent },
     ]
     const groups = groupBlocks(blocks)
-    expect(groups.map((g) => g.kind)).toEqual(['exec', 'image', 'exec'])
-    expect(groups[1]).toMatchObject({ kind: 'image', sessionId: 'S', tool: { toolUseID: 'i' } })
+    expect(groups).toHaveLength(1)
+    expect(groups[0]).toMatchObject({ kind: 'exec' })
+    if (groups[0].kind !== 'exec') throw new Error('expected exec')
+    expect(groups[0].tools.map((t) => t.toolUseID)).toEqual(['r', 'i', 'g'])
+    expect(groups[0].sessionIds).toEqual(['', 'S', ''])
   })
   it('completed 事件不带 data 时保留之前的生图结果', () => {
     const prev = { type: 'progress', toolName: 'image_generate', toolUseID: 'i', data: result } as ToolEvent

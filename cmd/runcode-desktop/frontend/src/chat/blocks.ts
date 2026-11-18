@@ -3,7 +3,6 @@
 // unit-tested directly (see chat.test.ts).
 import type { ToolEvent, PlanSnapshot, PlanItem, EditRecord, ResumedBlock } from '@/core/bridge'
 import { isEditRecord } from '@/core/bridge'
-import { IMAGE_GENERATION_TOOL } from '@/core/image-generation'
 import { type RecordingMark } from '@/recorder/minutes'
 import type { AssistantImageGenerationNote } from './image-generation-note'
 
@@ -13,8 +12,8 @@ export type AgentNested = { agent: string; text: string; tools: ToolEvent[]; usa
 export type Block =
   | { kind: 'user'; id: string; questionId?: string; text: string; ts: string; attachments?: string[] }
   | { kind: 'assistant'; id: string; text: string; thinking?: string; streaming: boolean; ts: string; imageGenerationNote?: AssistantImageGenerationNote }
-  // sessionId is the session the tool ran in; cards that open its files (the
-  // generated image card) must address that session, never whichever is focused.
+  // sessionId is the session the tool ran in; previews that open its files must
+  // address that session, never whichever is focused.
   | { kind: 'tool'; id: string; tool: ToolEvent; nested?: AgentNested; sessionId?: string }
   | { kind: 'error'; id: string; text: string }
   | { kind: 'warning'; id: string; text: string }
@@ -39,16 +38,14 @@ export type ToolBlock = Extract<Block, { kind: 'tool' }>
 
 export type Group =
   | { kind: 'block'; block: Block }
-  | { kind: 'exec'; id: string; tools: ToolEvent[] }
+  // sessionIds 与 tools 等长：栅格生图预览必须绑来源会话，不能猜当前焦点。
+  | { kind: 'exec'; id: string; tools: ToolEvent[]; sessionIds: string[] }
   | { kind: 'ask'; id: string; tool: ToolEvent }
   | { kind: 'analyze'; id: string; tool: ToolEvent }
   // skill is one "模型加载了某个技能" moment. It leaves the compact tool list
   // because a bare 加载技能 row says nothing: the call carries only a name, so
   // what the model actually picked up (and why) is only visible on a card.
   | { kind: 'skill'; id: string; tool: ToolEvent }
-  // image is one image_generate call: the info card + below-preview stage is
-  // the deliverable, so it is never folded into the compact tool list.
-  | { kind: 'image'; id: string; tool: ToolEvent; sessionId: string }
   | { kind: 'edits'; id: string; edits: EditRecord[] }
   // taskgroup collects a fan-out of parallel Task delegations (adjacent Task calls
   // issued in one assistant response) so they render as one container of compact
@@ -253,10 +250,7 @@ export function groupBlocks(blocks: Block[]): Group[] {
         out.push({ kind: 'skill', id: b.id, tool: b.tool })
         continue
       }
-      if (b.tool.toolName === IMAGE_GENERATION_TOOL) {
-        out.push({ kind: 'image', id: b.id, tool: b.tool, sessionId: b.sessionId ?? '' })
-        continue
-      }
+      // image_generate 与 Glob／Grep 等同进执行卡；行下预览由 chat-pane 挂载。
       // A Task delegation is its own observable card (its sub-agent's live text and
       // nested tool calls), so it never folds into the compact exec list — otherwise
       // its nested activity is dropped. Adjacent Task calls (a parallel fan-out
@@ -274,8 +268,13 @@ export function groupBlocks(blocks: Block[]): Group[] {
         continue
       }
       const last = out[out.length - 1]
-      if (last && last.kind === 'exec') last.tools.push(b.tool)
-      else out.push({ kind: 'exec', id: b.id, tools: [b.tool] })
+      const sid = b.sessionId ?? ''
+      if (last && last.kind === 'exec') {
+        last.tools.push(b.tool)
+        last.sessionIds.push(sid)
+      } else {
+        out.push({ kind: 'exec', id: b.id, tools: [b.tool], sessionIds: [sid] })
+      }
       continue
     }
     out.push({ kind: 'block', block: b })

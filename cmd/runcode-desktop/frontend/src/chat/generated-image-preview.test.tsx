@@ -49,11 +49,11 @@ afterEach(async () => {
 
 describe('computePreviewDisplaySize', () => {
   it('三比例在常规上限下等比缩放且不放大', () => {
-    expect(computePreviewDisplaySize(1024, 1024, 800, 900)).toEqual({ width: 480, height: 480, provisional: false })
-    expect(computePreviewDisplaySize(1280, 720, 800, 900)).toEqual({ width: 480, height: 270, provisional: false })
+    expect(computePreviewDisplaySize(1024, 1024, 800, 900)).toEqual({ width: 560, height: 560, provisional: false })
+    expect(computePreviewDisplaySize(1280, 720, 800, 900)).toEqual({ width: 560, height: 315, provisional: false })
     const portrait = computePreviewDisplaySize(720, 1280, 800, 900)
-    expect(portrait.height).toBe(480)
-    expect(portrait.width).toBe(Math.round(720 * (480 / 1280)))
+    expect(portrait.height).toBe(560)
+    expect(portrait.width).toBe(Math.round(720 * (560 / 1280)))
     expect(computePreviewDisplaySize(200, 100, 800, 900)).toEqual({ width: 200, height: 100, provisional: false })
   })
 })
@@ -68,7 +68,7 @@ describe('GeneratedImagePreview', () => {
     expect(host.textContent).toContain('预览图片')
   })
 
-  it('ready 图 decode 后才可交互；历史直挂不播揭示', async () => {
+  it('ready 图 decode 后才可交互；历史直挂不播揭示；角标仅图标', async () => {
     await act(async () => root.render(
       <GeneratedImagePreview tool={tool('completed')} sessionId="S" image={image} />,
     ))
@@ -76,11 +76,16 @@ describe('GeneratedImagePreview', () => {
     const img = host.querySelector('img')
     expect(img).toBeTruthy()
     expect(host.querySelector('.ig-preview-reveal')).toBeNull()
+    expect(host.querySelectorAll('.ig-preview-corner-btn')).toHaveLength(0)
     await act(async () => {
       img!.dispatchEvent(new Event('load'))
       await Promise.resolve()
     })
     expect(host.querySelector('.ig-preview-reveal')).toBeNull()
+    const corners = [...host.querySelectorAll('.ig-preview-corner-btn')]
+    expect(corners.map((el) => el.getAttribute('aria-label'))).toEqual([
+      '查看大图', '标注', '在文件夹中显示', '用系统程序打开',
+    ])
   })
 
   it('running→ready 且 decode 后播放揭示；animationend 清除', async () => {

@@ -5,7 +5,7 @@ import type { ImageGenerationCatalog, ImageGenerationResult, ImageGenerationSett
 
 export const IMAGE_GENERATION_TOOL = 'image_generate'
 
-/** 受支持的栅格 MIME；非栅格产物不进入新卡片／预览／查看器。 */
+/** 受支持的栅格 MIME；非栅格产物不进入行下预览／查看器。 */
 export const RASTER_IMAGE_GENERATION_MIMES = new Set([
   'image/png',
   'image/jpeg',
@@ -29,6 +29,13 @@ export function isRasterImageGeneration(
   const mime = (result.images?.[0]?.mimeType ?? '').trim().toLowerCase()
   if (!mime) return false
   return RASTER_IMAGE_GENERATION_MIMES.has(mime)
+}
+
+/** 外部生图工具尚未结束（进行中／进度），用于隐藏对话流「思考中」指示。 */
+export function isImageGenerateToolRunning(tool: { toolName?: string; type?: string } | null | undefined): boolean {
+  if ((tool?.toolName ?? '') !== IMAGE_GENERATION_TOOL) return false
+  const t = tool?.type ?? ''
+  return t !== 'completed' && t !== 'failed'
 }
 
 // isChatModel 是所有文本用途（对话、判定、子代理、上下文预算、识图）候选的统一入口。
@@ -90,42 +97,13 @@ export function isImageGenerationResult(data: unknown): data is ImageGenerationR
   return o.version === 1 && typeof o.generationId === 'string' && typeof o.status === 'string'
 }
 
-// accountingLabel 只描述人工观察的证据状态。缺失、未知值都按待核验处理——任何
-// 结果状态（失败、取消、未知）都不能推出“免费”。卡片 UI 不再展示本标签。
-export function accountingLabel(status?: string): string {
-  switch (status) {
-    case 'verified': return '本次计费已人工核对'
-    case 'ambiguous': return '计费记录无法唯一对应，待核验'
-    case 'observed_mismatch': return '已发现计费异常，该模型已停用'
-    default: return '计费待核验'
-  }
-}
-
-/** 卡片四态：生成中 / 预览可读 / 本次未交付图 / 曾成功但文件现已不可读。 */
-export type ImageGenerationCardState = 'running' | 'ready' | 'not-generated' | 'missing'
-
-/**
- * imageGenerationCardState 把工具结果与下方预览读取结果收成卡片状态。
- * missing 仅当 status=succeeded 且确认 not_found；其它读取失败由预览区单独提示，
- * 不把已完成生成改成「未生成」。
- */
-export function imageGenerationCardState(
-  result: ImageGenerationResult | null | undefined,
-  opts: { toolEnded: boolean; previewReadable?: boolean; previewMissing?: boolean },
-): ImageGenerationCardState {
-  if (!result) return opts.toolEnded ? 'not-generated' : 'running'
-  if (result.status === 'succeeded') {
-    if (opts.previewMissing) return 'missing'
-    if (opts.previewReadable) return 'ready'
-    // 成功结果尚在拉预览：仍按 ready 排版（占位），不落成「未生成」。
-    return 'ready'
-  }
-  return 'not-generated'
-}
-
-/** 两种用户可见失败文案（中性色展示）；模型名空时用「未设置模型」。 */
-export function imageGenerationFailureLabel(state: 'not-generated' | 'missing', model?: string | null): string {
-  const name = (model ?? '').trim() || '未设置模型'
-  if (state === 'missing') return `生成图片 文件不存在 ${name}`
-  return `生成图片 未生成 ${name}`
+/** 执行卡行下是否挂预览舞台：生成中或已成功交付图时挂；失败／未交付不挂。 */
+export function shouldShowImageGenerationStage(
+  tool: { toolName?: string; type?: string; data?: unknown },
+): boolean {
+  const result = isImageGenerationResult(tool.data) ? tool.data : null
+  if (!isRasterImageGeneration(tool, result)) return false
+  const toolEnded = tool.type === 'completed' || tool.type === 'failed'
+  if (!toolEnded) return true
+  return result?.status === 'succeeded' && !!result.images?.[0]
 }
