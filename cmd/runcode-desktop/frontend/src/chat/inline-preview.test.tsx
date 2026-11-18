@@ -38,6 +38,7 @@ afterEach(async () => {
   await act(async () => root.unmount())
   host.remove()
   vi.unstubAllGlobals()
+  vi.restoreAllMocks()
 })
 
 const svgOk = '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><rect width="10" height="10"/></svg>'
@@ -196,5 +197,131 @@ describe('InlinePreview lifecycle', () => {
     const imageButton = dialog.querySelector('img')?.closest('button') as HTMLButtonElement
     await act(async () => imageButton.click())
     expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+  })
+
+  it('单击 SVG 图面打开右侧代码预览，并使用唯一关联文件', async () => {
+    const open = vi.fn()
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'svg',
+        source: svgOk,
+        defaultNode: createElement('code', null, 'SOURCE'),
+        messageId: 'm1',
+        previewId: '0:10',
+        sessionId: 'S',
+        relatedPaths: ['charts/a.svg'],
+        onOpenCodePreview: open,
+      }))
+    })
+    await act(async () => (host.querySelector('img') as HTMLImageElement).click())
+    expect(open).toHaveBeenCalledWith(expect.objectContaining({
+      kind: 'file',
+      relPath: 'charts/a.svg',
+      ownerKey: 'file:S:charts/a.svg',
+    }))
+  })
+
+  it('Mermaid 和没有文件的 SVG 单击使用内存静态预览，HTML 从标题进入', async () => {
+    const open = vi.fn()
+    mermaid.render.mockResolvedValue({
+      ok: true,
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>',
+      width: 20,
+      height: 10,
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'mermaid',
+        source: 'graph TD;A-->B',
+        defaultNode: createElement('code', null, 'SOURCE'),
+        messageId: 'm1',
+        previewId: '0:10',
+        sessionId: 'S',
+        relatedPaths: ['charts/flow.mmd'],
+        onOpenCodePreview: open,
+      }))
+    })
+    await act(async () => { await Promise.resolve() })
+    await act(async () => (host.querySelector('img') as HTMLImageElement).click())
+    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'inline-static',
+      ownerKey: 'inline:S:m1:0:10',
+      sourceKind: 'mermaid',
+    }))
+
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html',
+          source: '<!doctype html><html><body><p>页面</p></body></html>',
+          defaultNode: createElement('code', null, 'SOURCE'),
+          messageId: 'm2',
+          previewId: '11:20',
+          sessionId: 'S',
+          onOpenCodePreview: open,
+        }),
+      ))
+    })
+    await act(async () => { await Promise.resolve() })
+    const titleButton = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'HTML 预览') as HTMLButtonElement
+    expect(titleButton).toBeTruthy()
+    await act(async () => titleButton.click())
+    expect(open).toHaveBeenLastCalledWith(expect.objectContaining({
+      kind: 'inline-static',
+      ownerKey: 'inline:S:m2:11:20',
+      sourceKind: 'html',
+    }))
+  })
+
+  it('SVG 和 Mermaid 可下载清理后的 SVG，HTML 不显示下载', async () => {
+    const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'svg',
+        source: svgOk,
+        defaultNode: createElement('code', null, 'SOURCE'),
+        messageId: 'm1',
+        previewId: '0:10',
+      }))
+    })
+    const button = host.querySelector('button[title="下载 SVG"]') as HTMLButtonElement
+    expect(button).toBeTruthy()
+    await act(async () => button.click())
+    expect(anchorClick).toHaveBeenCalledTimes(1)
+    const download = anchorClick.mock.instances[0] as HTMLAnchorElement
+    expect(download.download).toMatch(/^code-svg-[a-z0-9-]+\.svg$/)
+    expect(revoke).toHaveBeenCalled()
+
+    mermaid.render.mockResolvedValue({
+      ok: true,
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>',
+      width: 20,
+      height: 10,
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'mermaid',
+        source: 'graph TD;A-->B',
+        defaultNode: createElement('code', null, 'SOURCE'),
+        messageId: 'm2',
+        previewId: '11:20',
+      }))
+    })
+    expect(host.querySelector('button[title="下载 SVG"]')).toBeTruthy()
+    anchorClick.mockRestore()
+
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html',
+          source: '<!doctype html><html><body><p>页面</p></body></html>',
+          defaultNode: createElement('code', null, 'SOURCE'),
+          messageId: 'm3',
+          previewId: '21:30',
+        }),
+      ))
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(host.querySelector('button[title="下载 SVG"]')).toBeNull()
   })
 })

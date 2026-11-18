@@ -464,6 +464,14 @@ export function Icon({ name, size = 18, className }: Props) {
           <path d="M4 20l7-7" />
         </svg>
       )
+    case 'download':
+      return (
+        <svg {...common} {...stroke}>
+          <path d="M12 3v12" />
+          <path d="m7 10 5 5 5-5" />
+          <path d="M5 20h14" />
+        </svg>
+      )
     case 'shrink':
       return (
         <svg {...common} {...stroke}>

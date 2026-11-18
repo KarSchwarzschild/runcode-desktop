@@ -12,6 +12,7 @@ import {
 } from '@/preview/static-detect'
 import { extractFilePaths } from '@/preview/classify'
 import { isStaticInlinePath } from '@/session/inline-preview-status'
+import type { CodePreviewTarget } from '@/preview/code-preview'
 import { InlinePreview } from './inline-preview'
 
 export type AssistantMarkdownProps = Omit<MarkdownProps, 'renderCodeBlock'> & {
@@ -20,6 +21,7 @@ export type AssistantMarkdownProps = Omit<MarkdownProps, 'renderCodeBlock'> & {
   onContentHeightChange?: () => void
   /** 接通 inline-preview-status：成功内联后抑制同路径右侧自动预览。 */
   sessionId?: string
+  onOpenCodePreview?: (target: CodePreviewTarget) => void
 }
 
 export type FenceBlock = { lang: string; meta: string; value: string; start: number; end: number }
@@ -80,7 +82,10 @@ export function relatedPathsForKind(source: string, kind: StaticPreviewKind): st
   return out
 }
 
-export function AssistantMarkdown({ messageId, streaming = false, onContentHeightChange, children, textOnly, sessionId, ...rest }: AssistantMarkdownProps) {
+export function AssistantMarkdown({
+  messageId, streaming = false, onContentHeightChange, children, textOnly, sessionId,
+  onOpenCodePreview, ...rest
+}: AssistantMarkdownProps) {
   const enable = !streaming && !textOnly
   const selected = useMemo(
     () => (enable ? selectPreviewBlocks(children, false) : new Map<string, StaticPreviewKind>()),
@@ -108,12 +113,14 @@ export function AssistantMarkdown({ messageId, streaming = false, onContentHeigh
           defaultNode={info.defaultNode}
           onHeightChange={onContentHeightChange}
           messageId={messageId}
+          previewId={id}
           sessionId={sessionId}
           relatedPaths={pathsByKind?.[kind]}
+          onOpenCodePreview={onOpenCodePreview}
         />
       )
     }
-  }, [enable, selected, onContentHeightChange, messageId, sessionId, pathsByKind])
+  }, [enable, selected, onContentHeightChange, messageId, sessionId, pathsByKind, onOpenCodePreview])
 
   return (
     <Markdown {...rest} textOnly={textOnly} renderCodeBlock={renderCodeBlock}>

@@ -22,8 +22,9 @@ import {
   displayImageGenerationSizeLabel,
   scrubImageGenerationAssistantText,
 } from './image-generation-note'
+import type { CodePreviewTarget } from '@/preview/code-preview'
 
-export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings, sessionId }: {
+export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings, sessionId, onOpenCodePreview }: {
   textOnly?: boolean
   block: Block
   onRetryQuestion?: (id: string) => void
@@ -35,6 +36,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
   onContentHeightChange?: () => void
   onOpenImageGenerationSettings?: () => void
   sessionId?: string
+  onOpenCodePreview?: (target: CodePreviewTarget) => void
 }) {
   // While an assistant answer streams, keep it in a fixed-height window pinned to
   // the newest text (consistent with the tool/agent cards); release to full height
@@ -90,6 +92,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                     onOpenFile={onOpenFile}
                     resolveFile={resolveFile}
                     onContentHeightChange={onContentHeightChange}
+                    onOpenCodePreview={onOpenCodePreview}
                   >
                     {scrubImageGenerationAssistantText(block.text)}
                   </AssistantMarkdown>
@@ -173,7 +176,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
     case 'tool':
       // Live Task with sub-agent activity → nested observable view; a resumed Task
       // (no live nested data) falls back to the normal card showing its result.
-      if (block.tool.toolName === 'Task' && block.nested) return <BotRow><AgentTaskCard tool={block.tool} nested={block.nested} sessionId={sessionId ?? block.sessionId} /></BotRow>
+      if (block.tool.toolName === 'Task' && block.nested) return <BotRow><AgentTaskCard tool={block.tool} nested={block.nested} sessionId={sessionId ?? block.sessionId} onOpenCodePreview={onOpenCodePreview} /></BotRow>
       return <BotRow><ExecutionCard tools={[block.tool]} /></BotRow>
   }
 }

@@ -391,6 +391,7 @@ export default function App() {
                   onScroll={conversation.onChatScroll}
                   onAnswer={(text) => void conversation.send(text, [])}
                   onOpenFile={preview.openFile}
+                  onOpenCodePreview={preview.openCodePreview}
                   onReviewEdit={preview.openDiff}
                   onUndoEdit={(id) => void conversation.undo(id)}
                   resolveFile={workspace.resolve}

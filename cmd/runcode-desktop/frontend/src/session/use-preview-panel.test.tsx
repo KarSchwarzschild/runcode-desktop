@@ -88,3 +88,48 @@ it('discards pending external actions and previews on lifecycle change or unmoun
   expect(await preview).toBe(false)
   expect(api.releaseArtifact).toHaveBeenCalledWith('Ag2')
 })
+
+it('opens and updates a code-only static tab without requesting an artifact', async () => {
+  await render('A')
+  await act(async () => (panel as any).openCodePreview({
+    kind: 'inline-static',
+    ownerKey: 'inline:A:m1:0:10',
+    title: 'Mermaid 预览',
+    sourceKind: 'mermaid',
+    source: 'graph TD;A-->B',
+    messageId: 'm1',
+  }))
+  expect(api.openArtifact).not.toHaveBeenCalled()
+  expect(panel.tabs).toHaveLength(1)
+  expect(panel.tabs[0]).toMatchObject({
+    kind: 'inline-static',
+    ownerKey: 'inline:A:m1:0:10',
+    source: 'graph TD;A-->B',
+  })
+
+  await act(async () => (panel as any).openCodePreview({
+    kind: 'inline-static',
+    ownerKey: 'inline:A:m1:0:10',
+    title: 'Mermaid 预览',
+    sourceKind: 'mermaid',
+    source: 'graph TD;A-->C',
+    messageId: 'm1',
+  }))
+  expect(panel.tabs).toHaveLength(1)
+  expect(panel.tabs[0]).toMatchObject({ source: 'graph TD;A-->C' })
+})
+
+it('routes a code preview with a workspace file through the artifact-backed file tab', async () => {
+  api.openArtifact.mockResolvedValue({ ...ref('A'), path: 'charts/a.svg' })
+  await render('A')
+  await act(async () => {
+    ;(panel as any).openCodePreview({
+      kind: 'file',
+      relPath: 'charts/a.svg',
+      ownerKey: 'file:A:charts/a.svg',
+    })
+    await Promise.resolve()
+  })
+  expect(api.openArtifact).toHaveBeenCalledWith('A', 'charts/a.svg')
+  expect(panel.tabs[0]).toMatchObject({ kind: 'file', relPath: 'charts/a.svg' })
+})

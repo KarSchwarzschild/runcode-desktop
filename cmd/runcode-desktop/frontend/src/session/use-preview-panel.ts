@@ -5,7 +5,8 @@ import { copyText, errText, Events, onEvent, openArtifact, openExternal, release
 import { createActionScope } from './action-scope'
 import type { ArtifactActions } from '@/chat/artifact-actions'
 import { clampPreviewWidth, previewWidthBounds } from '@/preview/classify'
-import { closeTab, openTab, type PreviewTab } from '@/preview/tabs'
+import type { CodePreviewTarget } from '@/preview/code-preview'
+import { closeTab, openTab, tabKey, type PreviewTab } from '@/preview/tabs'
 
 export type PreviewPanelState = ReturnType<typeof usePreviewPanel>
 
@@ -122,6 +123,39 @@ export function usePreviewPanel(sessionID: string, notify: (text: string) => voi
     } catch (e) { if (current()) report.current(errText(e)) }
     finally { if (reference) void releaseArtifact(reference).catch(() => {}) }
   }
+  const openCodePreview = (target: CodePreviewTarget) => {
+    if (target.kind === 'file') {
+      void openFile(target.relPath)
+      return
+    }
+    if (lifecycle.current.get(sessionID)?.blocked) return
+    opens.current++
+    setBySession((all) => {
+      const cur = all[sessionID] ?? EMPTY_TABS
+      const tab: PreviewTab = {
+        kind: 'inline-static',
+        ownerKey: target.ownerKey,
+        title: target.title,
+        sourceKind: target.sourceKind,
+        source: target.source,
+        messageID: target.messageId,
+        sessionID,
+      }
+      const opened = openTab(cur.tabs, cur.active, tab)
+      let tabs = opened.tabs
+      let active: string | null = opened.active
+      let inlineCount = tabs.filter((t) => t.kind === 'inline-static').length
+      while (inlineCount > 8) {
+        const oldest = tabs.findIndex((t) => t.kind === 'inline-static' && tabKey(t) !== active)
+        if (oldest < 0) break
+        tabs = tabs.filter((_, i) => i !== oldest)
+        inlineCount--
+      }
+      if (active && !tabs.some((t) => tabKey(t) === active)) active = tabs[tabs.length - 1] ? tabKey(tabs[tabs.length - 1]) : null
+      return { ...all, [sessionID]: { tabs, active } }
+    })
+    setBrowseOpen(false)
+  }
   const openDiff = (snapshotId: string, relPath: string) => open({ kind: 'diff', snapshotId, relPath, sessionID })
   const close = (key: string) => {
     patch(closeTab(tabs, active, key))
@@ -178,6 +212,6 @@ export function usePreviewPanel(sessionID: string, notify: (text: string) => voi
   return {
     tabs, active, setActive, browseOpen, setBrowseOpen,
     autoOpen, toggleAutoOpen, width, dragHandlers, opens,
-    openFile, openReference, openDiff, actions, close, closeAll, dropSession,
+    openFile, openReference, openCodePreview, openDiff, actions, close, closeAll, dropSession,
   }
 }

@@ -27,6 +27,7 @@ import { type PreviewTab } from '@/preview/tabs'
 import { PlanStates, type PlanSnapshot } from '@/core/bridge'
 import { type Plan } from '@/session/use-plan'
 import { InlinePreviewBudgetProvider } from '@/chat/inline-preview-budget'
+import type { CodePreviewTarget } from '@/preview/code-preview'
 
 export function ChatPane({
   blocks, busy, cwd, userName, plan, planOpen, onPlanToggle, planning, textOnly = false,
@@ -39,6 +40,7 @@ export function ChatPane({
   sessionId,
   onRasterImageView,
   onRasterImageAnnotate,
+  onOpenCodePreview,
 }: {
   textOnly?: boolean
   onRetryQuestion?: (id: string) => void
@@ -75,6 +77,7 @@ export function ChatPane({
   sessionId?: string
   onRasterImageView?: (image: import('@/core/bridge').ImageGenerationArtifact, toolUseId: string) => void
   onRasterImageAnnotate?: (image: import('@/core/bridge').ImageGenerationArtifact, toolUseId: string) => void
+  onOpenCodePreview?: (target: CodePreviewTarget) => void
 }) {
   const groups = groupBlocks(blocks)
   // 栅格生图展示投影：合并指向本条产物的 open_preview，避免执行卡重复占行。
@@ -190,10 +193,10 @@ export function ChatPane({
                 />
               </BotRow>
             ) : g.kind === 'taskgroup' ? (
-              <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} sessionId={sessionId} /></BotRow>
+              <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} sessionId={sessionId} onOpenCodePreview={onOpenCodePreview} /></BotRow>
             ) : (
               <div key={g.block.id}>
-                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} onContentHeightChange={onContentHeightChange} onOpenImageGenerationSettings={onOpenImageGenerationSettings} sessionId={sessionId} />
+                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} onOpenCodePreview={onOpenCodePreview} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} onContentHeightChange={onContentHeightChange} onOpenImageGenerationSettings={onOpenImageGenerationSettings} sessionId={sessionId} />
                 {!textOnly && g.block.kind === 'assistant' && (
                   <ReplyArtifacts text={g.block.text} files={files} tabs={tabs} onOpen={onOpenFile} />
                 )}

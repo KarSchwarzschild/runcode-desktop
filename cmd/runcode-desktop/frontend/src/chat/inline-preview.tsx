@@ -7,13 +7,15 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { sanitizeSvg } from '@/preview/static-svg'
 import { renderStaticHtml, HTML_PREVIEW_SANDBOX, measureDocumentHeight, createHeightGovernor } from '@/preview/static-html'
 import { renderMermaid } from '@/preview/static-mermaid-loader'
-import { PREVIEW_LIMITS, type StaticPreviewKind } from '@/preview/static-detect'
+import { contentDigest, PREVIEW_LIMITS, type StaticPreviewKind } from '@/preview/static-detect'
 import { logPreviewFailure, previewFailureHint } from '@/preview/preview-failure'
 import { noteInlineFile, type InlineFileStatus } from '@/session/inline-preview-status'
 import { Icon } from '@/ui/icons'
 import { Popover } from '@/ui/popover'
 import { IconBtn } from '@/preview/icon-btn'
 import { ImageLightbox } from '@/preview/image-lightbox'
+import { codePreviewTarget, type CodePreviewTarget } from '@/preview/code-preview'
+import { downloadSvgText } from '@/preview/svg-download'
 import { useHtmlPreviewSlot } from './inline-preview-budget'
 
 type Props = {
@@ -25,10 +27,12 @@ type Props = {
   /** 与本预览同扩展名、同条消息里提到的工作区相对路径；用于抑制右侧自动预览。 */
   relatedPaths?: string[]
   sessionId?: string
+  previewId?: string
+  onOpenCodePreview?: (target: CodePreviewTarget) => void
 }
 
 type Ready =
-  | { kind: 'svg' | 'mermaid'; url: string; width: number; height: number }
+  | { kind: 'svg' | 'mermaid'; url: string; svg: string; width: number; height: number }
   | { kind: 'html'; srcdoc: string }
 
 const PREVIEW_TITLE: Record<StaticPreviewKind, string> = {
@@ -46,7 +50,10 @@ function reportPaths(sessionId: string | undefined, paths: string[] | undefined,
   for (const p of paths) noteInlineFile(sessionId, p, status)
 }
 
-export function InlinePreview({ kind, source, defaultNode, onHeightChange, messageId, relatedPaths, sessionId }: Props) {
+export function InlinePreview({
+  kind, source, defaultNode, onHeightChange, messageId, relatedPaths, sessionId,
+  previewId, onOpenCodePreview,
+}: Props) {
   const [ready, setReady] = useState<Ready | null>(null)
   const [failReason, setFailReason] = useState<string | null>(null)
   const [view, setView] = useState<'preview' | 'source'>('preview')
@@ -90,7 +97,7 @@ export function InlinePreview({ kind, source, defaultNode, onHeightChange, messa
           if (cancelled || gen !== genRef.current) { URL.revokeObjectURL(url); return }
           if (urlRef.current) URL.revokeObjectURL(urlRef.current)
           urlRef.current = url
-          setReady({ kind: 'svg', url, width: r.width, height: r.height })
+          setReady({ kind: 'svg', url, svg: r.svg, width: r.width, height: r.height })
           reportPaths(sessionId, paths, 'rendered')
           return
         }
@@ -110,7 +117,7 @@ export function InlinePreview({ kind, source, defaultNode, onHeightChange, messa
         if (cancelled || gen !== genRef.current) { URL.revokeObjectURL(url); return }
         if (urlRef.current) URL.revokeObjectURL(urlRef.current)
         urlRef.current = url
-        setReady({ kind: 'mermaid', url, width: r.width, height: r.height })
+        setReady({ kind: 'mermaid', url, svg: r.svg, width: r.width, height: r.height })
         reportPaths(sessionId, paths, 'rendered')
       } catch (err) {
         const msg = err instanceof Error ? err.message : 'unknown'
@@ -132,9 +139,28 @@ export function InlinePreview({ kind, source, defaultNode, onHeightChange, messa
   const title = PREVIEW_TITLE[kind]
   const imageReady = ready && ready.kind !== 'html' ? ready : null
   const canFullscreen = targetFullscreen(imageReady, view)
+  const digest = contentDigest(source.trim())
+  const openSidePreview = () => {
+    if (!onOpenCodePreview) return
+    onOpenCodePreview(codePreviewTarget({
+      kind, source, title, sessionId, messageId, previewId, relatedPaths,
+    }))
+  }
+  const titleNode = kind === 'html' && onOpenCodePreview ? (
+    <button
+      type="button"
+      className="text-[12px] font-medium text-ink flex-1 min-w-0 truncate text-left hover:text-primary"
+      title="在右侧预览打开"
+      onClick={openSidePreview}
+    >
+      {title}
+    </button>
+  ) : (
+    <span className="text-[12px] font-medium text-ink flex-1 min-w-0 truncate">{title}</span>
+  )
   const header = ready ? (
     <div className="relative flex items-center gap-2 min-h-9 px-2.5 border-b border-line2 bg-surface">
-      <span className="text-[12px] font-medium text-ink flex-1 min-w-0 truncate">{title}</span>
+      {titleNode}
       <button
         type="button"
         className="flex-none inline-flex items-center gap-1 h-7 px-2 rounded-md text-[12px] text-muted hover:text-ink hover:bg-surface2"
@@ -152,6 +178,13 @@ export function InlinePreview({ kind, source, defaultNode, onHeightChange, messa
           仅显示代码
         </button>
       </Popover>
+      {imageReady && view === 'preview' && (
+        <IconBtn
+          name="download"
+          title="下载 SVG"
+          onClick={() => downloadSvgText(imageReady.svg, `code-${kind}-${digest}.svg`)}
+        />
+      )}
       {canFullscreen && <IconBtn name="expand" title="全屏" onClick={() => setLightboxOpen(true)} />}
     </div>
   ) : (
@@ -204,15 +237,34 @@ export function InlinePreview({ kind, source, defaultNode, onHeightChange, messa
         <div className="p-2.5">{defaultNode}</div>
       ) : (
         <div className="p-2 overflow-hidden rounded-b-lg">
-          <img
-            src={ready.url}
-            alt={`${title}图`}
-            width={ready.width}
-            height={ready.height}
-            style={INLINE_IMAGE_STYLE}
-            className="block max-w-full w-auto h-auto mx-auto object-contain"
-            onLoad={() => notify.current?.()}
-          />
+          {onOpenCodePreview ? (
+            <button
+              type="button"
+              className="block w-full bg-transparent border-0 p-0 cursor-pointer"
+              title="在右侧预览打开"
+              onClick={openSidePreview}
+            >
+              <img
+                src={ready.url}
+                alt={`${title}图`}
+                width={ready.width}
+                height={ready.height}
+                style={INLINE_IMAGE_STYLE}
+                className="block max-w-full w-auto h-auto mx-auto object-contain"
+                onLoad={() => notify.current?.()}
+              />
+            </button>
+          ) : (
+            <img
+              src={ready.url}
+              alt={`${title}图`}
+              width={ready.width}
+              height={ready.height}
+              style={INLINE_IMAGE_STYLE}
+              className="block max-w-full w-auto h-auto mx-auto object-contain"
+              onLoad={() => notify.current?.()}
+            />
+          )}
         </div>
       )}
       <ImageLightbox
