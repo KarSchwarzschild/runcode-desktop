@@ -185,6 +185,32 @@ describe('InlinePreview lifecycle', () => {
     expect(host.querySelector('button[title="全屏"]')).toBeTruthy()
   })
 
+  it('相同 Mermaid 源码在父组件重渲染时只调用一次 render', async () => {
+    mermaid.render.mockResolvedValue({
+      ok: true,
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>',
+      width: 20,
+      height: 10,
+    })
+    const draw = (onOpenCodePreview: () => void) => root.render(createElement(InlinePreview, {
+      kind: 'mermaid',
+      source: 'graph TD;A-->B',
+      defaultNode: createElement('code', null, 'SOURCE'),
+      messageId: 'm1',
+      previewId: '0:10',
+      relatedPaths: [],
+      onOpenCodePreview,
+    }))
+    await act(async () => draw(() => {}))
+    await act(async () => { await Promise.resolve() })
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+
+    // 模拟输入框更新导致父组件重建回调；相同源码不应再次进入 Mermaid。
+    await act(async () => draw(() => {}))
+    await act(async () => { await Promise.resolve() })
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+  })
+
   it('全屏按钮打开客户端图片遮罩，单击图片后关闭', async () => {
     await act(async () => {
       root.render(createElement(InlinePreview, {
