@@ -56,6 +56,7 @@ export function GeneratedImageViewerHost({
             hosted
             sessionId={target.sessionId}
             sourcePath={target.image.path}
+            sourceReference={artifact?.reference ?? ''}
             imageUrl={url}
             naturalWidth={target.image.width}
             naturalHeight={target.image.height}

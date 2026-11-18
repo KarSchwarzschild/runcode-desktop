@@ -954,10 +954,11 @@ export interface SaveCustomModelRequest {
   clearAPIKey?: boolean;
 }
 
-// Mirrors protocol.SaveImageGenerationEditRequest. SaveImageGenerationEditRequest 把画板合成的 PNG 存为同一 generation 目录下的新副本。 SourcePath 必须是本会话工作区 生成图片/<generationId>/ 下已有图片（含 edited-*.png）。
+// Mirrors protocol.SaveImageGenerationEditRequest. SaveImageGenerationEditRequest 把画板合成的 PNG 存为同一 generation 目录下的新副本。 SourcePath 必须是本会话工作区 生成图片/<generationId>/ 下已有图片（含 edited-*.png）。 SourceReference 必填：宿主在同一来源会话操作内核对引用、session、generation 与路径。
 export interface SaveImageGenerationEditRequest {
   sessionId: string;
   sourcePath: string;
+  sourceReference: string;
   pngBase64: string;
 }
 
@@ -1332,7 +1333,7 @@ export interface UsageOverview {
   mappingVersion?: string;
 }
 
-// Mirrors protocol.UsageQuality. UsageQuality 描述一组统计的口径覆盖：tokenCoverage / cacheCoverage 取 complete / partial / none；legacy 标记说明合计里含无法确认来源的历史口径。
+// Mirrors protocol.UsageQuality. UsageQuality 描述一组统计的口径覆盖：tokenCoverage / cacheCoverage 取 complete / partial / none；containsEstimates 表示合计含本地近似缓存（非供应商精确命中）； legacy 标记说明合计里含无法确认来源的历史口径。
 export interface UsageQuality {
   tokenCoverage: string;
   cacheCoverage: string;

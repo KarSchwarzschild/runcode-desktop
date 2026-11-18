@@ -4,13 +4,17 @@ import { errText, saveImageGenerationEdit, type ImageGenerationArtifact } from '
 import { ConfirmDialog } from '@/ui/confirm-dialog'
 import { BTN, BTN_PRIMARY } from '@/ui/tokens'
 import {
-  IMAGE_EDIT_COLORS, IMAGE_EDIT_MAX_BYTES, appendStroke, appendText, fitEditOutputSize,
-  initialEditState, isDirty, redo, selectColor, selectTool, undo, type ImageEditState, type NormPoint,
+  IMAGE_EDIT_COLORS, appendStroke, appendText, fitEditOutputSize,
+  initialEditState, isDirty, projectImageEditOperations, redo, selectColor, selectTool, undo,
+  type ImageEditState, type NormPoint,
 } from './image-edit-ops'
+import { composeImageEditPng } from './image-edit-export'
 
 type Props = {
   sessionId: string
   sourcePath: string
+  /** 宿主 OpenArtifact 引用；保存与导出必填。 */
+  sourceReference: string
   imageUrl: string
   naturalWidth: number
   naturalHeight: number
@@ -22,7 +26,7 @@ type Props = {
 }
 
 export function ImageEditCanvas({
-  sessionId, sourcePath, imageUrl, naturalWidth, naturalHeight, onClose, onSaved,
+  sessionId, sourcePath, sourceReference, imageUrl, naturalWidth, naturalHeight, onClose, onSaved,
   hosted = false, onDirtyChange,
 }: Props) {
   const [state, setState] = useState<ImageEditState>(() => initialEditState())
@@ -33,6 +37,11 @@ export function ImageEditCanvas({
   const stageRef = useRef<HTMLDivElement>(null)
   const drawing = useRef<NormPoint[] | null>(null)
   const imgRef = useRef<HTMLImageElement>(null)
+  const savingRef = useRef(false)
+  const snapshotRef = useRef(state)
+  snapshotRef.current = state
+  const outSize = fitEditOutputSize(naturalWidth || 1, naturalHeight || 1)
+  const pixelOps = projectImageEditOperations(state.operations, outSize.w, outSize.h)
 
   useEffect(() => {
     onDirtyChange?.(isDirty(state))
@@ -103,23 +112,26 @@ export function ImageEditCanvas({
   }
 
   async function onSave() {
-    if (busy) return
+    if (busy || savingRef.current) return
+    if (!sourceReference) {
+      setError('来源引用已失效，请重新打开标注')
+      return
+    }
+    savingRef.current = true
     setError('')
     setBusy(true)
+    const frozen = snapshotRef.current
     try {
-      const pngBase64 = await composePngBase64(imageUrl, naturalWidth, naturalHeight, state)
-      // 粗估：base64 长度约 4/3 字节；超限直接拒，不发宿主。
-      const approxBytes = Math.floor((pngBase64.length * 3) / 4)
-      if (approxBytes > IMAGE_EDIT_MAX_BYTES || pngBase64.length > IMAGE_EDIT_MAX_BYTES) {
-        setError('合成结果超过 16 MiB 上限，请减少标注或使用更小原图')
-        return
-      }
-      const art = await saveImageGenerationEdit({ sessionId, sourcePath, pngBase64 })
+      const composed = await composeImageEditPng(sourceReference, frozen)
+      const art = await saveImageGenerationEdit({
+        sessionId, sourcePath, sourceReference, pngBase64: composed.pngBase64,
+      })
       onSaved(art)
       onClose()
     } catch (e) {
       setError(errText(e) || '保存失败')
     } finally {
+      savingRef.current = false
       setBusy(false)
     }
   }
@@ -175,20 +187,24 @@ export function ImageEditCanvas({
           onPointerUp={onPointerUp}
           onPointerCancel={onPointerUp}
         >
-          <img ref={imgRef} src={imageUrl} alt="" className="block max-w-full max-h-[70vh] rounded-lg" draggable={false} />
-          <svg className="absolute inset-0 w-full h-full pointer-events-none" viewBox="0 0 1 1" preserveAspectRatio="none">
-            {state.operations.map((op, i) => {
-              if (op.kind === 'stroke') {
-                const d = op.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ')
-                return <path key={i} d={d} fill="none" stroke={op.color} strokeWidth={op.width} strokeLinecap="round" strokeLinejoin="round" />
-              }
-              return (
-                <text key={i} x={op.x} y={op.y} fill={op.color} fontSize={op.fontSize} style={{ fontFamily: 'IBM Plex Sans, sans-serif' }}>
-                  {op.text}
-                </text>
-              )
-            })}
-          </svg>
+            <img ref={imgRef} src={imageUrl} alt="" className="block max-w-full max-h-[70vh] rounded-lg" draggable={false} />
+            <svg
+              className="absolute inset-0 w-full h-full pointer-events-none"
+              viewBox={`0 0 ${outSize.w} ${outSize.h}`}
+              preserveAspectRatio="xMidYMid meet"
+            >
+              {pixelOps.map((op, i) => {
+                if (op.kind === 'stroke') {
+                  const d = op.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'}${p.x} ${p.y}`).join(' ')
+                  return <path key={i} d={d} fill="none" stroke={op.color} strokeWidth={op.lineWidth} strokeLinecap="round" strokeLinejoin="round" />
+                }
+                return (
+                  <text key={i} x={op.x} y={op.y} fill={op.color} fontSize={op.fontSize} style={{ fontFamily: op.fontFamily }} dominantBaseline="alphabetic">
+                    {op.text}
+                  </text>
+                )
+              })}
+            </svg>
         </div>
       </div>
     </>
@@ -216,51 +232,3 @@ export function ImageEditCanvas({
   )
 }
 
-async function composePngBase64(
-  imageUrl: string,
-  naturalWidth: number,
-  naturalHeight: number,
-  state: ImageEditState,
-): Promise<string> {
-  const img = await loadImage(imageUrl)
-  const { w, h } = fitEditOutputSize(naturalWidth || img.naturalWidth || 1, naturalHeight || img.naturalHeight || 1)
-  const canvas = document.createElement('canvas')
-  canvas.width = w
-  canvas.height = h
-  const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('无法创建画布')
-  ctx.drawImage(img, 0, 0, w, h)
-  for (const op of state.operations) {
-    if (op.kind === 'stroke') {
-      if (op.points.length < 2) continue
-      ctx.strokeStyle = op.color
-      ctx.lineWidth = Math.max(1, op.width * Math.min(w, h))
-      ctx.lineCap = 'round'
-      ctx.lineJoin = 'round'
-      ctx.beginPath()
-      op.points.forEach((p, i) => {
-        const x = p.x * w
-        const y = p.y * h
-        if (i === 0) ctx.moveTo(x, y)
-        else ctx.lineTo(x, y)
-      })
-      ctx.stroke()
-    } else {
-      ctx.fillStyle = op.color
-      ctx.font = `${Math.max(12, op.fontSize * Math.min(w, h))}px "IBM Plex Sans", sans-serif`
-      ctx.fillText(op.text, op.x * w, op.y * h)
-    }
-  }
-  const dataUrl = canvas.toDataURL('image/png')
-  const i = dataUrl.indexOf(',')
-  return i >= 0 ? dataUrl.slice(i + 1) : dataUrl
-}
-
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image()
-    img.onload = () => resolve(img)
-    img.onerror = () => reject(new Error('无法加载底图'))
-    img.src = url
-  })
-}

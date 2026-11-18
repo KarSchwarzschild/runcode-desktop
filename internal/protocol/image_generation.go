@@ -83,10 +83,12 @@ const (
 
 // SaveImageGenerationEditRequest 把画板合成的 PNG 存为同一 generation 目录下的新副本。
 // SourcePath 必须是本会话工作区 生成图片/<generationId>/ 下已有图片（含 edited-*.png）。
+// SourceReference 必填：宿主在同一来源会话操作内核对引用、session、generation 与路径。
 type SaveImageGenerationEditRequest struct {
-	SessionID  string `json:"sessionId"`
-	SourcePath string `json:"sourcePath"`
-	PNGBase64  string `json:"pngBase64"`
+	SessionID       string `json:"sessionId"`
+	SourcePath      string `json:"sourcePath"`
+	SourceReference string `json:"sourceReference"`
+	PNGBase64       string `json:"pngBase64"`
 }
 
 // 生图请求的本地提交边界。它只回答客户端是否进入 HTTP Do，不承诺网络字节

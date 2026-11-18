@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const api = vi.hoisted(() => ({
   saveImageGenerationEdit: vi.fn(),
+  readArtifactBytes: vi.fn(),
 }))
 vi.mock('@/core/bridge', () => ({
   ...api,
@@ -23,7 +24,7 @@ beforeEach(() => {
   api.saveImageGenerationEdit.mockReset().mockResolvedValue({
     path: '生成图片/gen_1/edited-20261117-120000001.png', mimeType: 'image/png', bytes: 100, width: 64, height: 64,
   })
-  // jsdom 无真实图像度量：桩出合成路径用的 toDataURL / Image / 布局盒。
+  api.readArtifactBytes.mockReset().mockResolvedValue(new Uint8Array([1, 2, 3]).buffer)
   HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,aaaa')
   HTMLCanvasElement.prototype.getContext = vi.fn(() => ({
     drawImage: vi.fn(),
@@ -39,6 +40,7 @@ beforeEach(() => {
     set font(_v: string) {},
     set lineCap(_v: string) {},
     set lineJoin(_v: string) {},
+    set textBaseline(_v: string) {},
   })) as unknown as typeof HTMLCanvasElement.prototype.getContext
   vi.stubGlobal('Image', class {
     onload: null | (() => void) = null
@@ -46,6 +48,10 @@ beforeEach(() => {
     naturalWidth = 100
     naturalHeight = 100
     set src(_u: string) { queueMicrotask(() => this.onload?.()) }
+  })
+  vi.stubGlobal('URL', {
+    createObjectURL: () => 'blob:mock',
+    revokeObjectURL: vi.fn(),
   })
   Element.prototype.getBoundingClientRect = vi.fn(() => ({
     x: 0, y: 0, top: 0, left: 0, bottom: 200, right: 200, width: 200, height: 200, toJSON: () => ({}),
@@ -56,21 +62,21 @@ afterEach(async () => {
   host.remove()
 })
 
+const props = {
+  sessionId: 'S',
+  sourcePath: '生成图片/gen_1/image.png',
+  sourceReference: 'ref-1',
+  imageUrl: 'http://127.0.0.1:9/img',
+  naturalWidth: 100,
+  naturalHeight: 100,
+}
+
 describe('ImageEditCanvas', () => {
   it('Escape 对未保存面板提示；确认后关闭', async () => {
     const onClose = vi.fn()
     await act(async () => root.render(
-      <ImageEditCanvas
-        sessionId="S"
-        sourcePath="生成图片/gen_1/image.png"
-        imageUrl="http://127.0.0.1:9/img"
-        naturalWidth={100}
-        naturalHeight={100}
-        onClose={onClose}
-        onSaved={vi.fn()}
-      />,
+      <ImageEditCanvas {...props} onClose={onClose} onSaved={vi.fn()} />,
     ))
-    // 先画一笔制造 dirty
     const stage = host.querySelector('[data-edit-stage]') as HTMLElement
     expect(stage).toBeTruthy()
     await act(async () => {
@@ -85,54 +91,39 @@ describe('ImageEditCanvas', () => {
     expect(onClose).not.toHaveBeenCalled()
     const confirm = Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('放弃'))
     expect(confirm).toBeTruthy()
-    await act(async () => { confirm!.click() })
+    await act(async () => { (confirm as HTMLButtonElement).click() })
     expect(onClose).toHaveBeenCalled()
   })
 
-  it('保存请求带源路径；成功回调 edited 副本路径', async () => {
+  it('保存经 reference 读字节并带 sourceReference', async () => {
     const onSaved = vi.fn()
-    // 让 toDataURL 返回足够短的假 PNG base64（宿主侧由 mock 接住）
-    HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,' + 'A'.repeat(32))
+    HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,' + btoa('png-bytes'))
     await act(async () => root.render(
-      <ImageEditCanvas
-        sessionId="S"
-        sourcePath="生成图片/gen_1/image.png"
-        imageUrl="http://127.0.0.1:9/img"
-        naturalWidth={100}
-        naturalHeight={100}
-        onClose={vi.fn()}
-        onSaved={onSaved}
-      />,
+      <ImageEditCanvas {...props} onClose={vi.fn()} onSaved={onSaved} />,
     ))
-    const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '保存副本')
-    expect(save).toBeTruthy()
-    await act(async () => { save!.click() })
+    const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '保存副本') as HTMLButtonElement
+    await act(async () => { save.click() })
     await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    expect(api.readArtifactBytes).toHaveBeenCalledWith('ref-1')
     expect(api.saveImageGenerationEdit).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'S',
       sourcePath: '生成图片/gen_1/image.png',
+      sourceReference: 'ref-1',
     }))
-    expect(onSaved).toHaveBeenCalledWith(expect.objectContaining({
-      path: '生成图片/gen_1/edited-20261117-120000001.png',
-    }))
+    expect(onSaved).toHaveBeenCalled()
   })
 
   it('合成结果超过字节上限时提示且不发送', async () => {
-    HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,' + 'A'.repeat(IMAGE_EDIT_MAX_BYTES + 64))
+    // atob 长度 ≈ base64字符数 * 3/4；造出解码后超过 16MiB 的串。
+    const oversized = 'A'.repeat(Math.ceil(((IMAGE_EDIT_MAX_BYTES + 16) * 4) / 3))
+    HTMLCanvasElement.prototype.toDataURL = vi.fn(() => 'data:image/png;base64,' + oversized)
     await act(async () => root.render(
-      <ImageEditCanvas
-        sessionId="S"
-        sourcePath="生成图片/gen_1/image.png"
-        imageUrl="http://127.0.0.1:9/img"
-        naturalWidth={100}
-        naturalHeight={100}
-        onClose={vi.fn()}
-        onSaved={vi.fn()}
-      />,
+      <ImageEditCanvas {...props} onClose={vi.fn()} onSaved={vi.fn()} />,
     ))
-    const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '保存副本')
-    await act(async () => { save!.click() })
-    await act(async () => { await Promise.resolve() })
+    const save = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '保存副本') as HTMLButtonElement
+    await act(async () => { save.click() })
+    for (let i = 0; i < 5; i++) await act(async () => { await Promise.resolve() })
     expect(api.saveImageGenerationEdit).not.toHaveBeenCalled()
     expect(host.textContent).toMatch(/超过|太大|上限/)
   })

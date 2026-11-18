@@ -109,3 +109,39 @@ export function fitEditOutputSize(width: number, height: number, maxEdge = IMAGE
   const scale = maxEdge / edge
   return { w: Math.max(1, Math.round(w * scale)), h: Math.max(1, Math.round(h * scale)) }
 }
+
+export const IMAGE_EDIT_FONT_FAMILY = '"IBM Plex Sans", "Microsoft YaHei", sans-serif'
+
+export type PixelImageEditOperation =
+  | { kind: 'stroke'; color: string; lineWidth: number; points: { x: number; y: number }[] }
+  | { kind: 'text'; color: string; text: string; x: number; y: number; fontSize: number; fontFamily: string }
+
+/** 覆盖层与 Canvas 共用：归一化操作投影到像素坐标。 */
+export function projectImageEditOperations(
+  operations: ImageEditState['operations'],
+  width: number,
+  height: number,
+): PixelImageEditOperation[] {
+  const W = Math.max(1, width)
+  const H = Math.max(1, height)
+  const minEdge = Math.min(W, H)
+  return operations.map((op) => {
+    if (op.kind === 'stroke') {
+      return {
+        kind: 'stroke',
+        color: op.color,
+        lineWidth: Math.max(1, op.width * minEdge),
+        points: op.points.map((p) => ({ x: p.x * W, y: p.y * H })),
+      }
+    }
+    return {
+      kind: 'text',
+      color: op.color,
+      text: op.text,
+      x: op.x * W,
+      y: op.y * H,
+      fontSize: Math.max(12, op.fontSize * minEdge),
+      fontFamily: IMAGE_EDIT_FONT_FAMILY,
+    }
+  })
+}

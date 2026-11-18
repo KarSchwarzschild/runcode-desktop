@@ -23,14 +23,24 @@ import (
 func (a *App) SaveImageGenerationEdit(req appwire.SaveImageGenerationEditRequest) (appwire.ImageGenerationArtifact, error) {
 	sessionID := strings.TrimSpace(req.SessionID)
 	sourcePath := strings.TrimSpace(req.SourcePath)
-	if sessionID == "" || sourcePath == "" || strings.TrimSpace(req.PNGBase64) == "" {
-		return appwire.ImageGenerationArtifact{}, wireError(errors.New("保存标注需要会话、源路径与 PNG 数据"))
+	sourceRef := strings.TrimSpace(req.SourceReference)
+	if sessionID == "" || sourcePath == "" || sourceRef == "" || strings.TrimSpace(req.PNGBase64) == "" {
+		return appwire.ImageGenerationArtifact{}, wireError(errors.New("保存标注需要会话、源路径、来源引用与 PNG 数据"))
 	}
 	if a.mgr == nil {
 		return appwire.ImageGenerationArtifact{}, wireError(errNoSession)
 	}
 	var out appwire.ImageGenerationArtifact
-	err := a.mgr.WithSessionOperation(context.Background(), sessionID, func(_ context.Context, access host.SessionAccess) error {
+	// 经 withArtifact 进入同一来源 SessionOperation：核对引用身份与路径，写前／写后再验 permit。
+	err := a.withArtifact(context.Background(), sourceRef, func(_ context.Context, access host.SessionAccess, entry *artifactAccess) error {
+		if entry.ref.SessionID != sessionID {
+			return errors.New("来源引用与会话不匹配")
+		}
+		want := filepath.ToSlash(strings.TrimPrefix(path.Clean("/"+strings.ReplaceAll(sourcePath, `\`, `/`)), "/"))
+		got := filepath.ToSlash(strings.TrimPrefix(path.Clean("/"+strings.ReplaceAll(entry.ref.Path, `\`, `/`)), "/"))
+		if !strings.EqualFold(want, got) {
+			return errors.New("来源引用与源路径不匹配")
+		}
 		art, err := saveImageGenerationEditAt(access.Workspace, sourcePath, req.PNGBase64)
 		if err != nil {
 			return err
