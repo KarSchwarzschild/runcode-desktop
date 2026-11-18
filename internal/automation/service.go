@@ -20,18 +20,21 @@ type Service struct {
 	runner Runner
 	clock  Clock
 
-	mu           sync.Mutex
-	started      bool
-	active       *Run
-	queued       []*Run // global FIFO of claimed-but-waiting runs
-	holds        map[string]int
-	facts        chan Fact
-	wake         chan struct{}
-	cancel       context.CancelFunc
-	done         chan struct{}
-	onTaskChange func(Task)
-	onRunChange  func(Run)
+	mu            sync.Mutex
+	started       bool
+	active        *Run
+	queued        []*Run // global FIFO of claimed-but-waiting runs
+	holds         map[string]int
+	facts         chan Fact
+	wake          chan struct{}
+	cancel        context.CancelFunc
+	done          chan struct{}
+	onTaskChange  func(Task)
+	onRunChange   func(Run)
 	timeoutCancel bool // Cancel issued for active timeout; slot held until terminal Fact
+	// receiptHook, when set, fails the post-accept receipt write. Tests use it
+	// to force the "accepted but not recorded" path. Production leaves it nil.
+	receiptHook func() error
 }
 
 type ServiceOption func(*Service)
@@ -334,16 +337,143 @@ func (s *Service) dispatch(ctx context.Context) {
 		s.nudge()
 		return
 	}
-	saved.SessionID = sub.SessionID
-	saved.QuestionID = sub.QuestionID
-	saved.Status = RunRunning
-	saved, _ = s.store.SaveRun(ctx, saved, saved.RunRevision)
+	// Facts emitted during Start are still queued: this method runs on the
+	// loop, so they cannot be applied until Start returns. Apply them before
+	// promoting the run to running, or a fast success is overwritten.
+	s.drainFacts(ctx)
+	fresh, ferr := s.store.getRun(ctx, saved.ID)
+	if ferr != nil {
+		s.noteReceiptUnconfirmed(ctx, saved, sub)
+		return
+	}
+	if isTerminal(fresh.Status) {
+		s.finishFastTerminal(ctx, fresh, sub)
+		return
+	}
+	if isTerminal(sub.TerminalStatus) {
+		fresh.Status = sub.TerminalStatus
+		fresh.Reason = sub.TerminalReason
+		fin := s.clock.Now()
+		fresh.FinishedAtUTC = &fin
+	} else {
+		fresh.Status = RunRunning
+	}
+	fresh.SessionID = sub.SessionID
+	fresh.QuestionID = sub.QuestionID
+	updated, serr := s.saveReceipt(ctx, fresh)
+	if serr != nil {
+		if cur, rerr := s.store.getRun(ctx, fresh.ID); rerr == nil && isTerminal(cur.Status) {
+			s.finishFastTerminal(ctx, cur, sub)
+			return
+		}
+		s.noteReceiptUnconfirmed(ctx, fresh, sub)
+		return
+	}
 	s.mu.Lock()
-	s.active = &saved
+	if isTerminal(updated.Status) {
+		s.active = nil
+		s.timeoutCancel = false
+	} else {
+		s.active = &updated
+	}
 	s.mu.Unlock()
 	if s.onRunChange != nil {
-		s.onRunChange(saved)
+		s.onRunChange(updated)
 	}
+}
+
+// SetReceiptSaveHook installs a one-shot failure for the post-accept receipt
+// write. A nil hook restores the normal store write.
+func (s *Service) SetReceiptSaveHook(fn func() error) {
+	s.mu.Lock()
+	s.receiptHook = fn
+	s.mu.Unlock()
+}
+
+func (s *Service) saveReceipt(ctx context.Context, run Run) (Run, error) {
+	s.mu.Lock()
+	hook := s.receiptHook
+	s.mu.Unlock()
+	if hook != nil {
+		if err := hook(); err != nil {
+			return Run{}, err
+		}
+	}
+	return s.store.SaveRun(ctx, run, run.RunRevision)
+}
+
+// finishFastTerminal keeps a terminal status that won the race with the
+// receipt and only fills identity fields that the fact did not have yet.
+func (s *Service) finishFastTerminal(ctx context.Context, run Run, sub Submission) {
+	changed := false
+	if run.QuestionID == "" && sub.QuestionID != "" {
+		run.QuestionID = sub.QuestionID
+		changed = true
+	}
+	if run.SessionID == "" && sub.SessionID != "" {
+		run.SessionID = sub.SessionID
+		changed = true
+	}
+	if changed {
+		if updated, err := s.store.SaveRun(ctx, run, run.RunRevision); err == nil {
+			run = updated
+		}
+	}
+	s.clearActive(run.ID)
+	if s.onRunChange != nil {
+		s.onRunChange(run)
+	}
+}
+
+// noteReceiptUnconfirmed records that the model accepted the question but the
+// local receipt did not land. Further dispatch stops; the question is not
+// submitted again.
+func (s *Service) noteReceiptUnconfirmed(ctx context.Context, run Run, sub Submission) {
+	_ = s.HoldAdmission("receipt_unconfirmed")
+	cur, err := s.store.getRun(ctx, run.ID)
+	if err != nil {
+		s.clearActive(run.ID)
+		_ = s.runner.Cancel(ctx, sub.runForCancel(run))
+		return
+	}
+	if isTerminal(cur.Status) {
+		s.finishFastTerminal(ctx, cur, sub)
+		return
+	}
+	cur.SessionID = sub.SessionID
+	cur.QuestionID = sub.QuestionID
+	cur.Status = RunInterrupted
+	cur.Reason = "receipt_unconfirmed"
+	fin := s.clock.Now()
+	cur.FinishedAtUTC = &fin
+	if updated, err := s.store.SaveRun(ctx, cur, cur.RunRevision); err == nil {
+		cur = updated
+	}
+	s.clearActive(cur.ID)
+	if s.onRunChange != nil {
+		s.onRunChange(cur)
+	}
+	_ = s.runner.Cancel(ctx, sub.runForCancel(cur))
+}
+
+func (sub Submission) runForCancel(run Run) Run {
+	if sub.SessionID != "" {
+		run.SessionID = sub.SessionID
+	}
+	if sub.QuestionID != "" {
+		run.QuestionID = sub.QuestionID
+	}
+	return run
+}
+
+func (s *Service) clearActive(id string) {
+	s.mu.Lock()
+	if s.active != nil && s.active.ID == id {
+		s.active = nil
+		s.timeoutCancel = false
+	}
+	s.mu.Unlock()
+	s.nudge()
 }
 
 // claimDueIntoQueue claims due tasks even when the active slot is full.

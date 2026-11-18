@@ -6,9 +6,13 @@ import (
 )
 
 // Submission is the durable receipt from starting a run.
+// TerminalStatus is set when the run already reached a terminal fact before
+// this receipt returned. Empty means the turn is still in progress.
 type Submission struct {
-	SessionID  string
-	QuestionID string
+	SessionID      string
+	QuestionID     string
+	TerminalStatus string
+	TerminalReason string
 }
 
 // Runner executes a claimed run against a session host (desktop implements).

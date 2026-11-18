@@ -70,4 +70,21 @@ Step 0 complete.
 | Files | `internal/automation/{service,runner,service_test,fake_clock_test}.go`; Recover leaves queued for re-check |
 | Notes | Global active=1; per-task queued≤1; miss>60s aggregated; queue wait>60s → busy; 60m timeout holds slot until Fact; Observe non-blocking |
 
-Next: Step 4 desktop runner + identity isolation.
+## Step 4 — desktop runner and identity
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): run isolated sessions with bound identities` |
+| Tests | `go test ./internal/desktop ./internal/automation ./internal/codexauth ./internal/codexproxy -count=1` → PASS (`desktop` 49.2s, `automation` 1.5s, `codexauth` 1.5s, `codexproxy` 1.1s) |
+| Race | Not run. Step 2 `-race` on this Windows toolchain exits `0xc0000139`. This step does not claim a race PASS. |
+| Files | `internal/desktop/automation_{runner,identity,lease,runner_test,identity_test}.go`; guards in `app.go`, `questions.go`, `turn.go`, `sessions.go`, `session_settings.go`, `mcp.go`; identity in `tokens.go`, `codex.go`, `custommodels.go`, `internal/protocol/custommodels.go`, `internal/codexauth`; receipt merge in `internal/automation/{runner,service}.go` |
+
+Notes:
+
+- Runs open with `buildSessionModeHeld(..., focus=false)` under `startMu`. They do not call `OpenSession`. Workspace comes from the task. `AllowSteering` is forced off. The lease is installed before submit.
+- `turn:end` with `Stopped=true` is interrupted, not success. A success that arrives first is kept. Timeout and other errors map to `timed_out` and `failed`. Emit only queues a fact; the unfocused session closes on a later worker.
+- Passport identity is issuer+subject plus the selected tenant. Codex OAuth persists `iss`/`sub`; a login that has an account id but no subject must sign in again. Static keys use `credentialRevision`, bumped only when the key actually changes. Old configs with a key and no revision count as 1.
+- The Codex proxy package is unchanged. While a run is leased, the desktop resolver checks the bound subject or key revision before it returns a bearer.
+- Not accepted here: a real Passport, Codex, or OA round trip, or the Windows race detector.
+
+Next: Step 5 command facade and protocol.

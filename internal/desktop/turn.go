@@ -1,4 +1,4 @@
-﻿package desktop
+package desktop
 
 // 一个回合的生命周期:提交、打断、授权应答、以及回合之外的手动压缩。
 // 真正的执行在 host 管理的 goroutine 里,这里只维护桌面侧的记账(在途标记、
@@ -36,6 +36,9 @@ func (a *App) InjectMessage(sessionID, text string) (bool, error) {
 // the message as a fresh turn instead. Shared by InjectMessage and
 // InjectMessageWithImages.
 func (a *App) injectOrSend(sessionID, text string, images []llm.ImageSource, withImages bool) (bool, error) {
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return false, wireError(err)
+	}
 	e, err := a.entryOf(sessionID)
 	if err != nil {
 		return false, wireError(err)
@@ -58,6 +61,9 @@ func (a *App) injectOrSend(sessionID, text string, images []llm.ImageSource, wit
 // maintaining the desktop-side turn bookkeeping: the in-flight mirror, the
 // auto-title text, and the per-turn edit baseline reset.
 func (a *App) sendUserTurn(sessionID, text string, images []llm.ImageSource, withImages bool) error {
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return err
+	}
 	e, err := a.entryOf(sessionID)
 	if err != nil {
 		return err

@@ -271,6 +271,8 @@ type App struct {
 	// Startup 打开；Shutdown 在回合收尾后关闭。nil 表示未启用或打开失败。
 	usageMu    sync.RWMutex
 	usageStore *localusage.Store
+	// auto 是自动化任务的会话租约。Emit 只往这里记事实；关会话在独立 worker。
+	auto automationHost
 }
 
 // New returns an App that emits events to sink. Session events are enveloped
@@ -426,6 +428,9 @@ func (s hostSinkAdapter) Emit(env protocol.Envelope) {
 			s.app.noteToolFinished(ev.ToolName)
 		}
 	}
+	// 自动化事实只进内存队列。这里不能写库，也不能关会话：Emit 持有主机的
+	// 会话发射锁，堵住就会把整条会话的事件停住。
+	s.app.observeAutomationEnvelope(env)
 	// Record the turn lifecycle to the diagnostic log before forwarding, so a turn
 	// that fails or ends empty is traceable even when nothing renders in the UI.
 	logEnvelope(env)
@@ -1190,6 +1195,9 @@ func (a *App) closeCurrentHeld() error {
 func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) error {
 	if e == nil {
 		return nil
+	}
+	if err := a.rejectIfAutomationLeased(e.id); err != nil {
+		return err
 	}
 	// 关闭前先发 invalidating，让前端丢掉该会话的内联文件缓存与在途读取。
 	a.emitPreviewLifecycle(e, "invalidating", "")

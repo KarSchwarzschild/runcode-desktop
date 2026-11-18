@@ -120,6 +120,9 @@ func (a *App) ListSessions() ([]SessionSummary, error) {
 // 回合会把它重新创建出来——留下一个只含删除后内容、历史却已丢失的僵尸会话,反而
 // 比不删更糟。要删就先关闭对应会话（仅切换焦点不够）。
 func (a *App) DeleteSession(id string) error {
+	if err := a.rejectIfAutomationLeased(id); err != nil {
+		return wireError(err)
+	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
 	a.mu.Lock()
