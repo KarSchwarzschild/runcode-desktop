@@ -47,7 +47,7 @@ describe('UsageRequests', () => {
     expect(text(last)).toContain('第 3 页')
   })
 
-  it('非 Token 记录在 Token 列显示不适用；长模型名截断并保留全文', () => {
+  it('非 Token 记录在 Token 四列显示横划线；长模型名截断并保留全文', () => {
     const long = 'a-very-long-model-name-that-should-be-truncated-in-the-table-but-kept-in-title'
     const page = fixtureRequests({
       items: [
@@ -56,10 +56,12 @@ describe('UsageRequests', () => {
       ],
     })
     const markup = render({ page })
-    expect(text(markup)).toContain('不适用')
+    const t = text(markup)
+    expect(t).not.toContain('不适用')
+    // 生图行四个 Token 列均为 —（输入/输出/缓存命中/未命中）。
+    expect(t.match(/—/g)?.length ?? 0).toBeGreaterThanOrEqual(4)
     expect(markup).toContain(`title="${long}"`)
     expect(markup).toContain('truncate')
-    expect(text(markup)).toMatch(/—/)
   })
 
   it('供应商不可靠时没有供应商列，也不虚构品牌', () => {

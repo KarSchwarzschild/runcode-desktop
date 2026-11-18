@@ -1,6 +1,6 @@
 // 请求日志：本机快照游标分页，页序号由 useUsage 维护，只能前后翻、不能跳到没访问过的页。
-// 非 Token 计量的记录在 Token 列显示「不适用」，用量与单位放在详情里；详情只有记录 ID、
-// 模型、时间、用量与口径，没有正文、成本或密钥。
+// 非 Token 计量的记录在 Token 列统一显示「—」（生图等只计调用次数）；用量与单位放在详情里。
+// 详情只有记录 ID、模型、时间、用量与口径，没有正文、成本或密钥。
 import { Fragment, useState } from 'react'
 import type { UsageRequestRow, UsageRequestsPage } from '@/core/bridge'
 import { TOKENS_METER, formatDurationMs, formatExact, formatShanghai, requestStatusLabel, sourceLabel } from '@/core/usage'
@@ -11,7 +11,7 @@ const TH = 'py-2 px-3 font-normal text-muted text-[12px] whitespace-nowrap'
 const TD = 'py-2 px-3 whitespace-nowrap'
 const PAGE_SIZES: UsagePageSize[] = [20, 50, 100]
 
-const tokenCell = (row: UsageRequestRow, value: string | null) => (row.meterKind === TOKENS_METER ? formatExact(value) : '不适用')
+const tokenCell = (row: UsageRequestRow, value: string | null) => (row.meterKind === TOKENS_METER ? formatExact(value) : '—')
 
 function meterText(row: UsageRequestRow): string {
   if (row.meterKind === TOKENS_METER) return 'Token'

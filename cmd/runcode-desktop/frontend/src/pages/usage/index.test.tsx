@@ -70,7 +70,7 @@ describe('pickInitialTenant', () => {
 })
 
 describe('UsagePage', () => {
-  it('总览契约连接到采集说明、状态分布与请求状态列', async () => {
+  it('总览契约连接到状态分布与请求状态列，且不展示采集说明', async () => {
     native.overview.mockResolvedValue(fixtureOverview({
       sourceKind: 'local_platform', collectionStartedAt: '2026-11-09T00:00:00+08:00', storageStatus: 'unavailable',
       capabilities: { ...fixtureOverview().capabilities, requestStatus: true },
@@ -78,8 +78,9 @@ describe('UsagePage', () => {
     }))
     native.requests.mockResolvedValue(fixtureRequests({ items: [fixtureRow({ status: 'save_failed' })] }))
     await render(user)
-    expect(host.textContent).toContain('开始采集于 2026-11-09 00:00')
-    expect(host.textContent).toContain('存储不可用')
+    expect(host.textContent).not.toContain('开始采集于 2026-11-09 00:00')
+    expect(host.textContent).not.toContain('数据读取于')
+    expect(host.textContent).not.toContain('存储不可用')
     expect(host.querySelector('[aria-label="请求状态分布"]')?.textContent).toContain('保存失败 1')
     expect(host.querySelector('[aria-label="明细"] tbody')?.textContent).toContain('保存失败')
   })
@@ -103,7 +104,8 @@ describe('UsagePage', () => {
     expect(t).toContain('Asia/Shanghai')
     expect(t).toContain('本机采集的平台调用')
     expect(t).not.toContain('关闭客户端期间可能有缺口')
-    expect(t).toContain('数据读取于')
+    expect(t).not.toContain('数据读取于')
+    expect(t).not.toContain('本机采集记录 · 开始采集于')
     expect(t).not.toContain('含起点、不含终点')
     expect(t).toContain('1.1万')
     expect(native.overview).toHaveBeenCalledWith(expect.objectContaining({ tenantId: 'tenant-a', range: 'today' }))
