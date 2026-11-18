@@ -18,7 +18,9 @@ export function ExecutionCard({ tools, harmAllows, oaBlocked }: {
   oaBlocked?: Record<string, string>
 }) {
   const [sel, setSel] = useState<number | null>(null)
-  const runningIdx = tools.findIndex((t) => t.type !== 'completed' && t.type !== 'failed')
+  // A running automation summary stays collapsed. Clicking the row still opens
+  // its parameters. Ordinary tools keep auto-expanding while they run.
+  const runningIdx = tools.findIndex((t) => t.toolName !== 'automation_task' && t.type !== 'completed' && t.type !== 'failed')
   const activeIdx = sel != null && sel < tools.length ? sel : runningIdx
 
   return (

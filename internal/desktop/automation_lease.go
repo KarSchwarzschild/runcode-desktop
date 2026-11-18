@@ -142,6 +142,20 @@ func (a *App) sessionLeased(sessionID string) bool {
 	return ok
 }
 
+// leasedSessionIDs copies the lease set. Callers take App.mu only after this
+// returns: the automation lock is not held together with App.mu.
+func (a *App) leasedSessionIDs() map[string]bool {
+	a.auto.mu.Lock()
+	defer a.auto.mu.Unlock()
+	out := make(map[string]bool, len(a.auto.leases))
+	for id, lease := range a.auto.leases {
+		if lease != nil && id != "" {
+			out[id] = true
+		}
+	}
+	return out
+}
+
 func (a *App) sessionForAutomationRun(runID string) string {
 	a.auto.mu.Lock()
 	defer a.auto.mu.Unlock()

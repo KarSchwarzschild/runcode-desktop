@@ -24,7 +24,13 @@ vi.mock('@/core/bridge', () => ({
     Warning: 'warning',
     HarmAutoAllow: 'harm:autoallow',
     OABlocked: 'oa:blocked',
+    AutomationRunChanged: 'automation:run_changed',
+    AutomationContextChanged: 'automation:context_changed',
+    AutomationTaskChanged: 'automation:task_changed',
   },
+  getAutomationDefaults: vi.fn(async () => null),
+  getAutomationConversation: vi.fn(async () => null),
+  listSessionAutomationRuns: vi.fn(async () => ({ items: [], nextCursor: '' })),
   onEnvelope: (name: string, cb: (env: { sessionId: string; payload: unknown }) => void) => {
     bridge.listeners.set(name, cb)
     return () => bridge.listeners.delete(name)

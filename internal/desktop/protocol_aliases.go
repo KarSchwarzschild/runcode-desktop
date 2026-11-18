@@ -176,5 +176,6 @@ type (
 	AutomationTaskDraft            = protocol.AutomationTaskDraft
 	AutomationSchedule             = protocol.AutomationSchedule
 	AutomationRun                  = protocol.AutomationRun
+	AutomationOrigin               = protocol.AutomationOrigin
 	AutomationBindingSummary       = protocol.AutomationBindingSummary
 )

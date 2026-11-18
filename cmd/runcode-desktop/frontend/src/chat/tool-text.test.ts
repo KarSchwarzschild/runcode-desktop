@@ -71,6 +71,9 @@ describe('toolVerbTarget', () => {
     expect(target).toBe('Node.js')
     expect(toolVerbTarget(ev({ toolName: 'install_runtime', input: { runtime: 'ruby' } })).target).toBe('ruby')
   })
+  it('names an automation summary by the task, not a file path', () => {
+    expect(toolVerbTarget(ev({ toolName: 'automation_task', input: { name: '每日整理记录' } }))).toEqual({ verb: '执行', target: '每日整理记录' })
+  })
   it('uses the pattern for Grep/Glob and the query for WebSearch', () => {
     expect(toolVerbTarget(ev({ toolName: 'Grep', input: { pattern: 'foo.*bar' } })).target).toBe('foo.*bar')
     expect(toolVerbTarget(ev({ toolName: 'WebSearch', input: { query: 'runcode' } })).target).toBe('runcode')

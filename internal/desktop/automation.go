@@ -765,6 +765,49 @@ func (a *App) automationOwnersNow() ([]string, error) {
 	return owners, nil
 }
 
+type automationSessionRef struct {
+	workspace string
+	sessionID string
+}
+
+// automationOrigins reads session_link outside App.mu. A missing store or a
+// lookup error leaves the clock blank; it does not fail the session list.
+func (a *App) automationOrigins(refs []automationSessionRef) map[string]AutomationOrigin {
+	store := a.automationStore()
+	if store == nil || len(refs) == 0 {
+		return nil
+	}
+	owners := a.automationOwnerSnapshot()
+	if len(owners) == 0 {
+		var err error
+		owners, err = a.automationOwnersNow()
+		if err != nil || len(owners) == 0 {
+			return nil
+		}
+	}
+	want := make([]automation.SessionRef, 0, len(refs))
+	for _, ref := range refs {
+		want = append(want, automation.SessionRef{Workspace: ref.workspace, SessionID: ref.sessionID})
+	}
+	found, err := store.OriginsForSessions(context.Background(), owners, want)
+	if err != nil {
+		return nil
+	}
+	out := make(map[string]AutomationOrigin, len(found))
+	for key, origin := range found {
+		out[key] = AutomationOrigin{TaskID: origin.TaskID, TaskName: origin.TaskName}
+	}
+	return out
+}
+
+func originAt(origins map[string]AutomationOrigin, workspace, sessionID string) (AutomationOrigin, bool) {
+	origin, ok := origins[automation.OriginKey(workspace, sessionID)]
+	if !ok || origin.TaskID == "" {
+		return AutomationOrigin{}, false
+	}
+	return origin, true
+}
+
 func (a *App) currentAutomationTarget() (kind, name, permission string) {
 	raw := loadRawConfig()
 	a.mu.Lock()

@@ -245,10 +245,11 @@ export default function App() {
   const openRows = session.openList.map((s) => ({
     id: s.sessionId,
     title: session.titles[s.sessionId] || conversation.lastUserBySession[s.sessionId] || '新对话',
-    running: !!conversation.busyBySession[s.sessionId],
+    running: !!conversation.busyBySession[s.sessionId] || s.running || !!session.automationRunning[s.sessionId],
     waiting: permissions.waiting[s.sessionId] ?? 0,
     focused: s.sessionId === session.info?.sessionId,
     workspace: s.workspace,
+    automation: s.automation,
   }))
 
   return (

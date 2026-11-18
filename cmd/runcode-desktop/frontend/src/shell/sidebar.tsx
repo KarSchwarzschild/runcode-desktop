@@ -19,6 +19,8 @@ export interface OpenSessionRow {
   focused: boolean
   /** workspace 是这条会话的目录。几条会话落在**不同目录**时才显示出来。 */
   workspace: string
+  /** automation 是会话链接上的任务。有它才画时钟，不从对话标题推断。 */
+  automation?: { taskId: string; taskName: string }
 }
 
 type NavView = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
@@ -161,6 +163,11 @@ export function Sidebar({
                     }`}
                     aria-hidden
                   />
+                  {s.automation && (
+                    <span title={s.automation.taskName} className="flex-none text-faint">
+                      <Icon name="clock" size={13} />
+                    </span>
+                  )}
                   <span className="flex-1 min-w-0 truncate">{s.title}</span>
                   {/* 目录名。只有几条会话**落在不同目录**时才出现——同一个目录里全都
                       一样，那就是纯噪声。多工作区并行时它是唯一能区分"两条同名会话
@@ -223,7 +230,13 @@ export function Sidebar({
                     active ? 'text-ink bg-surface2' : 'text-muted hover:bg-surface2'
                   }`}
                 >
-                  <Icon name="file" size={15} />
+                  {s.automation ? (
+                    <span title={s.automation.taskName} className="flex-none text-faint">
+                      <Icon name="clock" size={15} />
+                    </span>
+                  ) : (
+                    <Icon name="file" size={15} />
+                  )}
                   <span className="flex-1 min-w-0 truncate">{s.title}</span>
                   <span className="text-faint text-[11px] flex-none group-hover:hidden">{s.when}</span>
                   {/* 打开中的会话不提供删除:后端会拒绝(删掉后下一个回合会把文件重建成

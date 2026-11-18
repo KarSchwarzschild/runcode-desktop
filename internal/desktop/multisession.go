@@ -121,8 +121,10 @@ func (a *App) CloseSession(sessionID string) error {
 // 就点到了别人身上——而这一栏里每行右侧都有一颗关闭按钮，代价是关掉一条正在跑
 // 的会话，没有任何报错。
 func (a *App) OpenSessions() []OpenSessionInfo {
+	// Lease ids are copied before App.mu. The link lookup happens after the
+	// lock is released, so a session list never queries SQLite while holding it.
+	leased := a.leasedSessionIDs()
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	live := make([]*sessionEntry, 0, len(a.sessions))
 	for _, e := range a.sessions {
 		if !e.closed {
@@ -130,14 +132,35 @@ func (a *App) OpenSessions() []OpenSessionInfo {
 		}
 	}
 	sort.Slice(live, func(i, j int) bool { return live[i].seq < live[j].seq })
-	out := make([]OpenSessionInfo, 0, len(live))
+	type openSnap struct {
+		id, workspace string
+		running       bool
+		focused       bool
+	}
+	snaps := make([]openSnap, 0, len(live))
+	refs := make([]automationSessionRef, 0, len(live))
 	for _, e := range live {
-		out = append(out, OpenSessionInfo{
-			SessionID: e.id,
-			Workspace: e.workspace,
-			Running:   e.turnActive,
-			Focused:   e.id == a.focused,
+		snaps = append(snaps, openSnap{
+			id: e.id, workspace: e.workspace,
+			running: e.turnActive || leased[e.id], focused: e.id == a.focused,
 		})
+		refs = append(refs, automationSessionRef{workspace: e.workspace, sessionID: e.id})
+	}
+	a.mu.Unlock()
+	origins := a.automationOrigins(refs)
+	out := make([]OpenSessionInfo, 0, len(snaps))
+	for _, snap := range snaps {
+		info := OpenSessionInfo{
+			SessionID: snap.id,
+			Workspace: snap.workspace,
+			Running:   snap.running,
+			Focused:   snap.focused,
+		}
+		if origin, ok := originAt(origins, snap.workspace, snap.id); ok {
+			info.Kind = "agent"
+			info.Automation = &origin
+		}
+		out = append(out, info)
 	}
 	return out
 }

@@ -20,11 +20,19 @@ import (
 
 func newAutomationCommandApp(t *testing.T) (*App, *recordingSink) {
 	t.Helper()
-	isolateConfigDir(t)
+	return newAutomationCommandAppIn(t, t.TempDir())
+}
+
+func newAutomationCommandAppIn(t *testing.T, home string) (*App, *recordingSink) {
+	t.Helper()
+	isolateConfigDirAt(t, home)
 	sink := &recordingSink{}
 	app := newWithBuild(sink, func(cfg engine.Config, _ engine.Options) (host.Session, error) {
 		s := newFakeHostSession()
 		s.id, s.cwd = cfg.SessionID, cfg.CWD
+		if s.id == "" {
+			s.id = cfg.Resume
+		}
 		return s, nil
 	})
 	saveStaticProfile(t, app)

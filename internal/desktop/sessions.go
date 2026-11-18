@@ -109,6 +109,19 @@ func (a *App) ListSessions() ([]SessionSummary, error) {
 			Turns: info.Turns,
 		})
 	}
+	refs := make([]automationSessionRef, 0, len(out))
+	for _, item := range out {
+		refs = append(refs, automationSessionRef{workspace: ws, sessionID: item.ID})
+	}
+	origins := a.automationOrigins(refs)
+	for i := range out {
+		origin, ok := originAt(origins, ws, out[i].ID)
+		if !ok {
+			continue
+		}
+		out[i].Kind = "agent"
+		out[i].Automation = &origin
+	}
 	return out, nil
 }
 

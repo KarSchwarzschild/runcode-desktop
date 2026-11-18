@@ -244,6 +244,12 @@ func (s *Store) UpdateTask(ctx context.Context, task Task, expectedRevision int6
 	if n != 1 {
 		return Task{}, ErrConflict
 	}
+	// The clock reads the task name. A rename must not leave the link row
+	// showing the name from the day the session was first reused.
+	if _, err := s.db.ExecContext(ctx, `UPDATE session_links SET task_name=? WHERE task_id=? AND owner_scope=?`,
+		task.Name, task.ID, task.OwnerScope); err != nil {
+		return Task{}, err
+	}
 	return s.getTask(ctx, task.ID)
 }
 
@@ -683,6 +689,117 @@ func terminalRank(status string) int {
 	default:
 		return 0
 	}
+}
+
+// SessionRef identifies one workspace session for a clock lookup.
+type SessionRef struct {
+	Workspace string
+	SessionID string
+}
+
+// SessionOrigin is the task a session is linked to. TaskName prefers the
+// current task row over the name frozen on the link.
+type SessionOrigin struct {
+	TaskID   string
+	TaskName string
+}
+
+// OriginKey joins a workspace and session without colliding on either part.
+func OriginKey(workspace, sessionID string) string {
+	return workspace + "\x00" + sessionID
+}
+
+// OriginsForSessions returns one origin per requested session. Several links
+// keep the task with the newest updated time, then the larger task id.
+func (s *Store) OriginsForSessions(ctx context.Context, owners []string, refs []SessionRef) (map[string]SessionOrigin, error) {
+	out := map[string]SessionOrigin{}
+	if len(owners) == 0 || len(refs) == 0 {
+		return out, nil
+	}
+	want := make(map[string]struct{}, len(refs))
+	for _, ref := range refs {
+		if strings.TrimSpace(ref.Workspace) == "" || strings.TrimSpace(ref.SessionID) == "" {
+			continue
+		}
+		want[OriginKey(ref.Workspace, ref.SessionID)] = struct{}{}
+	}
+	if len(want) == 0 {
+		return out, nil
+	}
+	clause, args := ownerPlaceholders(owners)
+	rows, err := s.db.QueryContext(ctx, `SELECT l.workspace, l.session_id, l.task_id, l.task_name,
+		COALESCE(t.name, ''), COALESCE(t.updated_at_utc, '')
+		FROM session_links l
+		LEFT JOIN tasks t ON t.id = l.task_id AND t.owner_scope = l.owner_scope
+		WHERE l.owner_scope IN `+clause, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	type candidate struct {
+		origin  SessionOrigin
+		updated string
+	}
+	best := map[string]candidate{}
+	for rows.Next() {
+		var workspace, sessionID, taskID, linkName, taskName, updated string
+		if err := rows.Scan(&workspace, &sessionID, &taskID, &linkName, &taskName, &updated); err != nil {
+			return nil, err
+		}
+		key := OriginKey(workspace, sessionID)
+		if _, ok := want[key]; !ok {
+			continue
+		}
+		name := taskName
+		if name == "" {
+			name = linkName
+		}
+		next := candidate{origin: SessionOrigin{TaskID: taskID, TaskName: name}, updated: updated}
+		cur, ok := best[key]
+		if !ok || next.updated > cur.updated || (next.updated == cur.updated && next.origin.TaskID > cur.origin.TaskID) {
+			best[key] = next
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	for key, item := range best {
+		out[key] = item.origin
+	}
+	return out, nil
+}
+
+// InsertRun stores a historical run without moving the task's next occurrence.
+// ClaimDue remains the only path that schedules the next run.
+func (s *Store) InsertRun(ctx context.Context, run Run) (Run, error) {
+	if strings.TrimSpace(run.ID) == "" || strings.TrimSpace(run.TaskID) == "" || strings.TrimSpace(run.Status) == "" {
+		return Run{}, fmt.Errorf("automation: run id, task and status are required")
+	}
+	if run.RunRevision == 0 {
+		run.RunRevision = 1
+	}
+	sched, err := json.Marshal(run.Schedule)
+	if err != nil {
+		return Run{}, err
+	}
+	bind, err := json.Marshal(run.Binding)
+	if err != nil {
+		return Run{}, err
+	}
+	run.Summary = clipSummary(run.Summary)
+	_, err = s.db.ExecContext(ctx, `INSERT INTO runs(
+		id, task_id, task_revision, run_revision, scheduled_at_utc, status, reason, session_id, question_id,
+		queued_at_utc, started_at_utc, finished_at_utc, summary, missed_count,
+		task_name, prompt, workspace, execution_mode, schedule_json, binding_json
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		run.ID, run.TaskID, run.TaskRevision, run.RunRevision, fmtTime(run.ScheduledAtUTC), run.Status, run.Reason, run.SessionID, run.QuestionID,
+		fmtTimePtr(run.QueuedAtUTC), fmtTimePtr(run.StartedAtUTC), fmtTimePtr(run.FinishedAtUTC), run.Summary, run.MissedCount,
+		run.TaskName, run.Prompt, run.Workspace, run.ExecutionMode, string(sched), string(bind),
+	)
+	if err != nil {
+		return Run{}, err
+	}
+	return s.getRun(ctx, run.ID)
 }
 
 func clipSummary(s string) string {

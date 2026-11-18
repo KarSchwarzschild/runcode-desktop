@@ -118,3 +118,30 @@ Deferred:
 - No real Passport, Codex, or OA round trip. No race-detector PASS.
 
 Next: Step 6 execution cards, history projection, and cross-workspace open.
+
+## Step 6 — execution cards and linked chats
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): replay execution cards and mark linked chats` |
+| Tests | `go test ./internal/desktop -run Automation -count=1` → PASS (`desktop` 1.715s). `go test ./internal/automation -count=1` → PASS (1.543s). |
+| Frontend | `npm.cmd test -- src/chat/automation-run.test.ts src/session/automation-turns.test.ts` → PASS, together with `execution-card.test.tsx`, `tool-text.test.ts`, `use-conversation.test.tsx`, and `use-session.test.tsx` (6 files, 51 tests). `npm.cmd run typecheck` → PASS. `npm.cmd run lint` → PASS. |
+| Race | Not run. Step 2 `-race` on this Windows toolchain exits `0xc0000139`. This step does not claim a race PASS. |
+| Files | `internal/automation/store.go`; `internal/desktop/{app,automation,automation_lease,automation_replay_test,automation_test,multisession,protocol_aliases,sessions}.go`; `frontend/src/chat/{automation-run,automation-run.test,execution-card,execution-card.test,tool-detail,tool-text,tool-text.test}.{ts,tsx}`; `frontend/src/session/{automation-turns,automation-turns.test,use-conversation,use-conversation.test,use-session}.{ts,tsx}`; `frontend/src/{App.tsx,dev/previews.tsx,shell/sidebar.tsx,ui/icons.tsx}` |
+
+Notes:
+
+- Execution cards are a desktop projection. `toolUseId` is `automation:` plus the run id. Core `seq` is not rewritten and no fake tool is written into history. A run is placed after the user question that owns it. No `questionId` means no guessed user and no card. Another session's question is not a place to hang the card.
+- The first leased delta inserts the SystemNote “正在提交自动化任务” so the new answer does not merge into the previous assistant. The receipt then replaces that note with the real user and one summary card. A terminal snapshot does not regress to running. A late receipt only fills `questionId`. After the run is settled, busy stays false.
+- The summary row stays collapsed. The spinner shows until the run succeeds. The green check is only `succeeded`. `failed`, `interrupted`, `timed_out`, and `skipped` stay red. Prompt text is rendered as text.
+- `OpenSessionInfo`, `SessionSummary`, and `ConversationInfo.automation` come from `session_link`, joined to the current task name. `Kind` stays `agent`. The lookup runs after `App.mu` is released. `OpenSessions.Running` is the live turn or the lease. The sidebar also ORs the focused busy flag and the `run_changed` flag, so a background run shows a clock and a running dot before that session is opened.
+- `run_changed` refreshes the open list and the recent list even when the run's session is not focused. History paging walks every cursor. `historyPending` keeps the blocks already on screen. A terminal refresh merges by `questionId` / `toolUseID` and does not call `applyResumed` over a live stream. Async loads are dropped when either the session generation or the automation context moves.
+- `TestAutomationReplayLinkAndWorkspace` uses two workspaces with the same title. Opening the run resumes the linked directory. A missing transcript returns “会话历史不存在” and does not build an empty conversation. After restart and a rename, the clock still resolves to the same task id and the new name.
+
+Deferred:
+
+- Step 7 owns the more menu and the task manager. Step 8 owns the form. Step 9 owns detail and pause. Step 10 owns the tray, `WindowController`, and real exit. `BackgroundSupported` stays false.
+- No real Passport, Codex, or OA round trip. No race-detector PASS.
+- `?preview=tools` now includes an automation summary fixture. This session did not open that page in a browser.
+
+Next: Step 7 task list and the more-menu entry.

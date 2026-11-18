@@ -1384,7 +1384,7 @@ func (a *App) Status(sessionID string) (SessionInfo, error) {
 // sessionInfo maps an engine status to the wire SessionInfo, attaching the
 // live preview base URL.
 func (a *App) sessionInfo(st engine.Status) SessionInfo {
-	return SessionInfo{
+	info := SessionInfo{
 		Kind:               "agent",
 		SessionID:          st.SessionID,
 		Model:              st.Model,
@@ -1399,6 +1399,11 @@ func (a *App) sessionInfo(st engine.Status) SessionInfo {
 		PricingSource:      st.PricingSource,
 		PreviewBaseURL:     a.previewURLFor(st.CWD),
 	}
+	origins := a.automationOrigins([]automationSessionRef{{workspace: st.CWD, sessionID: st.SessionID}})
+	if origin, ok := originAt(origins, st.CWD, st.SessionID); ok {
+		info.Automation = &origin
+	}
+	return info
 }
 
 // GetProtocolInfo reports the wire-protocol version this host implements, so a
