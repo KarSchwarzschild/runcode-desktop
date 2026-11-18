@@ -49,11 +49,11 @@ afterEach(async () => {
 
 describe('computePreviewDisplaySize', () => {
   it('三比例在常规上限下等比缩放且不放大', () => {
-    expect(computePreviewDisplaySize(1024, 1024, 800, 900)).toEqual({ width: 480, height: 480, provisional: false })
-    expect(computePreviewDisplaySize(1280, 720, 800, 900)).toEqual({ width: 480, height: 270, provisional: false })
+    expect(computePreviewDisplaySize(1024, 1024, 800, 900)).toEqual({ width: 560, height: 560, provisional: false })
+    expect(computePreviewDisplaySize(1280, 720, 800, 900)).toEqual({ width: 560, height: 315, provisional: false })
     const portrait = computePreviewDisplaySize(720, 1280, 800, 900)
-    expect(portrait.height).toBe(480)
-    expect(portrait.width).toBe(Math.round(720 * (480 / 1280)))
+    expect(portrait.height).toBe(560)
+    expect(portrait.width).toBe(Math.round(720 * (560 / 1280)))
     expect(computePreviewDisplaySize(200, 100, 800, 900)).toEqual({ width: 200, height: 100, provisional: false })
   })
 })

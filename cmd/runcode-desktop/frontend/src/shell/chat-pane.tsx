@@ -15,6 +15,7 @@ import {
   buildGeneratedImagePresentation,
   isMergedRasterOpenPreview,
 } from '@/chat/generated-image-presentation'
+import { isImageGenerateToolRunning } from '@/core/image-generation'
 import { AskCard } from '@/chat/ask-card'
 import { BlockView } from '@/chat/block-view'
 import { BotRow } from '@/chat/bot-row'
@@ -77,6 +78,11 @@ export function ChatPane({
   onRasterImageAnnotate?: (image: import('@/core/bridge').ImageGenerationArtifact, toolUseId: string) => void
 }) {
   const groups = groupBlocks(blocks)
+  // 外部生图进行中时，卡片下方已有扫光舞台，不再叠「思考中」三点。
+  const imageGenerateRunning = useMemo(
+    () => blocks.some((b) => b.kind === 'tool' && isImageGenerateToolRunning(b.tool)),
+    [blocks],
+  )
   // 栅格生图展示投影：合并指向本条产物的 open_preview，避免执行卡重复占行。
   const imagePresentations = useMemo(() => {
     if (!sessionId) return []
@@ -201,7 +207,7 @@ export function ChatPane({
             ),
           )}
           {recorderCard && <BotRow>{recorderCard}</BotRow>}
-          {busy && (
+          {busy && !imageGenerateRunning && (
             <BotRow>
               <div className="inline-flex items-center gap-2.5 text-faint py-1">
                 <span className="think-dots"><i /><i /><i /></span>

@@ -3,8 +3,8 @@ import type { ImageGenerationCatalog, ImageGenerationResult, PassportModel } fro
 import {
   accountingLabel, allowsUnfixedSize, coerceDraftSize, defaultDraftSize,
   imageGenerationCardState, imageGenerationFailureLabel, imageGenerationModelKey,
-  isChatModel, isImageGenerationModel, isImageGenerationResult, isRasterImageGeneration,
-  settingsSelection,
+  isChatModel, isImageGenerateToolRunning, isImageGenerationModel, isImageGenerationResult,
+  isRasterImageGeneration, settingsSelection,
 } from './image-generation'
 
 const profile = { available: true, supportedSizes: ['1024x1024', '2048x2048'], defaultSize: '1024x1024', responseFormats: ['url'] }
@@ -97,6 +97,13 @@ describe('results', () => {
     expect(imageGenerationFailureLabel('missing', 'seedream')).toBe('生成图片 文件不存在 seedream')
     expect(imageGenerationFailureLabel('not-generated', '')).toBe('生成图片 未生成 未设置模型')
     expect(imageGenerationFailureLabel('missing', null)).toBe('生成图片 文件不存在 未设置模型')
+  })
+  it('生图工具进行中判定：完成／失败不算 running', () => {
+    expect(isImageGenerateToolRunning({ toolName: 'image_generate', type: 'progress' })).toBe(true)
+    expect(isImageGenerateToolRunning({ toolName: 'image_generate', type: 'started' })).toBe(true)
+    expect(isImageGenerateToolRunning({ toolName: 'image_generate', type: 'completed' })).toBe(false)
+    expect(isImageGenerateToolRunning({ toolName: 'image_generate', type: 'failed' })).toBe(false)
+    expect(isImageGenerateToolRunning({ toolName: 'Bash', type: 'progress' })).toBe(false)
   })
   it('栅格门控：只认 image_generate + 受支持 MIME，不按模型名', () => {
     expect(isRasterImageGeneration({ toolName: 'image_generate' })).toBe(true)

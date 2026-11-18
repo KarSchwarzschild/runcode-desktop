@@ -17,7 +17,7 @@ const REVEAL_FALLBACK_MS = 700
 
 export type PreviewDisplaySize = { width: number; height: number; provisional: boolean }
 
-/** 等比缩放：Wcap=min(480,C) Hcap=min(480,0.55×vh)，正方形可到 480；不放大小图。 */
+/** 等比缩放：Wcap=min(560,C) Hcap=min(560,0.65×vh)，正方形可到对话内常见大图尺寸；不放大小图。 */
 export function computePreviewDisplaySize(
   naturalW: number,
   naturalH: number,
@@ -27,8 +27,8 @@ export function computePreviewDisplaySize(
   const w = Math.max(1, naturalW)
   const h = Math.max(1, naturalH)
   const C = Math.max(1, containerW)
-  const Wcap = Math.min(480, C)
-  const Hcap = Math.min(480, 0.55 * Math.max(1, viewportH))
+  const Wcap = Math.min(560, C)
+  const Hcap = Math.min(560, 0.65 * Math.max(1, viewportH))
   const s = Math.min(1, Wcap / w, Hcap / h)
   return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)), provisional: false }
 }
@@ -116,7 +116,7 @@ export function GeneratedImagePreview({
   const path = image?.path ?? ''
   const running = tool.type !== 'completed' && tool.type !== 'failed'
   const [resource, setResource] = useState<Resource>({ status: 'idle' })
-  const [boxW, setBoxW] = useState(480)
+  const [boxW, setBoxW] = useState(560)
   const [revealing, setRevealing] = useState(false)
   const revealRootRef = useRef<HTMLDivElement>(null)
   const sawRunningRef = useRef(false)
@@ -129,7 +129,8 @@ export function GeneratedImagePreview({
   useLayoutEffect(() => {
     const el = rootRef.current
     if (!el) return
-    const measure = () => setBoxW(Math.max(1, el.clientWidth - 32))
+    // 根节点无水平内边距，直接用满可用宽，避免再人为减 32 把舞台夹小。
+    const measure = () => setBoxW(Math.max(1, el.clientWidth))
     measure()
     if (typeof ResizeObserver === 'undefined') return
     const ro = new ResizeObserver(measure)

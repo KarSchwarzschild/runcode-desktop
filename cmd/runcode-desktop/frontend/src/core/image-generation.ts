@@ -31,6 +31,13 @@ export function isRasterImageGeneration(
   return RASTER_IMAGE_GENERATION_MIMES.has(mime)
 }
 
+/** 外部生图工具尚未结束（进行中／进度），用于隐藏对话流「思考中」指示。 */
+export function isImageGenerateToolRunning(tool: { toolName?: string; type?: string } | null | undefined): boolean {
+  if ((tool?.toolName ?? '') !== IMAGE_GENERATION_TOOL) return false
+  const t = tool?.type ?? ''
+  return t !== 'completed' && t !== 'failed'
+}
+
 // isChatModel 是所有文本用途（对话、判定、子代理、上下文预算、识图）候选的统一入口。
 // 只有「声明了 image_generation 却没有 chat」才排除；没有能力字段的旧目录照旧当聊天模型。
 export function isChatModel(m: PassportModel): boolean {

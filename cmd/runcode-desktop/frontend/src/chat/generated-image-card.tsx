@@ -51,10 +51,11 @@ export function GeneratedImageCard({
 
   const showPreviewStage = cardState === 'running' || cardState === 'ready'
 
+  // 信息卡收窄；预览舞台占满助手列可用宽度，不能跟卡一起 w-fit，否则舞台被卡宽夹到 ~300px。
   return (
-    <div className="max-w-[min(100%,400px)] min-w-0 w-fit">
+    <div className="min-w-0 w-full max-w-full">
       <div
-        className="w-fit max-w-full min-w-0 border border-line2 rounded-[10px] bg-surface px-3 py-2.5 flex flex-col gap-1"
+        className="w-fit max-w-[min(100%,400px)] min-w-0 border border-line2 rounded-[10px] bg-surface px-3 py-2.5 flex flex-col gap-1"
         data-generated-image-card=""
       >
         <div className="flex items-center gap-2 min-h-5 text-[13px] leading-5">
