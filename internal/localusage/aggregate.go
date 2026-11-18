@@ -13,11 +13,13 @@ type StatusTotals struct {
 
 // AggregateTotals keeps known values and their sample counts separate. Pending
 // calls contribute only to Statuses.Pending, never to requests or usage sums.
+// Cache* 同时包含供应商上报与本地近似估算；CacheEstimatedCount 只计估算样本。
 type AggregateTotals struct {
 	RequestCount, TokenCallCount                                                    int64
 	InputSampleCount, OutputSampleCount, TokenSampleCount, CompleteTokenSampleCount int64
 	InputTokens, OutputTokens, TotalTokens                                          int64
 	CacheSampleCount, CacheHitTokens, CacheMissTokens, CacheEligibleInputTokens     int64
+	CacheEstimatedCount                                                             int64
 	DurationSumMs, DurationSampleCount                                              int64
 	Statuses                                                                        StatusTotals
 }
@@ -67,10 +69,11 @@ func (s *Store) QueryOverview(ctx context.Context, filter QueryFilter, boundarie
 	}
 	defer done()
 	filter.SnapshotSeq = seq
+	cols := aggregateColumnsSQL(seq)
 	out := OverviewResult{Seq: seq}
 	if len(boundaries) == 0 {
 		from, args := callsFrom(filter, true)
-		err := tx.QueryRowContext(ctx, `SELECT `+aggregateColumns+from, args...).Scan(out.Totals.scanArgs()...)
+		err := tx.QueryRowContext(ctx, `SELECT `+cols+from, args...).Scan(out.Totals.scanArgs()...)
 		if err != nil {
 			return OverviewResult{}, err
 		}
@@ -88,7 +91,7 @@ func (s *Store) QueryOverview(ctx context.Context, filter QueryFilter, boundarie
 		out.Buckets[i] = AggregateBucket{StartAt: boundaries[i].UTC(), EndAt: boundaries[i+1].UTC()}
 	}
 	query := `WITH boundaries(bucket,begin_ms,end_ms) AS (VALUES ` + strings.Join(values, ",") + `)
-SELECT b.bucket, ` + aggregateColumns + `
+SELECT b.bucket, ` + cols + `
 FROM boundaries b CROSS JOIN events s
 LEFT JOIN events f ON f.call_id=s.call_id AND f.phase='finish' AND f.seq<=?
 WHERE s.phase='start' AND s.seq<=? AND s.scope_id=? AND s.started_at_ms>=b.begin_ms AND s.started_at_ms<b.end_ms`
@@ -134,6 +137,7 @@ func (s *Store) QueryDimensions(ctx context.Context, filter QueryFilter, search 
 	}
 	defer done()
 	filter.SnapshotSeq = seq
+	cols := aggregateColumnsSQL(seq)
 	from, args := callsFrom(filter, false)
 	if search != "" {
 		from += ` AND instr(lower(s.model),lower(?))>0`
@@ -145,7 +149,7 @@ func (s *Store) QueryDimensions(ctx context.Context, filter QueryFilter, search 
 	}
 	offset := (page - 1) * pageSize
 	args = append(args, pageSize, offset)
-	rows, err := tx.QueryContext(ctx, `SELECT s.model, `+aggregateColumns+from+` GROUP BY s.model ORDER BY COUNT(f.seq) DESC, s.model ASC LIMIT ? OFFSET ?`, args...)
+	rows, err := tx.QueryContext(ctx, `SELECT s.model, `+cols+from+` GROUP BY s.model ORDER BY COUNT(f.seq) DESC, s.model ASC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return DimensionsResult{}, err
 	}
@@ -168,9 +172,42 @@ func (s *Store) QueryDimensions(ctx context.Context, filter QueryFilter, search 
 const tokenCallSQL = `(s.call_kind IN ('llm','vision') AND f.seq IS NOT NULL)`
 const inputKnownSQL = `(f.input_tokens_known<>0 AND f.input_tokens IS NOT NULL)`
 const outputKnownSQL = `(f.output_tokens_known<>0 AND f.output_tokens IS NOT NULL)`
-const cacheKnownSQL = `(` + tokenCallSQL + ` AND f.cache_hit_tokens_known<>0 AND f.cache_hit_tokens IS NOT NULL AND f.cache_miss_tokens_known<>0 AND f.cache_miss_tokens IS NOT NULL)`
+const reportedCacheSQL = `(` + tokenCallSQL + ` AND f.cache_hit_tokens_known<>0 AND f.cache_hit_tokens IS NOT NULL AND f.cache_miss_tokens_known<>0 AND f.cache_miss_tokens IS NOT NULL)`
+const estimateWindowMs = int64(30 * 60 * 1000)
 
-const aggregateColumns = `COUNT(f.seq),
+// prevTokenFieldSQL 取同 scope／同模型、按开始时间紧邻的前一次已结束 Token 调用字段。
+// seq 写入 SQL，避免与外层参数位置纠缠。
+func prevTokenFieldSQL(seq int64, field string) string {
+	return fmt.Sprintf(`(SELECT %s FROM events ps JOIN events pf ON pf.call_id=ps.call_id AND pf.phase='finish' AND pf.seq<=%d WHERE ps.phase='start' AND ps.seq<=%d AND ps.scope_id=s.scope_id AND ps.model=s.model AND ps.call_kind IN ('llm','vision') AND pf.input_tokens_known<>0 AND pf.input_tokens IS NOT NULL AND (ps.started_at_ms<s.started_at_ms OR (ps.started_at_ms=s.started_at_ms AND ps.call_id<s.call_id)) ORDER BY ps.started_at_ms DESC, ps.call_id DESC LIMIT 1)`, field, seq, seq)
+}
+
+func canEstimateSQL(seq int64) string {
+	prevIn := prevTokenFieldSQL(seq, "pf.input_tokens")
+	prevStart := prevTokenFieldSQL(seq, "ps.started_at_ms")
+	return fmt.Sprintf(`(%s AND %s AND NOT %s AND (%s) IS NOT NULL AND (%s) IS NOT NULL AND (s.started_at_ms-(%s))<=%d AND f.input_tokens>=(%s))`,
+		tokenCallSQL, inputKnownSQL, reportedCacheSQL, prevIn, prevStart, prevStart, estimateWindowMs, prevIn)
+}
+
+func effectiveCacheHitSQL(seq int64) string {
+	prevIn := prevTokenFieldSQL(seq, "pf.input_tokens")
+	return `(CASE WHEN ` + reportedCacheSQL + ` THEN f.cache_hit_tokens WHEN ` + canEstimateSQL(seq) + ` THEN MIN(f.input_tokens,(` + prevIn + `)) END)`
+}
+
+func effectiveCacheMissSQL(seq int64) string {
+	prevIn := prevTokenFieldSQL(seq, "pf.input_tokens")
+	return `(CASE WHEN ` + reportedCacheSQL + ` THEN f.cache_miss_tokens WHEN ` + canEstimateSQL(seq) + ` THEN f.input_tokens-(` + prevIn + `) END)`
+}
+
+func effectiveCacheSQL(seq int64) string {
+	return `(` + reportedCacheSQL + ` OR ` + canEstimateSQL(seq) + `)`
+}
+
+func aggregateColumnsSQL(seq int64) string {
+	eff := effectiveCacheSQL(seq)
+	hit := effectiveCacheHitSQL(seq)
+	miss := effectiveCacheMissSQL(seq)
+	est := canEstimateSQL(seq)
+	return `COUNT(f.seq),
 COUNT(CASE WHEN ` + tokenCallSQL + ` THEN 1 END),
 COUNT(CASE WHEN ` + inputKnownSQL + ` THEN 1 END),
 COUNT(CASE WHEN ` + outputKnownSQL + ` THEN 1 END),
@@ -178,9 +215,10 @@ COUNT(CASE WHEN ` + tokenCallSQL + ` AND (` + inputKnownSQL + ` OR ` + outputKno
 COUNT(CASE WHEN ` + tokenCallSQL + ` AND ` + inputKnownSQL + ` AND ` + outputKnownSQL + ` THEN 1 END),
 COALESCE(SUM(CASE WHEN ` + inputKnownSQL + ` THEN f.input_tokens END),0),
 COALESCE(SUM(CASE WHEN ` + outputKnownSQL + ` THEN f.output_tokens END),0),
-COUNT(CASE WHEN ` + cacheKnownSQL + ` THEN 1 END),
-COALESCE(SUM(CASE WHEN ` + cacheKnownSQL + ` THEN f.cache_hit_tokens END),0),
-COALESCE(SUM(CASE WHEN ` + cacheKnownSQL + ` THEN f.cache_miss_tokens END),0),
+COUNT(CASE WHEN ` + eff + ` THEN 1 END),
+COALESCE(SUM(` + hit + `),0),
+COALESCE(SUM(` + miss + `),0),
+COUNT(CASE WHEN ` + est + ` THEN 1 END),
 COALESCE(SUM(f.duration_ms),0), COUNT(f.duration_ms),
 COUNT(CASE WHEN f.seq IS NULL THEN 1 END),
 COUNT(CASE WHEN f.status='succeeded' THEN 1 END),
@@ -188,9 +226,10 @@ COUNT(CASE WHEN f.status='failed' THEN 1 END),
 COUNT(CASE WHEN f.status='cancelled' THEN 1 END),
 COUNT(CASE WHEN f.seq IS NOT NULL AND (f.status IS NULL OR f.status NOT IN ('succeeded','failed','cancelled','save_failed')) THEN 1 END),
 COUNT(CASE WHEN f.status='save_failed' THEN 1 END)`
+}
 
 func (t *AggregateTotals) scanArgs() []any {
-	return []any{&t.RequestCount, &t.TokenCallCount, &t.InputSampleCount, &t.OutputSampleCount, &t.TokenSampleCount, &t.CompleteTokenSampleCount, &t.InputTokens, &t.OutputTokens, &t.CacheSampleCount, &t.CacheHitTokens, &t.CacheMissTokens, &t.DurationSumMs, &t.DurationSampleCount, &t.Statuses.Pending, &t.Statuses.Succeeded, &t.Statuses.Failed, &t.Statuses.Cancelled, &t.Statuses.Unknown, &t.Statuses.SaveFailed}
+	return []any{&t.RequestCount, &t.TokenCallCount, &t.InputSampleCount, &t.OutputSampleCount, &t.TokenSampleCount, &t.CompleteTokenSampleCount, &t.InputTokens, &t.OutputTokens, &t.CacheSampleCount, &t.CacheHitTokens, &t.CacheMissTokens, &t.CacheEstimatedCount, &t.DurationSumMs, &t.DurationSampleCount, &t.Statuses.Pending, &t.Statuses.Succeeded, &t.Statuses.Failed, &t.Statuses.Cancelled, &t.Statuses.Unknown, &t.Statuses.SaveFailed}
 }
 
 func (t *AggregateTotals) finish() {
@@ -210,6 +249,7 @@ func (t *AggregateTotals) add(other AggregateTotals) {
 	t.CacheSampleCount += other.CacheSampleCount
 	t.CacheHitTokens += other.CacheHitTokens
 	t.CacheMissTokens += other.CacheMissTokens
+	t.CacheEstimatedCount += other.CacheEstimatedCount
 	t.DurationSumMs += other.DurationSumMs
 	t.DurationSampleCount += other.DurationSampleCount
 	t.Statuses.Pending += other.Statuses.Pending

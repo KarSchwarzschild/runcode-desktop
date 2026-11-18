@@ -39,6 +39,7 @@ type CallRecord struct {
 	CacheHitTokensKnown  bool
 	CacheMissTokens      *int64
 	CacheMissTokensKnown bool
+	CacheEstimated       bool // 有效缓存来自本地近似，而非供应商上报
 	GeneratedImages      *int64
 }
 
@@ -133,7 +134,7 @@ func (s *Store) QueryPage(ctx context.Context, filter QueryFilter, cursor string
 		args = append(args, decoded.Started, decoded.CallID)
 	}
 	args = append(args, limit+1)
-	calls, err := queryCalls(ctx, tx, callColumns+from+` ORDER BY s.started_at_ms DESC, s.call_id DESC LIMIT ?`, args)
+	calls, err := queryCalls(ctx, tx, callColumnsSQL(seq)+from+` ORDER BY s.started_at_ms DESC, s.call_id DESC LIMIT ?`, args)
 	if err != nil {
 		return QueryPage{}, err
 	}
@@ -198,12 +199,15 @@ func snapshotSeq(ctx context.Context, tx *sql.Tx, requested int64, pinned bool) 
 	return current, nil
 }
 
-const callColumns = `SELECT s.call_id, s.scope_id, s.model, s.call_kind, s.started_at_ms,
+func callColumnsSQL(seq int64) string {
+	return `SELECT s.call_id, s.scope_id, s.model, s.call_kind, s.started_at_ms,
  f.finished_at_ms, f.duration_ms, CASE WHEN f.seq IS NULL THEN 'pending'
  WHEN f.status IN ('succeeded','failed','cancelled','unknown','save_failed') THEN f.status ELSE 'unknown' END,
  f.input_tokens, f.input_tokens_known, f.output_tokens, f.output_tokens_known,
- f.cache_hit_tokens, f.cache_hit_tokens_known, f.cache_miss_tokens, f.cache_miss_tokens_known,
+ ` + effectiveCacheHitSQL(seq) + `, ` + effectiveCacheMissSQL(seq) + `,
+ CASE WHEN ` + canEstimateSQL(seq) + ` THEN 1 ELSE 0 END,
  f.generated_images`
+}
 
 func callsFrom(f QueryFilter, includePending bool) (string, []any) {
 	join := ` JOIN `
@@ -230,8 +234,8 @@ func queryCalls(ctx context.Context, tx *sql.Tx, query string, args []any) ([]Ca
 	for rows.Next() {
 		var call CallRecord
 		var started, finished sql.NullInt64
-		var duration, input, inputKnown, output, outputKnown, cacheHit, cacheHitKnown, cacheMiss, cacheMissKnown, images sql.NullInt64
-		if err := rows.Scan(&call.CallID, &call.ScopeID, &call.Model, &call.CallKind, &started, &finished, &duration, &call.Status, &input, &inputKnown, &output, &outputKnown, &cacheHit, &cacheHitKnown, &cacheMiss, &cacheMissKnown, &images); err != nil {
+		var duration, input, inputKnown, output, outputKnown, cacheHit, cacheMiss, estimated, images sql.NullInt64
+		if err := rows.Scan(&call.CallID, &call.ScopeID, &call.Model, &call.CallKind, &started, &finished, &duration, &call.Status, &input, &inputKnown, &output, &outputKnown, &cacheHit, &cacheMiss, &estimated, &images); err != nil {
 			return nil, err
 		}
 		call.StartedAt = time.UnixMilli(started.Int64).UTC()
@@ -253,15 +257,12 @@ func queryCalls(ctx context.Context, tx *sql.Tx, query string, args []any) ([]Ca
 			v := output.Int64
 			call.OutputTokens = &v
 		}
-		call.CacheHitTokensKnown = cacheHitKnown.Valid && cacheHitKnown.Int64 != 0 && cacheHit.Valid
-		if call.CacheHitTokensKnown {
-			v := cacheHit.Int64
-			call.CacheHitTokens = &v
-		}
-		call.CacheMissTokensKnown = cacheMissKnown.Valid && cacheMissKnown.Int64 != 0 && cacheMiss.Valid
-		if call.CacheMissTokensKnown {
-			v := cacheMiss.Int64
-			call.CacheMissTokens = &v
+		// 有效缓存（上报或估算）直接由 SQL 产出；已知标记与两侧同时有值对齐。
+		if cacheHit.Valid && cacheMiss.Valid {
+			h, m := cacheHit.Int64, cacheMiss.Int64
+			call.CacheHitTokens, call.CacheMissTokens = &h, &m
+			call.CacheHitTokensKnown, call.CacheMissTokensKnown = true, true
+			call.CacheEstimated = estimated.Valid && estimated.Int64 != 0
 		}
 		if images.Valid {
 			v := images.Int64

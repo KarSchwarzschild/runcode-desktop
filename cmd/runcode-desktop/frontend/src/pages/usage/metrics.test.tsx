@@ -64,6 +64,7 @@ describe('UsageMetrics', () => {
     })
     const t = text(renderToStaticMarkup(<UsageMetrics totals={totals} capabilities={caps} empty={false} />))
     expect(t).toContain('部分记录可统计')
+    expect(t).toContain('本地近似')
     expect(t).toContain('缓存信息覆盖 1/2 次')
     expect(t).toContain('含估算')
     expect(t).toContain('含历史口径')

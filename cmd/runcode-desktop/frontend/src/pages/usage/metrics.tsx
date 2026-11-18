@@ -26,8 +26,11 @@ function tokenQuality(t: UsageTotals): string {
 function cacheCard(t: UsageTotals, caps: UsageCapabilities): { value: string; sub: string } {
   if (!caps.cacheMetrics) return { value: '—', sub: '当前数据不支持缓存统计' }
   if (t.cacheHitRate == null) return { value: '—', sub: '缓存信息未知：历史记录里的 0 无法区分未命中与未上报' }
-  const coverage = `缓存信息覆盖 ${formatExact(t.cacheKnownRequestCount)}/${formatExact(t.cacheEligibleRequestCount)} 次`
-  return { value: formatRate(t.cacheHitRate), sub: t.quality.containsLegacyInferredCache ? `${coverage} · 含历史推导` : coverage }
+  const parts: string[] = []
+  if (t.quality.containsEstimates) parts.push('本地近似')
+  parts.push(`缓存信息覆盖 ${formatExact(t.cacheKnownRequestCount)}/${formatExact(t.cacheEligibleRequestCount)} 次`)
+  if (t.quality.containsLegacyInferredCache) parts.push('含历史推导')
+  return { value: formatRate(t.cacheHitRate), sub: parts.join(' · ') }
 }
 
 export function UsageMetrics({ totals, capabilities, empty, statusCounts }: {

@@ -172,7 +172,10 @@ func localUsageTotals(a localusage.AggregateTotals) protocol.UsageTotals {
 		CacheHitTokens: value(a.CacheHitTokens, a.CacheSampleCount), CacheMissTokens: value(a.CacheMissTokens, a.CacheSampleCount), CacheEligibleInputTokens: value(a.CacheEligibleInputTokens, a.CacheSampleCount),
 		CacheHitRate: rate, CacheKnownRequestCount: strconv.FormatInt(a.CacheSampleCount, 10), CacheEligibleRequestCount: strconv.FormatInt(a.TokenCallCount, 10),
 		DurationSampleCount: strconv.FormatInt(a.DurationSampleCount, 10), AverageDurationMs: avg,
-		Quality: protocol.UsageQuality{TokenCoverage: coverage, CacheCoverage: cacheCoverage, InvalidRecordCount: "0"},
+		Quality: protocol.UsageQuality{
+			TokenCoverage: coverage, CacheCoverage: cacheCoverage,
+			ContainsEstimates: a.CacheEstimatedCount > 0, InvalidRecordCount: "0",
+		},
 	}
 }
 
@@ -395,7 +398,11 @@ func localUsageRow(c localusage.CallRecord) protocol.UsageRequestRow {
 		if c.CacheHitTokensKnown && c.CacheHitTokens != nil && c.CacheMissTokensKnown && c.CacheMissTokens != nil {
 			h, m := strconv.FormatInt(*c.CacheHitTokens, 10), strconv.FormatInt(*c.CacheMissTokens, 10)
 			row.CacheHitTokens, row.CacheMissTokens = &h, &m
-			row.Quality.CacheSource = "reported"
+			if c.CacheEstimated {
+				row.Quality.CacheSource = "estimated"
+			} else {
+				row.Quality.CacheSource = "reported"
+			}
 		}
 		if c.InputTokensKnown && c.InputTokens != nil {
 			v := strconv.FormatInt(*c.InputTokens, 10)

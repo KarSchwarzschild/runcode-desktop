@@ -256,6 +256,65 @@ func TestLocalUsageReportsCacheHitRateFromCoreUsage(t *testing.T) {
 	}
 }
 
+func TestLocalUsageReportsConservativeEstimatedCacheRate(t *testing.T) {
+	now := time.Date(2026, 11, 13, 4, 0, 0, 0, time.UTC)
+	app, store := newLocalUsageTestApp(t, now)
+	scope, err := app.freezeUsageScopeParts("https://bridge.test", "tenant-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(id string, started time.Time, in, out int64) {
+		t.Helper()
+		start := localusage.StartRecord{CallID: id, Scope: scope, Model: "qwen-max", CallKind: localusage.CallKindLLM, StartedAt: started}
+		if err := store.Begin(context.Background(), start); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Finish(context.Background(), localusage.FinishRecord{
+			CallID: id, Status: localusage.StatusSucceeded, FinishedAt: started.Add(time.Second),
+			InputTokens: &in, InputTokensKnown: true, OutputTokens: &out, OutputTokensKnown: true, FrozenStart: start,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("est-1", now.Add(-2*time.Minute), 100, 10)
+	write("est-2", now.Add(-time.Minute), 120, 12)
+	overview, err := app.GetUsageOverview(protocol.UsageQuery{TenantID: "tenant-a", Range: "last24h", Timezone: usageTimezone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !overview.Capabilities.CacheMetrics || !overview.Summary.Quality.ContainsEstimates {
+		t.Fatalf("expected estimated cache metrics: %+v", overview.Summary)
+	}
+	if overview.Summary.CacheHitRate == nil || *overview.Summary.CacheHitRate < 0.833 || *overview.Summary.CacheHitRate > 0.834 {
+		t.Fatalf("estimated rate = %v want ~0.833", overview.Summary.CacheHitRate)
+	}
+	if overview.Summary.CacheHitTokens == nil || *overview.Summary.CacheHitTokens != "100" || overview.Summary.CacheMissTokens == nil || *overview.Summary.CacheMissTokens != "20" {
+		t.Fatalf("estimated tokens = %+v", overview.Summary)
+	}
+	page, err := app.GetUsageRequests(protocol.UsageRequestsQuery{
+		Query: protocol.ResolvedUsageQuery{
+			TenantID: "tenant-a", SnapshotSeq: overview.SnapshotSeq,
+			EffectiveRange: overview.EffectiveRange,
+		},
+		PageSize: 20,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawEstimated bool
+	for _, row := range page.Items {
+		if row.ID == "est-2" {
+			sawEstimated = true
+			if row.Quality.CacheSource != "estimated" {
+				t.Fatalf("row est-2 cache source = %q", row.Quality.CacheSource)
+			}
+		}
+	}
+	if !sawEstimated {
+		t.Fatal("missing estimated request row")
+	}
+}
+
 func TestLocalUsageTrendBucketsByHour(t *testing.T) {
 	// 上海 12:00 = UTC 04:00；「当天」应从 00:00+08 起按小时分桶，不能整段压成一根柱。
 	now := time.Date(2026, 11, 13, 4, 0, 0, 0, time.UTC)

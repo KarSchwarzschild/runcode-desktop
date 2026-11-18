@@ -81,7 +81,8 @@ type UsageDimensionsQuery struct {
 }
 
 // UsageQuality 描述一组统计的口径覆盖：tokenCoverage / cacheCoverage 取
-// complete / partial / none；legacy 标记说明合计里含无法确认来源的历史口径。
+// complete / partial / none；containsEstimates 表示合计含本地近似缓存（非供应商精确命中）；
+// legacy 标记说明合计里含无法确认来源的历史口径。
 type UsageQuality struct {
 	TokenCoverage               string `json:"tokenCoverage"`
 	CacheCoverage               string `json:"cacheCoverage"`
