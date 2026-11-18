@@ -11,6 +11,7 @@ import {
 import { basename } from '@/core/paths'
 import { Icon } from '@/ui/icons'
 import { ArtifactActionsContext } from './artifact-actions'
+import { IMAGE_GENERATION_ANNOTATION_UI } from './image-generation-annotation'
 import './generated-image-preview.css'
 
 const REVEAL_STRIPS = 8
@@ -96,11 +97,12 @@ type Resource =
   | { status: 'error'; path: string }
 
 export function GeneratedImagePreview({
-  tool, sessionId, image, collapsed = false, onToggleCollapse, onHeightChange, onView, onAnnotate, stageRef,
+  tool, sessionId, image, collapsed: collapsedProp, onToggleCollapse, onHeightChange, onView, onAnnotate, stageRef,
 }: {
   tool: ToolEvent
   sessionId: string
   image?: ImageGenerationArtifact
+  /** 受控折叠；省略时组件自管开关（对话卡默认）。 */
   collapsed?: boolean
   onToggleCollapse?: () => void
   onHeightChange?: () => void
@@ -120,6 +122,14 @@ export function GeneratedImagePreview({
   const [resource, setResource] = useState<Resource>({ status: 'idle' })
   const [boxW, setBoxW] = useState(560)
   const [revealing, setRevealing] = useState(false)
+  // 对话卡未传受控 props 时自管折叠；只传 onClick 空壳会导致「预览 …」点了无反应。
+  const [uncontrolledCollapsed, setUncontrolledCollapsed] = useState(false)
+  const controlled = collapsedProp !== undefined
+  const collapsed = controlled ? collapsedProp : uncontrolledCollapsed
+  const toggleCollapsed = () => {
+    if (onToggleCollapse) onToggleCollapse()
+    if (!controlled) setUncontrolledCollapsed((v) => !v)
+  }
   const revealRootRef = useRef<HTMLDivElement>(null)
   const sawRunningRef = useRef(false)
   const revealedKeyRef = useRef('')
@@ -285,7 +295,10 @@ export function GeneratedImagePreview({
         {canInteract ? (
           <div className="pointer-events-none absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
             <CornerIconBtn icon="expand" tip="查看大图" onClick={() => onView?.()} />
-            <CornerIconBtn icon="pencil" tip="标注" onClick={() => onAnnotate?.()} />
+            {/* 标注角标：见 image-generation-annotation.ts；恢复开关后取消下一行条件即可。 */}
+            {IMAGE_GENERATION_ANNOTATION_UI ? (
+              <CornerIconBtn icon="pencil" tip="标注" onClick={() => onAnnotate?.()} />
+            ) : null}
             <CornerIconBtn icon="folder" tip="在文件夹中显示" onClick={() => { void actions.reveal(path).catch(() => {}) }} />
             <CornerIconBtn icon="external-link" tip="用系统程序打开" onClick={() => { void actions.external(path).catch(() => {}) }} />
           </div>
@@ -310,7 +323,7 @@ export function GeneratedImagePreview({
           id={titleId}
           className="inline-flex items-center gap-1 text-[12px] text-muted hover:text-ink"
           aria-expanded={!collapsed}
-          onClick={() => onToggleCollapse?.()}
+          onClick={toggleCollapsed}
         >
           <Icon name="chevron-down" size={12} className={collapsed ? '-rotate-90 transition' : 'transition'} />
           {title}

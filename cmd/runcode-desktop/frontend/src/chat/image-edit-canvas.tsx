@@ -1,4 +1,6 @@
 // 中央图片标注画板：底图 + 归一化操作栈；保存为同 generation 目录下的 edited-*.png。
+// 入口已由 IMAGE_GENERATION_ANNOTATION_UI（image-generation-annotation.ts）关掉；
+// 本文件与画笔／文字工具保留，便于恢复开关后无需重写画板。
 import { useEffect, useRef, useState } from 'react'
 import { errText, saveImageGenerationEdit, type ImageGenerationArtifact } from '@/core/bridge'
 import { ConfirmDialog } from '@/ui/confirm-dialog'

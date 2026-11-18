@@ -200,7 +200,10 @@ export function ChatPane({
                         sessionId={sid || sessionId || ''}
                         image={image}
                         onView={() => { if (image) onRasterImageView?.(image, tool.toolUseID ?? '') }}
-                        onAnnotate={() => { if (image) onRasterImageAnnotate?.(image, tool.toolUseID ?? '') }}
+                        // 标注入口下线时 onRasterImageAnnotate 为空；恢复见 image-generation-annotation.ts
+                        onAnnotate={onRasterImageAnnotate
+                          ? () => { if (image) onRasterImageAnnotate(image, tool.toolUseID ?? '') }
+                          : undefined}
                       />
                     )
                   })}

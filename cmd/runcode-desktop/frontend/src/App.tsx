@@ -496,12 +496,14 @@ function ChatPaneWithRasterViewer(
       alt: '生成图片',
     }, mode, document.activeElement instanceof HTMLElement ? document.activeElement : null)
   }
+  // 标注入口下线：见 chat/image-generation-annotation.ts。
+  // 恢复：打开 IMAGE_GENERATION_ANNOTATION_UI，并恢复
+  // onRasterImageAnnotate={(image, toolUseId) => open(image, toolUseId, 'annotate')}
   return (
     <ChatPane
       {...rest}
       sessionId={sessionId}
       onRasterImageView={(image, toolUseId) => open(image, toolUseId, 'view')}
-      onRasterImageAnnotate={(image, toolUseId) => open(image, toolUseId, 'annotate')}
     />
   )
 }
