@@ -111,6 +111,22 @@ describe('image generation assistant note timing', () => {
     expect(conversation.blocks.filter((b) => b.kind === 'assistant' && b.imageGenerationNote)).toHaveLength(1)
   })
 
+  it('stamps unconfigured note when model skips image_generate but guides to settings', async () => {
+    const unconfigured: AssistantImageGenerationNote = { modelLabel: '未配置', sizeLabel: '未配置' }
+    bridge.submitQuestion.mockResolvedValue({ questionId: 'q-unconfigured' })
+    await render(unconfigured)
+    await act(async () => { await conversation.send('生成一件T恤') })
+    await emit('assistant:delta', {
+      text: '目前暂时无法为您生成图片。请点击回复末尾的「修改生图设置」。',
+    })
+    await emit('turn:end', turnEnd)
+
+    expect(loadImageGenerationNoteMap('S')).toEqual({ 'q-unconfigured': unconfigured })
+    const stamped = conversation.blocks.filter((b) => b.kind === 'assistant' && b.imageGenerationNote)
+    expect(stamped).toHaveLength(1)
+    expect(stamped[0]).toMatchObject({ imageGenerationNote: unconfigured })
+  })
+
   it('waits for a late questionId after image_generate and TurnEnd already arrived', async () => {
     const setItem = vi.spyOn(Storage.prototype, 'setItem')
     let resolveReceipt!: (value: { questionId: string }) => void

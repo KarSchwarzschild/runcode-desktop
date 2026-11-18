@@ -33,9 +33,11 @@ import {
   type Block,
 } from '@/chat/blocks'
 import {
+  isUnconfiguredImageGenerationNote,
   loadImageGenerationNoteMap,
   rehydrateAssistantNotes,
   saveImageGenerationNote,
+  shouldStampUnconfiguredImageGenerationNote,
   stampTurnAssistantNote,
   type AssistantImageGenerationNote,
 } from '@/chat/image-generation-note'
@@ -145,17 +147,6 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
       ready.push(blockId)
     }
     for (const blockId of ready) finalizeImageGenerationNote(sessionId, blockId)
-  }, [finalizeImageGenerationNote])
-
-  const finishImageGenerationTurn = useCallback((sessionId: string) => {
-    const blockIDs = [...pendingImageGenByUserBlock.current]
-      .filter(([, pending]) => pending.sessionId === sessionId)
-      .map(([blockId]) => blockId)
-    for (const blockId of blockIDs) {
-      const pending = pendingImageGenByUserBlock.current.get(blockId)
-      if (pending) pending.finished = true
-    }
-    for (const blockId of blockIDs) finalizeImageGenerationNote(sessionId, blockId, true)
   }, [finalizeImageGenerationNote])
 
   const discardImageGenerationTurn = useCallback((sessionId: string) => {
@@ -357,18 +348,37 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
           if (end.inputTokens > 0 || end.outputTokens > 0) {
             next = [...next, { kind: 'usage', id: nextID(), inTok: end.inputTokens, outTok: end.outputTokens, durMs: end.durationMs }]
           }
-          // 在同一快照里盖生图尾注：先 finalizeStreaming 再 stamp，避免紧随其后的
-          // finishImageGenerationTurn 读到仍标 streaming 的旧块而丢尾注。
-          for (const [, pending] of pendingImageGenByUserBlock.current) {
+          // 生图尾注盖章与清理必须在本 updater 内同步完成。
+          // 若再调用 finishImageGenerationTurn，它会在本 updater 入队后立刻以
+          // observed=false 把未配置回合丢掉（React 尚未跑到这里），尾注永久缺失。
+          // 未配置时模型常「请勿调用」而不发 image_generate，仍须按失败引导盖尾注。
+          for (const [blockId, pending] of [...pendingImageGenByUserBlock.current]) {
             if (pending.sessionId !== sid) continue
             pending.finished = true
+            if (!pending.observed
+              && isUnconfiguredImageGenerationNote(pending.note)
+              && shouldStampUnconfiguredImageGenerationNote(next)) {
+              pending.observed = true
+            }
             if (pending.observed && pending.questionId) {
               next = stampTurnAssistantNote(next, pending.note)
+              try {
+                saveImageGenerationNote(sid, pending.questionId, pending.note)
+              } catch { /* localStorage 失败不阻断终态 */ }
+              pendingImageGenByUserBlock.current.delete(blockId)
+              if (activeImageGenBlockBySession.current.get(sid) === blockId) {
+                activeImageGenBlockBySession.current.delete(sid)
+              }
+            } else if (!pending.observed) {
+              pendingImageGenByUserBlock.current.delete(blockId)
+              if (activeImageGenBlockBySession.current.get(sid) === blockId) {
+                activeImageGenBlockBySession.current.delete(sid)
+              }
             }
+            // observed 但尚无 questionId：保留，等 submit 回执 finalize。
           }
           return next
         })
-        finishImageGenerationTurn(sid)
       }),
       onEnvelope(Events.TurnError, (env) => {
         const { error } = env.payload
@@ -425,7 +435,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
     // 只订阅一次:引擎事件是进程级的,重订阅会漏事件也会重复处理。列进依赖的三个
     // 都是稳定引用(infoRef 是 ref;patch/blocksOf 经 useCallback 固定),所以这条
     // 依赖数组不会导致重订阅;其余外部回调经上面的 cb ref 取最新值。
-  }, [infoRef, patch, blocksOf, observeImageGeneration, finishImageGenerationTurn, discardImageGenerationTurn])
+  }, [infoRef, patch, blocksOf, observeImageGeneration, discardImageGenerationTurn])
 
   // Pin the conversation to the bottom while output streams, but only if the user
   // is already at (or near) the bottom — once they scroll up to read, streaming

@@ -36,6 +36,42 @@ export function formatImageGenerationNote(input: { modelName?: string | null; si
   }
 }
 
+/** 冻结尾注是否表示尚未选择生图模型（含旧版「未设置」文案）。 */
+export function isUnconfiguredImageGenerationNote(note: AssistantImageGenerationNote | null | undefined): boolean {
+  const label = (note?.modelLabel ?? '').trim()
+  return label === '未配置' || label === '未设置'
+}
+
+/**
+ * 未配置且本回合未实际发出 image_generate 时，是否仍应盖尾注。
+ * 工具说明要求「请勿调用」，模型常只写失败说明；若仍要求必须 observe，
+ * 末尾就不会出现「修改生图设置」。本判定只认未配置 + 本回合出图意图／失败引导。
+ */
+export function shouldStampUnconfiguredImageGenerationNote(blocks: Block[]): boolean {
+  const lastUser = blocks.map((b) => b.kind).lastIndexOf('user')
+  if (lastUser < 0) return false
+  const user = blocks[lastUser]
+  const userText = user?.kind === 'user' ? user.text : ''
+  const asstText = blocks
+    .slice(lastUser + 1)
+    .filter((b): b is Extract<Block, { kind: 'assistant' }> => b.kind === 'assistant')
+    .map((b) => b.text)
+    .join('\n')
+  // 助手已在引导去改设置／说明无法出图
+  if (/修改生图设置|图像生成模型|生图模型|无法[^\n]{0,24}生成图片|没有选择[^\n]{0,16}(生图|图像生成)/.test(asstText)) {
+    return true
+  }
+  // 用户本意就是位图／海报／实物效果等出图；避免「画一个流程图」这类逻辑图误盖
+  if (
+    /文生图|画一张|来一张|出一张/.test(userText)
+    || (/生成/.test(userText) && /(照片|海报|插画|图片|T恤|衣服|壁纸|一张图)/.test(userText))
+    || /生成\S{0,8}图/.test(userText)
+  ) {
+    return true
+  }
+  return false
+}
+
 export function noteStorageKey(sessionId: string): string {
   return `imagegen.note.${sessionId}`
 }

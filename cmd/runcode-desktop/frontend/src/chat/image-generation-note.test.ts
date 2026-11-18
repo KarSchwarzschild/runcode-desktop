@@ -2,8 +2,9 @@
 import { describe, expect, it, beforeEach } from 'vitest'
 import type { Block } from './blocks'
 import {
-  displayImageGenerationSizeLabel, formatImageGenerationNote, loadImageGenerationNoteMap,
-  rehydrateAssistantNotes, saveImageGenerationNote, scrubImageGenerationAssistantText,
+  displayImageGenerationSizeLabel, formatImageGenerationNote, isUnconfiguredImageGenerationNote,
+  loadImageGenerationNoteMap, rehydrateAssistantNotes, saveImageGenerationNote,
+  scrubImageGenerationAssistantText, shouldStampUnconfiguredImageGenerationNote,
   stampTurnAssistantNote, UNFIXED_SIZE_LABEL, questionIdForUserBlock,
 } from './image-generation-note'
 
@@ -32,6 +33,32 @@ describe('formatImageGenerationNote', () => {
   })
   it('scrubs desktop preview boilerplate', () => {
     expect(scrubImageGenerationAssistantText('已生成，已在桌面预览中打开。继续')).toBe('已生成。继续')
+  })
+  it('recognizes unconfigured labels including legacy 未设置', () => {
+    expect(isUnconfiguredImageGenerationNote(formatImageGenerationNote({}))).toBe(true)
+    expect(isUnconfiguredImageGenerationNote({ modelLabel: '未设置', sizeLabel: '不固定尺寸' })).toBe(true)
+    expect(isUnconfiguredImageGenerationNote({ modelLabel: 'img-a', sizeLabel: '未配置' })).toBe(false)
+  })
+  it('stamps unconfigured note when assistant guides to settings or user asks for a bitmap', () => {
+    const fail: Block[] = [
+      { kind: 'user', id: 'u', text: '生成一件T恤', ts: '' },
+      {
+        kind: 'assistant', id: 'a', streaming: false, ts: '',
+        text: '目前暂时无法为您生成图片。请点击「修改生图设置」。',
+      },
+    ]
+    expect(shouldStampUnconfiguredImageGenerationNote(fail)).toBe(true)
+    const diagram: Block[] = [
+      { kind: 'user', id: 'u', text: '画一个流程图', ts: '' },
+      { kind: 'assistant', id: 'a', streaming: false, ts: '', text: '```mermaid\ngraph TD;A-->B\n```' },
+    ]
+    // 流程图等逻辑图：用户未提位图、助手未引导改设置 → 不误盖
+    expect(shouldStampUnconfiguredImageGenerationNote(diagram)).toBe(false)
+    const chat: Block[] = [
+      { kind: 'user', id: 'u', text: '今天天气怎么样', ts: '' },
+      { kind: 'assistant', id: 'a', streaming: false, ts: '', text: '今天晴。' },
+    ]
+    expect(shouldStampUnconfiguredImageGenerationNote(chat)).toBe(false)
   })
 })
 
