@@ -22,6 +22,8 @@ type Props = {
   kind: StaticPreviewKind
   source: string
   defaultNode: ReactNode
+  /** 流式中只延后已闭合块；完成态和直出预览不增加等待。 */
+  streaming?: boolean
   onHeightChange?: () => void
   messageId?: string
   /** 与本预览同扩展名、同条消息里提到的工作区相对路径；用于抑制右侧自动预览。 */
@@ -45,15 +47,18 @@ const INLINE_IMAGE_STYLE = {
   maxHeight: 'clamp(240px, 42vh, 420px)',
 } as const
 
+const STREAMING_DEBOUNCE_MS = 200
+
 function reportPaths(sessionId: string | undefined, paths: string[] | undefined, status: InlineFileStatus) {
   if (!sessionId || !paths?.length) return
   for (const p of paths) noteInlineFile(sessionId, p, status)
 }
 
 export function InlinePreview({
-  kind, source, defaultNode, onHeightChange, messageId, relatedPaths, sessionId,
+  kind, source, defaultNode, streaming = false, onHeightChange, messageId, relatedPaths, sessionId,
   previewId, onOpenCodePreview,
 }: Props) {
+  const [renderSource, setRenderSource] = useState<string | null>(() => streaming ? null : source)
   const [ready, setReady] = useState<Ready | null>(null)
   const [failReason, setFailReason] = useState<string | null>(null)
   const [view, setView] = useState<'preview' | 'source'>('preview')
@@ -70,7 +75,28 @@ export function InlinePreview({
   const pathsRef = useRef(relatedPaths)
   pathsRef.current = relatedPaths
 
+  // 流式时只延后已经闭合的围栏；源内容变化时先撤掉旧结果，避免展示过期图。
   useEffect(() => {
+    if (!streaming) {
+      setRenderSource(source)
+      return
+    }
+    setRenderSource(null)
+    setReady(null)
+    setFailReason(null)
+    setViewOpen(false)
+    setLightboxOpen(false)
+    if (urlRef.current) {
+      URL.revokeObjectURL(urlRef.current)
+      urlRef.current = null
+    }
+    const timer = window.setTimeout(() => setRenderSource(source), STREAMING_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [source, streaming])
+
+  useEffect(() => {
+    if (renderSource === null) return
+    const stableSource = renderSource
     const gen = ++genRef.current
     let cancelled = false
     const ac = new AbortController()
@@ -91,7 +117,7 @@ export function InlinePreview({
     async function run() {
       try {
         if (kind === 'svg') {
-          const r = sanitizeSvg(source)
+          const r = sanitizeSvg(stableSource)
           if (!r.ok) { fail(r.reason); return }
           const url = URL.createObjectURL(new Blob([r.svg], { type: 'image/svg+xml' }))
           if (cancelled || gen !== genRef.current) { URL.revokeObjectURL(url); return }
@@ -102,7 +128,7 @@ export function InlinePreview({
           return
         }
         if (kind === 'html') {
-          const r = renderStaticHtml(source)
+          const r = renderStaticHtml(stableSource)
           if (!r.ok) { fail(r.reason); return }
           if (!cancelled && gen === genRef.current) {
             setReady({ kind: 'html', srcdoc: r.srcdoc })
@@ -110,7 +136,7 @@ export function InlinePreview({
           }
           return
         }
-        const r = await renderMermaid(source, ac.signal)
+        const r = await renderMermaid(stableSource, ac.signal)
         if (cancelled || ac.signal.aborted || gen !== genRef.current) return
         if (!r.ok) { fail(r.reason); return }
         const url = URL.createObjectURL(new Blob([r.svg], { type: 'image/svg+xml' }))
@@ -130,7 +156,7 @@ export function InlinePreview({
       ac.abort()
       if (urlRef.current) { URL.revokeObjectURL(urlRef.current); urlRef.current = null }
     }
-  }, [kind, source, messageId, sessionId, pathsKey])
+  }, [kind, renderSource, messageId, sessionId, pathsKey])
 
   useEffect(() => {
     if (ready) notify.current?.()

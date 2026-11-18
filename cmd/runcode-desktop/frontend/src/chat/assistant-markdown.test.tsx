@@ -35,9 +35,9 @@ describe('listFenceBlocks / selectPreviewBlocks', () => {
     const md = '```svg source\n' + SVG + '\n```\n\n```html\n<button>x</button>\n```'
     expect(selectPreviewBlocks(md, false).size).toBe(0)
   })
-  it('does not preview while streaming, even for closed fences', () => {
+  it('selects closed fences while streaming', () => {
     const md = '```svg\n' + SVG + '\n```'
-    expect(selectPreviewBlocks(md, true).size).toBe(0)
+    expect(selectPreviewBlocks(md, true).size).toBe(1)
     expect(listFenceBlocks(md)).toHaveLength(1)
   })
   it('rejects an unclosed fence that the parser still yields as a code node', () => {
@@ -77,10 +77,11 @@ describe('AssistantMarkdown', () => {
     expect(html).toContain('language-svg')
     expect(html).not.toContain('min-h-12') // loading placeholder from InlinePreview
   })
-  it('does not enable preview while streaming', () => {
-    const md = '```svg\n' + SVG + '\n```'
+  it('keeps an unclosed streaming fence as source', () => {
+    const md = '```svg\n' + SVG
     const html = renderToStaticMarkup(<AssistantMarkdown messageId="m1" streaming>{md}</AssistantMarkdown>)
     expect(html).toContain('language-svg')
+    expect(html).not.toContain('min-h-12')
   })
   it('mounts an inline preview slot for a closed svg block (placeholder before effect)', () => {
     // renderToStaticMarkup 不跑 effect，所以看到的是加载占位而不是 <img>；证明插槽已接上。

@@ -1,5 +1,5 @@
 // AssistantMarkdown 是主助手正文的 Markdown 渲染器：在通用 Markdown 插槽上叠加
-// 静态预览识别（围栏完整性、类型、去重与单消息上限）。流式输出期间一律显示源码；
+// 静态预览识别（围栏完整性、类型、去重与单消息上限）。流式中只预览已闭合围栏；
 // textOnly 纯文本渲染不启用预览。不处理生图工具卡片——那是 GeneratedImageCard 的事。
 import { useMemo, type ReactNode } from 'react'
 import { unified } from 'unified'
@@ -46,9 +46,8 @@ export function listFenceBlocks(source: string): FenceBlock[] {
   return out
 }
 
-export function selectPreviewBlocks(source: string, streaming: boolean): Map<string, StaticPreviewKind> {
+export function selectPreviewBlocks(source: string, _streaming: boolean): Map<string, StaticPreviewKind> {
   const selected = new Map<string, StaticPreviewKind>()
-  if (streaming) return selected
   const candidates = []
   for (const b of listFenceBlocks(source)) {
     const closed = fenceClosed(source, b.start, b.end)
@@ -87,19 +86,20 @@ export function AssistantMarkdown({
   messageId, streaming = false, onContentHeightChange, children, textOnly, sessionId,
   onOpenCodePreview, ...rest
 }: AssistantMarkdownProps) {
-  const enable = !streaming && !textOnly
+  const enable = !textOnly
   const selected = useMemo(
-    () => (enable ? selectPreviewBlocks(children, false) : new Map<string, StaticPreviewKind>()),
-    [enable, children],
+    () => (enable ? selectPreviewBlocks(children, streaming) : new Map<string, StaticPreviewKind>()),
+    [enable, streaming, children],
   )
   const pathsByKind = useMemo(() => {
-    if (!enable || !sessionId) return null
+    // 流式路径可能先出现、文件稍后才落盘；等 TurnEnd 后再读取，避免重复申请 artifact。
+    if (!enable || streaming || !sessionId) return null
     return {
       svg: relatedPathsForKind(children, 'svg'),
       mermaid: relatedPathsForKind(children, 'mermaid'),
       html: relatedPathsForKind(children, 'html'),
     }
-  }, [enable, sessionId, children])
+  }, [enable, streaming, sessionId, children])
   const selectedKinds = useMemo(() => new Set(selected.values()), [selected])
   const filePreviews = useMemo(() => {
     if (!enable || textOnly || !sessionId || !pathsByKind) return []
@@ -136,6 +136,7 @@ export function AssistantMarkdown({
           kind={kind}
           source={info.value}
           defaultNode={info.defaultNode}
+          streaming={streaming}
           onHeightChange={onContentHeightChange}
           messageId={messageId}
           previewId={id}
@@ -145,7 +146,7 @@ export function AssistantMarkdown({
         />
       )
     }
-  }, [enable, selected, onContentHeightChange, messageId, sessionId, pathsByKind, onOpenCodePreview])
+  }, [enable, streaming, selected, onContentHeightChange, messageId, sessionId, pathsByKind, onOpenCodePreview])
 
   return (
     <>

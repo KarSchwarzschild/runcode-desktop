@@ -324,4 +324,92 @@ describe('InlinePreview lifecycle', () => {
     await act(async () => { await Promise.resolve() })
     expect(host.querySelector('button[title="下载 SVG"]')).toBeNull()
   })
+
+  it('流式内容闭合后等待稳定窗口，再开始渲染', async () => {
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        root.render(createElement(InlinePreview, {
+          kind: 'svg',
+          source: svgOk,
+          defaultNode: createElement('code', null, 'STREAMING SOURCE'),
+          streaming: true,
+        }))
+      })
+      expect(createUrl).not.toHaveBeenCalled()
+      await act(async () => { vi.advanceTimersByTime(199) })
+      expect(createUrl).not.toHaveBeenCalled()
+      await act(async () => { vi.advanceTimersByTime(1) })
+      expect(createUrl).toHaveBeenCalledTimes(1)
+      expect(host.querySelector('img')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('流式内容更新时取消旧渲染，只展示稳定窗口后的新内容', async () => {
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        root.render(createElement(InlinePreview, {
+          kind: 'svg',
+          source: svgOk,
+          defaultNode: createElement('code', null, 'OLD SOURCE'),
+          streaming: true,
+        }))
+      })
+      await act(async () => { vi.advanceTimersByTime(200) })
+      const oldUrl = host.querySelector('img')?.getAttribute('src')
+      expect(oldUrl).toBeTruthy()
+
+      await act(async () => {
+        root.render(createElement(InlinePreview, {
+          kind: 'svg',
+          source: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20"><circle r="5"/></svg>',
+          defaultNode: createElement('code', null, 'NEW SOURCE'),
+          streaming: true,
+        }))
+      })
+      expect(host.querySelector('img')).toBeNull()
+      expect(revoke).toHaveBeenCalledWith(oldUrl)
+      await act(async () => { vi.advanceTimersByTime(199) })
+      expect(createUrl).toHaveBeenCalledTimes(1)
+      await act(async () => { vi.advanceTimersByTime(1) })
+      expect(createUrl).toHaveBeenCalledTimes(2)
+      expect(host.querySelector('img')?.getAttribute('src')).not.toBe(oldUrl)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('TurnEnd 后沿用已渲染结果，不重新渲染也不闪回源码', async () => {
+    vi.useFakeTimers()
+    try {
+      await act(async () => {
+        root.render(createElement(InlinePreview, {
+          kind: 'svg',
+          source: svgOk,
+          defaultNode: createElement('code', null, 'SOURCE'),
+          streaming: true,
+        }))
+      })
+      await act(async () => { vi.advanceTimersByTime(200) })
+      expect(createUrl).toHaveBeenCalledTimes(1)
+      expect(host.querySelector('img')).toBeTruthy()
+
+      await act(async () => {
+        root.render(createElement(InlinePreview, {
+          kind: 'svg',
+          source: svgOk,
+          defaultNode: createElement('code', null, 'SOURCE'),
+          streaming: false,
+        }))
+      })
+      expect(createUrl).toHaveBeenCalledTimes(1)
+      expect(host.querySelector('img')).toBeTruthy()
+      expect(host.textContent).not.toContain('SOURCE')
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })
