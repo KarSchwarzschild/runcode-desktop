@@ -166,3 +166,25 @@ Deferred:
 - No real Passport, Codex, or OA round trip. No race-detector PASS. This session did not open the manager in a browser; 1024×680 and 150% scaling remain a manual check.
 
 Next: Step 8 create form and native workspace picker.
+
+## Step 8 — create form and native workspace picker
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): create schedules with native workspace picker` |
+| Frontend | `npm.cmd test -- src/pages/automation/draft.test.ts src/pages/automation/workspace-picker.test.tsx src/pages/automation/task-form.test.tsx src/pages/automation/workspace-dialog.test.tsx src/shell/more-menu.test.tsx` → PASS (5 files, 11 tests). `npm.cmd run typecheck` → PASS. `npm.cmd run lint` → PASS. |
+
+Notes:
+
+- The create drawer replaces the Step 7 placeholder. The schedule control offers exactly weekly, weekdays, daily, every_hours, every_minutes, monthly, and once. There is no custom mode and no cron field. Repeating modes ask for an interval of 1–9999 with the unit 周/天/小时/分钟/月. Once omits the interval. Weekly can select several weekdays. Monthly warns that a missing day is skipped.
+- The default is daily, at the next five-minute boundary with seconds 00. A boundary after 23:55 rolls the start date forward. Name and prompt lengths count Unicode code points, so a non-BMP character or an emoji is one character. 80 and 16000 are accepted; 81 and 16001 are not.
+- The workspace picker searches the backend recent list and ends with “浏览其他目录...”. `pickWorkspaceFolder` is the only directory call. An empty cancel keeps the previous path. A new path only updates the draft. It does not call `openSession` or `resumeSession`, and it does not write localStorage.
+- Save sends `createAutomationTask` with the current context, `expectedBindingVersion`, and one `clientRequestId`. A failed attempt keeps the text and the same id. Success or an explicit cancel is what retires the id. The button ignores a second click while the request is in flight. Success does not call send or run. The model name and permission mode are read-only. A missing savable connection disables save and offers settings. An unrecognized browser zone is shown as Asia/Shanghai. A backend “expired once” error keeps the draft.
+- Closing a dirty drawer asks with ConfirmDialog before discarding. Enter is not treated as save while an IME composition is in progress.
+
+Deferred:
+
+- Step 9 owns detail, pause/resume, and run history. Step 10 owns the tray and real exit. `BackgroundSupported` stays false.
+- No real Passport, Codex, or OA round trip. No race-detector PASS. This session did not open the Windows folder dialog, so paths with Chinese characters, spaces, a drive root, and cancel were not checked on a real picker.
+
+Next: Step 9 task detail, pause/resume, and run history.

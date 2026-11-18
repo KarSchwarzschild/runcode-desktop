@@ -469,7 +469,11 @@ export default function App() {
           />
         )}
       </div>
-      <AutomationWorkspaceDialog open={automationOpen} onClose={() => setAutomationOpen(false)} />
+      <AutomationWorkspaceDialog
+        open={automationOpen}
+        onClose={() => setAutomationOpen(false)}
+        onOpenSettings={() => { setAutomationOpen(false); openSettings() }}
+      />
       {installing && <InstallOverlay state={installing} />}
       {askpass.current && (
         <AskpassModal

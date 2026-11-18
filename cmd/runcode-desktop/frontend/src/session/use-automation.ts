@@ -3,16 +3,19 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import {
   Events,
+  createAutomationTask,
   errText,
   getAutomationDefaults,
   listAutomationTasks,
   onEnvelope,
   type AutomationDefaults,
   type AutomationTask,
+  type AutomationTaskDraft,
 } from '@/core/bridge'
 import {
   emptyAutomationState,
   reduceAutomation,
+  sameAutomationContext,
   type AutomationFilter,
   type AutomationState,
 } from './automation-state'
@@ -35,6 +38,8 @@ export interface AutomationController {
   defaults: AutomationDefaults | null
   openCreate: () => void
   closeCreate: () => void
+  saveCreate: (draft: AutomationTaskDraft) => Promise<void>
+  notice: string
   selectTask: (id: string) => void
   setFilter: (filter: AutomationFilter) => void
   setQuery: (text: string) => void
@@ -46,9 +51,13 @@ export function useAutomation(enabled: boolean): AutomationController {
   const [state, dispatch] = useReducer(reduceAutomation, undefined, emptyAutomationState)
   const [defaults, setDefaults] = useState<AutomationDefaults | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
+  const [notice, setNotice] = useState('')
   const [reload, setReload] = useState(0)
   const stateRef = useRef(state)
+  const defaultsRef = useRef(defaults)
+  const requestIdRef = useRef('')
   stateRef.current = state
+  defaultsRef.current = defaults
   const ticketRef = useRef(0)
   const appendTicket = useRef(0)
 
@@ -128,8 +137,35 @@ export function useAutomation(enabled: boolean): AutomationController {
   }, [])
 
   const selectTask = useCallback((id: string) => dispatch({ type: 'select', id }), [])
-  const openCreate = useCallback(() => setCreateOpen(true), [])
-  const closeCreate = useCallback(() => setCreateOpen(false), [])
+  const openCreate = useCallback(() => {
+    if (!requestIdRef.current) requestIdRef.current = crypto.randomUUID()
+    setCreateOpen(true)
+  }, [])
+  const closeCreate = useCallback(() => {
+    requestIdRef.current = ''
+    setCreateOpen(false)
+  }, [])
+  const saveCreate = useCallback(async (draft: AutomationTaskDraft) => {
+    const snap = stateRef.current
+    const currentDefaults = defaultsRef.current
+    if (!snap.context || !currentDefaults) throw new Error('自动化上下文还没有准备好')
+    if (!requestIdRef.current) requestIdRef.current = crypto.randomUUID()
+    const result = await createAutomationTask({
+      context: snap.context,
+      clientRequestId: requestIdRef.current,
+      expectedBindingVersion: currentDefaults.bindingVersion,
+      draft,
+    })
+    if (!sameAutomationContext(result.context, stateRef.current.context)) {
+      throw new Error('身份已变化，请刷新后重试')
+    }
+    requestIdRef.current = ''
+    dispatch({ type: 'event', context: result.context, task: result.task })
+    dispatch({ type: 'select', id: result.task.id })
+    setNotice(result.warning || '')
+    setCreateOpen(false)
+    setReload((n) => n + 1)
+  }, [])
   const refresh = useCallback(() => setReload((n) => n + 1), [])
 
   const loadMore = useCallback(() => {
@@ -174,6 +210,8 @@ export function useAutomation(enabled: boolean): AutomationController {
     defaults,
     openCreate,
     closeCreate,
+    saveCreate,
+    notice,
     selectTask,
     setFilter,
     setQuery,

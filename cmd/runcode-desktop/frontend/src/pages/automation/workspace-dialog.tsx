@@ -1,15 +1,20 @@
-import { useEffect, useRef, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { ConfirmDialog } from '@/ui/confirm-dialog'
 import { Icon } from '@/ui/icons'
 import { isComposingKey } from '@/ui/keys'
 import { useAutomation } from '@/session/use-automation'
 import { AutomationManager } from './index'
 
-export function AutomationWorkspaceDialog({ open, onClose }: {
+export function AutomationWorkspaceDialog({ open, onClose, onOpenSettings }: {
   open: boolean
   onClose: () => void
+  onOpenSettings?: () => void
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const auto = useAutomation(open)
+  const [dirty, setDirty] = useState(false)
+  const [askDiscard, setAskDiscard] = useState(false)
+  const markDirty = useCallback((value: boolean) => setDirty(value), [])
 
   useEffect(() => {
     if (!open) return
@@ -21,10 +26,22 @@ export function AutomationWorkspaceDialog({ open, onClose }: {
     }
   }, [open])
 
+  useEffect(() => {
+    if (!auto.createOpen) setDirty(false)
+  }, [auto.createOpen])
+
   if (!open) return null
 
   function closeTop() {
+    if (askDiscard) {
+      setAskDiscard(false)
+      return
+    }
     if (auto.createOpen) {
+      if (dirty) {
+        setAskDiscard(true)
+        return
+      }
       auto.closeCreate()
       return
     }
@@ -64,8 +81,17 @@ export function AutomationWorkspaceDialog({ open, onClose }: {
             <Icon name="close" size={16} />
           </button>
         </header>
-        <AutomationManager auto={auto} />
+        <AutomationManager auto={auto} onDirty={markDirty} onCancelCreate={closeTop} onOpenSettings={onOpenSettings} />
       </div>
+      {askDiscard && (
+        <ConfirmDialog
+          title="放弃未保存的修改？"
+          message="关闭后这次填写的内容不会保存。"
+          confirmLabel="放弃"
+          onConfirm={() => { setAskDiscard(false); setDirty(false); auto.closeCreate() }}
+          onCancel={() => setAskDiscard(false)}
+        />
+      )}
     </div>
   )
 }

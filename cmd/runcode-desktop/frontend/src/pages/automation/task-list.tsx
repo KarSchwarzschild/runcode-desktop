@@ -17,7 +17,8 @@ const TABS: { id: AutomationController['filter']; label: string }[] = [
 const WEEKDAY = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const ACTIVE_RUN = new Set(['queued', 'submitting', 'running', 'waiting_permission'])
 
-export function scheduleSummary(schedule: AutomationSchedule): string {
+export function scheduleSummary(schedule?: AutomationSchedule): string {
+  if (!schedule?.mode) return '时间规则不可用'
   const n = schedule.interval && schedule.interval > 0 ? schedule.interval : 1
   switch (schedule.mode) {
     case 'weekly': {
@@ -148,7 +149,7 @@ export function TaskList({ auto }: { auto: AutomationController }) {
                   </span>
                 </span>
                 <span className="flex-none text-right">
-                  <span className="block text-[12px] text-ink2">{formatNextRun(task.nextRunAtUTC, task.schedule.timeZone)}</span>
+                  <span className="block text-[12px] text-ink2">{formatNextRun(task.nextRunAtUTC, task.schedule?.timeZone || 'Asia/Shanghai')}</span>
                   <span className="block text-[12px] text-muted">{taskStatusLine(task)}</span>
                 </span>
               </button>
