@@ -13,9 +13,12 @@ const asst = (id: string, patch: Partial<Extract<Block, { kind: 'assistant' }>> 
 const user = (id: string, questionId?: string): Block => ({ kind: 'user', id, text: 'hi', ts: '', questionId })
 
 describe('formatImageGenerationNote', () => {
-  it('formats missing model and empty size', () => {
+  it('formats missing model and empty size as 未配置', () => {
     expect(formatImageGenerationNote({ modelName: '', size: '' })).toEqual({
-      modelLabel: '未设置', sizeLabel: UNFIXED_SIZE_LABEL,
+      modelLabel: '未配置', sizeLabel: '未配置',
+    })
+    expect(formatImageGenerationNote({ modelName: 'img-a', size: '' })).toEqual({
+      modelLabel: 'img-a', sizeLabel: UNFIXED_SIZE_LABEL,
     })
     expect(UNFIXED_SIZE_LABEL).toBe('不固定尺寸')
   })

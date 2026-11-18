@@ -68,6 +68,22 @@ describe('GeneratedImagePreview', () => {
     expect(host.textContent).toContain('预览图片')
   })
 
+  it('点击「预览 …」标题可折叠／展开舞台', async () => {
+    await act(async () => root.render(
+      <GeneratedImagePreview tool={tool('progress')} sessionId="S" />,
+    ))
+    const title = host.querySelector('button[aria-expanded="true"]')
+    expect(title).toBeTruthy()
+    expect(host.querySelector('.ig-preview-shimmer')).toBeTruthy()
+    await act(async () => { title!.dispatchEvent(new MouseEvent('click', { bubbles: true })) })
+    expect(host.querySelector('button[aria-expanded="false"]')).toBeTruthy()
+    expect(host.querySelector('.ig-preview-shimmer')).toBeNull()
+    await act(async () => {
+      host.querySelector('button[aria-expanded="false"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(host.querySelector('.ig-preview-shimmer')).toBeTruthy()
+  })
+
   it('ready 图 decode 后才可交互；历史直挂不播揭示；角标仅图标', async () => {
     await act(async () => root.render(
       <GeneratedImagePreview tool={tool('completed')} sessionId="S" image={image} />,
@@ -83,8 +99,9 @@ describe('GeneratedImagePreview', () => {
     })
     expect(host.querySelector('.ig-preview-reveal')).toBeNull()
     const corners = [...host.querySelectorAll('.ig-preview-corner-btn')]
+    // 标注角标随 IMAGE_GENERATION_ANNOTATION_UI 下线；恢复开关后应再含「标注」。
     expect(corners.map((el) => el.getAttribute('aria-label'))).toEqual([
-      '查看大图', '标注', '在文件夹中显示', '用系统程序打开',
+      '查看大图', '在文件夹中显示', '用系统程序打开',
     ])
   })
 

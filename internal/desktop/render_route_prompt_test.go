@@ -35,6 +35,8 @@ func TestRenderRoutePromptMergesIntoSessionConfig(t *testing.T) {
 		"image_generate",
 		"Do not create an HTML file only to preview Mermaid",
 		"Do not use image generation for ordinary flowcharts",
+		"Do not substitute SVG",
+		"修改生图设置",
 	} {
 		if !strings.Contains(cfg.SystemPromptAppend, want) {
 			t.Errorf("SystemPromptAppend missing %q", want)

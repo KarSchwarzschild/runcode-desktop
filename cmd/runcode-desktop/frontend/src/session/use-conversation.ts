@@ -357,6 +357,15 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
           if (end.inputTokens > 0 || end.outputTokens > 0) {
             next = [...next, { kind: 'usage', id: nextID(), inTok: end.inputTokens, outTok: end.outputTokens, durMs: end.durationMs }]
           }
+          // 在同一快照里盖生图尾注：先 finalizeStreaming 再 stamp，避免紧随其后的
+          // finishImageGenerationTurn 读到仍标 streaming 的旧块而丢尾注。
+          for (const [, pending] of pendingImageGenByUserBlock.current) {
+            if (pending.sessionId !== sid) continue
+            pending.finished = true
+            if (pending.observed && pending.questionId) {
+              next = stampTurnAssistantNote(next, pending.note)
+            }
+          }
           return next
         })
         finishImageGenerationTurn(sid)

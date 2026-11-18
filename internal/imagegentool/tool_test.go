@@ -409,7 +409,7 @@ func TestDescriptionStatesWhenToCallAndAvailability(t *testing.T) {
 		t.Fatalf("description still mentions composer toggle: %s", desc)
 	}
 	snap.Enabled, snap.Available, snap.Reason = false, false, "尚未选择生图模型"
-	if d := tl.Description(); !strings.Contains(d, "请勿调用") || !strings.Contains(d, "设置 → 图片生成") || strings.Contains(d, "image-model") {
+	if d := tl.Description(); !strings.Contains(d, "请勿调用") || !strings.Contains(d, "修改生图设置") || !strings.Contains(d, "不要改用 SVG") || strings.Contains(d, "image-model") {
 		t.Fatalf("unavailable description: %s", d)
 	}
 }
@@ -426,6 +426,8 @@ func TestDescriptionSteersMultimodalRouting(t *testing.T) {
 		"不要调用",
 		"海报", "写实", "插画",
 		"导出",
+		"不要改用 SVG",
+		"修改生图设置",
 	} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("available description missing routing cue %q: %s", want, desc)

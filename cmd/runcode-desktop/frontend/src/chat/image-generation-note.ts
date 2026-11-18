@@ -26,8 +26,12 @@ export function scrubImageGenerationAssistantText(text: string): string {
 export function formatImageGenerationNote(input: { modelName?: string | null; size?: string | null }): AssistantImageGenerationNote {
   const model = (input.modelName ?? '').trim()
   const size = (input.size ?? '').trim()
+  // 未选模型时模型与尺寸都显示「未配置」，与失败尾注／设置入口一致；有模型但未固定尺寸仍用「不固定尺寸」。
+  if (!model) {
+    return { modelLabel: '未配置', sizeLabel: '未配置' }
+  }
   return {
-    modelLabel: model || '未设置',
+    modelLabel: model,
     sizeLabel: size || UNFIXED_SIZE_LABEL,
   }
 }
