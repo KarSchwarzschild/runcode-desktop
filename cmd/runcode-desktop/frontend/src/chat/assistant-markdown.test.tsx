@@ -91,4 +91,24 @@ describe('AssistantMarkdown', () => {
     expect(html).toContain('min-h-12')
     expect(html).not.toContain('language-svg')
   })
+
+  it('mounts a file preview for a path-only SVG message', () => {
+    const html = renderToStaticMarkup(
+      <AssistantMarkdown messageId="m1" sessionId="S" onOpenCodePreview={() => {}}>
+        已生成 charts/a.svg
+      </AssistantMarkdown>,
+    )
+    expect(html).toContain('data-file-preview-path="charts/a.svg"')
+  })
+
+  it('does not duplicate a fenced chart when the same file path is mentioned', () => {
+    const md = `已生成 charts/a.svg\n\n\`\`\`svg\n${SVG}\n\`\`\``
+    const html = renderToStaticMarkup(
+      <AssistantMarkdown messageId="m1" sessionId="S" onOpenCodePreview={() => {}}>
+        {md}
+      </AssistantMarkdown>,
+    )
+    expect(html).not.toContain('data-file-preview-path="charts/a.svg"')
+    expect(html).toContain('data-file-preview-link="charts/a.svg"')
+  })
 })

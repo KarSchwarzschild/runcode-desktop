@@ -8,12 +8,13 @@ import remarkGfm from 'remark-gfm'
 import { visit } from 'unist-util-visit'
 import { Markdown, type CodeBlockRenderInfo, type MarkdownProps } from '@/ui/markdown'
 import {
-  classifyCodeBlock, contentDigest, fenceClosed, planMessagePreviews, type StaticPreviewKind,
+  classifyCodeBlock, contentDigest, fenceClosed, planMessagePreviews, PREVIEW_LIMITS, type StaticPreviewKind,
 } from '@/preview/static-detect'
 import { extractFilePaths } from '@/preview/classify'
 import { isStaticInlinePath } from '@/session/inline-preview-status'
 import type { CodePreviewTarget } from '@/preview/code-preview'
 import { InlinePreview } from './inline-preview'
+import { InlineFilePreview } from './inline-file-preview'
 
 export type AssistantMarkdownProps = Omit<MarkdownProps, 'renderCodeBlock'> & {
   messageId: string
@@ -99,6 +100,30 @@ export function AssistantMarkdown({
       html: relatedPathsForKind(children, 'html'),
     }
   }, [enable, sessionId, children])
+  const selectedKinds = useMemo(() => new Set(selected.values()), [selected])
+  const filePreviews = useMemo(() => {
+    if (!enable || textOnly || !sessionId || !pathsByKind) return []
+    let remaining = Math.max(0, PREVIEW_LIMITS.perMessage - selected.size)
+    const out: { kind: StaticPreviewKind; path: string }[] = []
+    for (const kind of ['svg', 'mermaid', 'html'] as const) {
+      if (selectedKinds.has(kind)) continue
+      for (const path of pathsByKind[kind]) {
+        if (remaining <= 0) break
+        out.push({ kind, path })
+        remaining--
+      }
+    }
+    return out
+  }, [enable, textOnly, sessionId, pathsByKind, selected.size, selectedKinds])
+  const fileLinks = useMemo(() => {
+    if (!enable || textOnly || !sessionId || !pathsByKind) return []
+    const out: { kind: StaticPreviewKind; path: string }[] = []
+    for (const kind of ['svg', 'mermaid', 'html'] as const) {
+      if (!selectedKinds.has(kind)) continue
+      for (const path of pathsByKind[kind]) out.push({ kind, path })
+    }
+    return out
+  }, [enable, textOnly, sessionId, pathsByKind, selectedKinds])
 
   const renderCodeBlock = useMemo(() => {
     if (!enable || selected.size === 0) return undefined
@@ -123,8 +148,35 @@ export function AssistantMarkdown({
   }, [enable, selected, onContentHeightChange, messageId, sessionId, pathsByKind, onOpenCodePreview])
 
   return (
-    <Markdown {...rest} textOnly={textOnly} renderCodeBlock={renderCodeBlock}>
-      {children}
-    </Markdown>
+    <>
+      <Markdown {...rest} textOnly={textOnly} renderCodeBlock={renderCodeBlock}>
+        {children}
+      </Markdown>
+      {filePreviews.map(({ kind, path }) => (
+        <InlineFilePreview
+          key={`${kind}:${path}`}
+          path={path}
+          sessionId={sessionId}
+          messageId={messageId}
+          previewId={`file:${path}`}
+          onOpenCodePreview={onOpenCodePreview}
+        />
+      ))}
+      {fileLinks.length > 0 && (
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[12px]">
+          {fileLinks.map(({ kind, path }) => (
+            <button
+              key={`${kind}:${path}`}
+              type="button"
+              data-file-preview-link={path}
+              className="text-primary hover:underline"
+              onClick={() => rest.onOpenFile?.(path)}
+            >
+              {kind === 'html' ? '打开 HTML：' : '可继续编辑的矢量图：'}{path}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   )
 }
