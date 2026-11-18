@@ -438,4 +438,19 @@ describe('InlinePreview lifecycle', () => {
       vi.useRealTimers()
     }
   })
+
+  it('内部异常只显示安全短原因，不回显异常正文', async () => {
+    mermaid.render.mockRejectedValue(new Error('internal-stack-secret'))
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'mermaid',
+        source: 'graph TD;A-->B',
+        defaultNode: createElement('code', null, 'SOURCE'),
+      }))
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(host.textContent).toContain('SOURCE')
+    expect(host.textContent).toContain('未显示预览')
+    expect(host.textContent).not.toContain('internal-stack-secret')
+  })
 })

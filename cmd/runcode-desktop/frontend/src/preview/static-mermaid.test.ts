@@ -223,4 +223,24 @@ describe('createMermaidRenderer', () => {
     release()
     expect((await first).ok).toBe(true)
   })
+  it('reports timeout when a queued render never settles', async () => {
+    let release: () => void = () => {}
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    const api = fakeMermaid()
+    vi.mocked(api.render).mockImplementation(async (id) => {
+      await gate
+      return { svg: `<svg id="${id}" viewBox="0 0 1 1"><rect width="1" height="1"/></svg>` }
+    })
+    const render = createMermaidRenderer(async () => api, { timeoutMs: 5 })
+    const pending = render('graph TD\nA-->B')
+    const outcome = await Promise.race([
+      pending,
+      new Promise<string>((resolve) => setTimeout(() => resolve('still-pending'), 25)),
+    ])
+    expect(outcome).toEqual({ ok: false, reason: 'timeout' })
+
+    release()
+    await pending
+    await vi.waitFor(() => expect(document.body.children).toHaveLength(0))
+  })
 })

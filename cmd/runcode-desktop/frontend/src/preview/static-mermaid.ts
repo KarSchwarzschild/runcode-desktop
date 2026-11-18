@@ -102,7 +102,7 @@ export type MermaidApi = {
   render(id: string, text: string, container?: Element): Promise<{ svg: string }>
 }
 
-export type MermaidFailure = MermaidCheckFailure | 'busy' | 'load-failed' | 'syntax' | 'cancelled' | 'unsafe-output' | 'platform-unsupported'
+export type MermaidFailure = MermaidCheckFailure | 'busy' | 'timeout' | 'load-failed' | 'syntax' | 'cancelled' | 'unsafe-output' | 'platform-unsupported'
 export type MermaidResult = Extract<SvgResult, { ok: true }> | { ok: false; reason: MermaidFailure }
 
 // Mermaid 12 依赖 Constructable Stylesheets（new CSSStyleSheet）。麒麟旧 WebKit
@@ -136,7 +136,10 @@ export type MermaidRenderer = (source: string, signal?: AbortSignal) => Promise<
 
 // createMermaidRenderer 把加载、初始化、排队、离屏测量容器与清理串成一个函数。
 // 加载失败不缓存，下一次渲染会重试导入。
-export function createMermaidRenderer(load: () => Promise<MermaidApi>, opts: { maxPending?: number } = {}): MermaidRenderer {
+export function createMermaidRenderer(
+  load: () => Promise<MermaidApi>,
+  opts: { maxPending?: number; timeoutMs?: number } = {},
+): MermaidRenderer {
   const enqueue = createSerialQueue(opts.maxPending)
   let api: Promise<MermaidApi> | null = null
   let seq = 0
@@ -185,6 +188,16 @@ export function createMermaidRenderer(load: () => Promise<MermaidApi>, opts: { m
       const clean = sanitizeSvg(svg)
       return clean.ok ? clean : { ok: false, reason: 'unsafe-output' }
     })
-    return run ?? { ok: false, reason: 'busy' }
+    if (!run) return { ok: false, reason: 'busy' }
+    // 超时先让界面稳定回退源码；同步布局无法被定时器打断，任务结束后仍会自行清理 DOM。
+    let timer = 0 as ReturnType<typeof setTimeout>
+    const timeout = new Promise<MermaidResult>((resolve) => {
+      timer = setTimeout(() => resolve({ ok: false, reason: 'timeout' }), opts.timeoutMs ?? 15_000)
+    })
+    try {
+      return await Promise.race([run, timeout])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 }

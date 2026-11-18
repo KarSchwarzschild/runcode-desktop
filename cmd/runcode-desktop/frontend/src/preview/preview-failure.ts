@@ -15,6 +15,7 @@ const LABELS: Record<string, string> = {
   syntax: '语法无法解析',
   'load-failed': '渲染器加载失败',
   busy: '预览队列繁忙',
+  timeout: '渲染超时',
   cancelled: '已取消',
   'unsafe-output': '输出未通过安全检查',
   'parse-error': '无法解析',
