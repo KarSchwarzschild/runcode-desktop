@@ -4,11 +4,20 @@ import {
   allowsUnfixedSize, coerceDraftSize, defaultDraftSize,
   imageGenerationModelKey,
   isChatModel, isImageGenerateToolRunning, isImageGenerationModel, isImageGenerationResult,
-  isRasterImageGeneration, settingsSelection, shouldShowImageGenerationStage,
+  isGeneratedImageRel, isRasterImageGeneration, settingsSelection, shouldShowImageGenerationStage,
 } from './image-generation'
 
 const profile = { available: true, supportedSizes: ['1024x1024', '2048x2048'], defaultSize: '1024x1024', responseFormats: ['url'] }
 const ref = (name: string, tenantId = 't1') => ({ kind: 'platform', name, bridge: 'https://bridge.example', tenantId })
+
+describe('generated image paths', () => {
+  it('统一识别工作区相对、Windows 和绝对路径下的生成图片目录', () => {
+    expect(isGeneratedImageRel('生成图片/g/image.png')).toBe(true)
+    expect(isGeneratedImageRel('生成图片\\g\\image.png')).toBe(true)
+    expect(isGeneratedImageRel('D:/ws/生成图片/g/image.png')).toBe(true)
+    expect(isGeneratedImageRel('notes/image.png')).toBe(false)
+  })
+})
 
 describe('model purpose filters', () => {
   const models: PassportModel[] = [

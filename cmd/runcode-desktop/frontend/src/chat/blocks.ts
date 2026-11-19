@@ -3,6 +3,7 @@
 // unit-tested directly (see chat.test.ts).
 import type { ToolEvent, PlanSnapshot, PlanItem, EditRecord, ResumedBlock } from '@/core/bridge'
 import { isEditRecord } from '@/core/bridge'
+import { IMAGE_GENERATION_TOOL } from '@/core/image-generation'
 import { type RecordingMark } from '@/recorder/minutes'
 import type { AssistantImageGenerationNote } from './image-generation-note'
 
@@ -40,6 +41,8 @@ export type Group =
   | { kind: 'block'; block: Block }
   // sessionIds 与 tools 等长：栅格生图预览必须绑来源会话，不能猜当前焦点。
   | { kind: 'exec'; id: string; tools: ToolEvent[]; sessionIds: string[] }
+  // 生图工具独立成组，只渲染图片预览，不进入通用执行卡。
+  | { kind: 'image'; id: string; tools: ToolBlock[]; sessionIds: string[] }
   | { kind: 'ask'; id: string; tool: ToolEvent }
   | { kind: 'analyze'; id: string; tool: ToolEvent }
   // skill is one "模型加载了某个技能" moment. It leaves the compact tool list
@@ -250,7 +253,6 @@ export function groupBlocks(blocks: Block[]): Group[] {
         out.push({ kind: 'skill', id: b.id, tool: b.tool })
         continue
       }
-      // image_generate 保留在 exec 组供行下预览投影，ExecutionCard 会过滤它，不渲染折叠行。
       // A Task delegation is its own observable card (its sub-agent's live text and
       // nested tool calls), so it never folds into the compact exec list — otherwise
       // its nested activity is dropped. Adjacent Task calls (a parallel fan-out
@@ -264,6 +266,17 @@ export function groupBlocks(blocks: Block[]): Group[] {
           out[out.length - 1] = { kind: 'taskgroup', id: 'tasks-' + last.block.id, tasks: [last.block, b] }
         } else {
           out.push({ kind: 'block', block: b })
+        }
+        continue
+      }
+      // 生图是结果展示而非参数/输出执行行，连续调用合并为一个 image 组。
+      if (b.tool.toolName === IMAGE_GENERATION_TOOL) {
+        const last = out[out.length - 1]
+        if (last && last.kind === 'image') {
+          last.tools.push(b)
+          last.sessionIds.push(b.sessionId ?? '')
+        } else {
+          out.push({ kind: 'image', id: b.id, tools: [b], sessionIds: [b.sessionId ?? ''] })
         }
         continue
       }

@@ -4,6 +4,16 @@
 import type { ImageGenerationCatalog, ImageGenerationResult, ImageGenerationSettings, ModelReference, PassportModel } from './bridge'
 
 export const IMAGE_GENERATION_TOOL = 'image_generate'
+const GENERATED_IMAGE_DIR = '生成图片/'
+
+/**
+ * 判断路径是否位于工作区「生成图片/」目录下。
+ * 统一处理 Windows 反斜杠、`./` 前缀和带工作区前缀的绝对路径，供自动预览与会话事件共用。
+ */
+export function isGeneratedImageRel(path: string): boolean {
+  const normalized = (path ?? '').replace(/\\/g, '/').replace(/^\.\//, '')
+  return normalized.startsWith(GENERATED_IMAGE_DIR) || normalized.includes('/' + GENERATED_IMAGE_DIR)
+}
 
 /** 受支持的栅格 MIME；非栅格产物不进入行下预览／查看器。 */
 export const RASTER_IMAGE_GENERATION_MIMES = new Set([

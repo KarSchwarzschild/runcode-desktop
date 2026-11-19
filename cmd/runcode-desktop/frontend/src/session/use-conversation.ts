@@ -42,6 +42,7 @@ import {
   type AssistantImageGenerationNote,
 } from '@/chat/image-generation-note'
 import { basename } from '@/core/paths'
+import { IMAGE_GENERATION_TOOL, isGeneratedImageRel } from '@/core/image-generation'
 import { digestDisplayText, docDisplayText, minutesDisplayText, parseRecordingMarker, type RecordingMark } from '@/recorder/minutes'
 import {
   convOf, dropConv, lastUserText, patchConv, sessionOf, withReverted, withContextCompaction,
@@ -227,7 +228,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
           if (snap) patch(sessionOf(env), (s) => ({ ...s, plan: snap }))
           return
         }
-        if (!ev.parentToolUseID && ev.toolName === 'image_generate') {
+        if (!ev.parentToolUseID && ev.toolName === IMAGE_GENERATION_TOOL) {
           observeImageGeneration(sessionOf(env))
         }
         // 只有**看得见**的那条会话才准打开预览面板:后台会话弹一个面板出来会把
@@ -237,8 +238,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
           if (artifact?.reference) {
             // 栅格生图产物走卡片下方预览，不自动开侧栏；仍释放本事件临时引用。
             const rel = (artifact.path || '').replace(/\\/g, '/')
-            const rasterGenPath = /(^|\/)生成图片\//.test(rel)
-            if (rasterGenPath) {
+            if (isGeneratedImageRel(rel)) {
               void releaseArtifact(artifact.reference).catch(() => {})
             } else if (!ev.parentToolUseID && artifact.sessionId === sessionOf(env) && sessionOf(env) === focusedRef.current) {
               cb.current.onOpenPreview(artifact)

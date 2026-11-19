@@ -2,18 +2,11 @@
 // 生图不自动打开右侧预览；普通 Write/Edit 与正文提到的 pptx/md 等仍可进入。
 import { toolTargetPath } from '@/chat/tool-text'
 import type { Block } from '@/chat/blocks'
+import { IMAGE_GENERATION_TOOL, isGeneratedImageRel } from '@/core/image-generation'
 import { extractFilePaths, toWorkspaceRel } from '@/preview/classify'
-
-const GENERATED_DIR = '生成图片/'
 
 function normRel(p: string): string {
   return p.replace(/\\/g, '/').replace(/^\.\//, '')
-}
-
-/** 是否为工作区「生成图片/…」下的路径（含绝对路径归一化后的形态）。 */
-export function isGeneratedImageRel(rel: string): boolean {
-  const n = normRel(rel)
-  return n.startsWith(GENERATED_DIR) || n.includes('/' + GENERATED_DIR)
 }
 
 /** 正文里「生成图片/…」及绝对路径中夹带该目录的片段（extractFilePaths 吃不下中文目录名）。 */
@@ -35,7 +28,7 @@ function imageGenerateResultPaths(blocks: Block[], cwd: string): Set<string> {
       for (const p of generatedPathsFromText(b.text, cwd)) out.add(p)
       continue
     }
-    if (b.kind !== 'tool' || b.tool.toolName !== 'image_generate') continue
+    if (b.kind !== 'tool' || b.tool.toolName !== IMAGE_GENERATION_TOOL) continue
     const data = b.tool.data as { images?: Array<{ path?: string }> } | undefined
     for (const img of data?.images ?? []) {
       const p = img?.path?.trim()

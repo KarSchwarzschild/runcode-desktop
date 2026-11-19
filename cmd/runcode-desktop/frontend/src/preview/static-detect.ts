@@ -51,12 +51,6 @@ export function htmlZoomScrollLeft(opts: {
   return Math.max(0, Math.min(width - viewport, center * width - viewport / 2))
 }
 
-/** @deprecated 保留给旧单测；预览缩放以百分比和 100% 初始值表达。 */
-export function htmlInlineScale(availableWidth: number, designWidth: number = PREVIEW_LIMITS.htmlDesignWidth): number {
-  if (!(availableWidth > 0) || !(designWidth > 0)) return 1
-  return availableWidth / designWidth
-}
-
 const HTML_LANGS = new Set(['html', 'htm', 'h5'])
 const SVG_LANGS = new Set(['svg', 'xml', 'svg+xml', 'image/svg+xml'])
 const MERMAID_LANGS = new Set(['mermaid', 'mmd'])

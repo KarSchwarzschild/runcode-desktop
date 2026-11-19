@@ -6,7 +6,7 @@ import { InlinePreview } from './inline-preview'
 import { AssistantMarkdown } from './assistant-markdown'
 import { InlinePreviewBudgetProvider } from './inline-preview-budget'
 import {
-  PREVIEW_LIMITS, htmlInlineScale, clampHtmlZoomPercent, stepHtmlZoomPercent,
+  PREVIEW_LIMITS, clampHtmlZoomPercent, stepHtmlZoomPercent,
   HTML_ZOOM_MIN, HTML_ZOOM_MAX,
 } from '@/preview/static-detect'
 
@@ -583,14 +583,6 @@ describe('InlinePreview lifecycle', () => {
     expect(shell.style.maxHeight || shell.className).toBeTruthy()
     await act(async () => (host.querySelector('button[title="复制源码"]') as HTMLButtonElement).click())
     expect(bridge.copyText).toHaveBeenCalledWith(svgOk)
-  })
-
-  it('htmlInlineScale 按壳宽铺满设计宽（可 >1），窄宽度时缩小', () => {
-    expect(htmlInlineScale(390, 390)).toBe(1)
-    expect(htmlInlineScale(780, 390)).toBe(2)
-    expect(htmlInlineScale(195, 390)).toBe(0.5)
-    expect(PREVIEW_LIMITS.htmlInlineMaxHeight).toBeLessThan(PREVIEW_LIMITS.htmlMaxHeight)
-    expect(PREVIEW_LIMITS.htmlDesignWidth).toBeGreaterThanOrEqual(320)
   })
 
   it('HTML 缩放纯函数：clamp / 步进', () => {

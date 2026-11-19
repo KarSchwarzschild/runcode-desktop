@@ -5,10 +5,7 @@ import { BTN } from '@/ui/tokens'
 import { GeneratedImageModalSurface } from './generated-image-modal-surface'
 import { useGeneratedImageViewer } from './generated-image-viewer-context'
 
-export function GeneratedImageViewerHost(_props?: {
-  /** @deprecated 标注入口已永久删除；保留参数以免调用方改签名。 */
-  onSaved?: (sessionId: string, art: import('@/core/bridge').ImageGenerationArtifact) => void
-}) {
+export function GeneratedImageViewerHost() {
   const v = useGeneratedImageViewer()
   if (!v.active || !v.target) return null
   const { target, artifact } = v

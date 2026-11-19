@@ -180,17 +180,16 @@ export function ChatPane({
             </div>
           )}
           {groups.map((g) =>
-            g.kind === 'exec' ? (() => {
+            g.kind === 'image' ? (() => {
+              // image 组只渲染结果预览；分组阶段已保证生图不会进入 ExecutionCard，
+              // 但来源 session 仍随每个工具保留，查看器和标注必须绑定原会话。
               const kept = g.tools
-                .map((tool, i) => ({ tool, sessionId: g.sessionIds[i] ?? sessionId ?? '' }))
+                .map((block, i) => ({ tool: block.tool, sessionId: g.sessionIds[i] ?? sessionId ?? '' }))
                 .filter(({ tool }) => !isMergedRasterOpenPreview(tool, imagePresentations, cwd ?? '', sessionId ?? ''))
               if (kept.length === 0) return null
-              const tools = kept.map((k) => k.tool)
-              const stages = kept.filter(({ tool }) => shouldShowImageGenerationStage(tool))
               return (
                 <BotRow key={g.id}>
-                  <ExecutionCard tools={tools} harmAllows={harmAllows} oaBlocked={oaBlocked} />
-                  {stages.map(({ tool, sessionId: sid }) => {
+                  {kept.filter(({ tool }) => shouldShowImageGenerationStage(tool)).map(({ tool, sessionId: sid }) => {
                     const result = isImageGenerationResult(tool.data) ? tool.data : null
                     const image = result?.status === 'succeeded' ? result.images?.[0] : undefined
                     return (
@@ -200,13 +199,24 @@ export function ChatPane({
                         sessionId={sid || sessionId || ''}
                         image={image}
                         onView={() => { if (image) onRasterImageView?.(image, tool.toolUseID ?? '') }}
-                        // 标注入口下线时 onRasterImageAnnotate 为空；恢复见 image-generation-annotation.ts
+                        // 标注入口保留；开关关闭时 onRasterImageAnnotate 为空。
                         onAnnotate={onRasterImageAnnotate
                           ? () => { if (image) onRasterImageAnnotate(image, tool.toolUseID ?? '') }
                           : undefined}
                       />
                     )
                   })}
+                </BotRow>
+              )
+            })() : g.kind === 'exec' ? (() => {
+              const kept = g.tools
+                .map((tool, i) => ({ tool, sessionId: g.sessionIds[i] ?? sessionId ?? '' }))
+                .filter(({ tool }) => !isMergedRasterOpenPreview(tool, imagePresentations, cwd ?? '', sessionId ?? ''))
+              if (kept.length === 0) return null
+              const tools = kept.map((k) => k.tool)
+              return (
+                <BotRow key={g.id}>
+                  <ExecutionCard tools={tools} harmAllows={harmAllows} oaBlocked={oaBlocked} />
                 </BotRow>
               )
             })() : g.kind === 'ask' ? (
