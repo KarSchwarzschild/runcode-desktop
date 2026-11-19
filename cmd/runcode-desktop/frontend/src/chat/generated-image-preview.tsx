@@ -179,7 +179,24 @@ export function GeneratedImagePreview({
   const naturalW = image?.width || hint?.w || 1024
   const naturalH = image?.height || hint?.h || 1024
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
-  const display = computePreviewDisplaySize(naturalW, naturalH, boxW, vh)
+  const layoutKey = `${sessionId}|${tool.toolUseID ?? path}`
+  const layoutRef = useRef<{ key: string; width: number; height: number; locked: boolean } | null>(null)
+  if (!layoutRef.current || layoutRef.current.key !== layoutKey) {
+    // 首次出现时确定舞台几何。running 期间允许提示尺寸补进来一次；
+    // 完成瞬间锁定，避免真实图片宽高把整段对话向上推。
+    layoutRef.current = { key: layoutKey, width: naturalW, height: naturalH, locked: !running }
+  } else if (running && !layoutRef.current.locked && hint) {
+    layoutRef.current.width = hint.w
+    layoutRef.current.height = hint.h
+  } else if (!running && !layoutRef.current.locked) {
+    layoutRef.current.locked = true
+  }
+  const display = computePreviewDisplaySize(
+    layoutRef.current.width,
+    layoutRef.current.height,
+    boxW,
+    vh,
+  )
   const title = running ? '预览图片' : `预览 ${basename(path) || 'image.png'}`
   const readyUrl = resource.status === 'ready' && resource.path === path ? resource.artifact.url : ''
   const canInteract = !!readyUrl && resource.status === 'ready' && resource.decoded && !revealing && !running

@@ -38,4 +38,11 @@ describe('Markdown renderCodeBlock slot', () => {
     )
     expect(called).toBe(0)
   })
+  it('suppresses unresolved local image syntax instead of rendering a broken image', () => {
+    const html = renderToStaticMarkup(
+      <Markdown>{'![一张真实的篮球](image_e5e4640f.jpg)'}</Markdown>,
+    )
+    expect(html).not.toContain('<img')
+    expect(html).not.toContain('一张真实的篮球')
+  })
 })

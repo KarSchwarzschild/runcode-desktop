@@ -126,6 +126,30 @@ describe('GeneratedImagePreview', () => {
     expect(host.querySelector('.ig-preview-reveal')).toBeNull()
   })
 
+  it('生成中到完成保持预览舞台尺寸，不因真实宽高变化而推动对话', async () => {
+    const width = vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(560)
+    try {
+      await act(async () => root.render(
+        <GeneratedImagePreview tool={tool('progress')} sessionId="S" />,
+      ))
+      const placeholder = host.querySelector('.ig-preview-shimmer') as HTMLElement
+      const before = { width: placeholder.style.width, height: placeholder.style.height }
+
+      await act(async () => root.render(
+        <GeneratedImagePreview
+          tool={tool('completed')}
+          sessionId="S"
+          image={{ ...image, width: 1280, height: 720 }}
+        />,
+      ))
+      await act(async () => { await Promise.resolve() })
+      const stage = host.querySelector('.ig-preview-stage') as HTMLElement
+      expect({ width: stage.style.width, height: stage.style.height }).toEqual(before)
+    } finally {
+      width.mockRestore()
+    }
+  })
+
   it('not_found 显示文件不存在；其它错误显示暂时无法预览', async () => {
     api.openArtifact.mockRejectedValueOnce(new Error(JSON.stringify({ code: 'not_found', message: 'gone' })))
     await act(async () => root.render(
