@@ -15,4 +15,16 @@ The screenshots render the production tool card, task manager and task form comp
 
 The seven schedule choices were also asserted in `task-form.test.tsx`: weekly, weekdays, daily, every N hours, every N minutes, monthly and once. No custom/cron option exists. Native folder selection is delegated to the existing `PickWorkspaceFolder`; `TestAutomationWorkspacePickerContract` verifies selected, cancelled and unsupported-dialog outcomes.
 
-Step 10–11 regression logs are stored beside this file as `step11-*`. `requirements-matrix.md` maps R01–R10 to tests and the remaining Windows manual checks.
+Step 10–11 regression logs are stored beside this file as `step11-*`. `requirements-matrix.md` maps R01–R19 to tests and the remaining Windows manual checks.
+
+## Step 11A — interaction optimization evidence
+
+Date: 2026-11-19. Branch: `codex/automation-tasks-1118`.
+
+The `step11a-*` logs record the final automated evidence for the interaction refinement:
+
+- root and nested-module Go tests/builds;
+- frontend typecheck, lint, 953 Vitest tests and production build;
+- protocol generation check and `golangci-lint --new-from-rev=f982567`.
+
+The root suite is recorded with `-p 1`: one initial parallel run overlapped the complete desktop/frontend suites and an existing `internal/localusage` wall-clock test exceeded its deadline; that test passed alone and the serial full root suite passed. This does not replace the user-deferred Windows tray and native dialog acceptance.

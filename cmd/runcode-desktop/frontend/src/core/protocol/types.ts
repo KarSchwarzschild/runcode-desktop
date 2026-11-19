@@ -301,6 +301,7 @@ export interface AutomationDefaults {
   context: AutomationContext;
   available: boolean;
   unavailableReason?: string;
+  currentWorkspace: string;
   recentWorkspaces: string[] | null;
   model: AutomationModelSummary;
   permissionMode?: string;
@@ -345,6 +346,7 @@ export interface AutomationRun {
   finishedAtUTC?: string;
   summary?: string;
   missedCount?: number;
+  trigger?: string;
   name?: string;
   prompt?: string;
   workspace?: string;
@@ -363,6 +365,12 @@ export interface AutomationRunPage {
   context: AutomationContext;
   items: AutomationRun[] | null;
   nextCursor?: string;
+}
+
+// Mirrors protocol.AutomationRunResult. AutomationRunResult is one manual run plus the context it was accepted under.
+export interface AutomationRunResult {
+  context: AutomationContext;
+  run: AutomationRun;
 }
 
 // Mirrors protocol.AutomationSchedule. AutomationSchedule is the user-facing time rule.
@@ -404,6 +412,10 @@ export interface AutomationTask {
   nextRunAtUTC?: string;
   blockedReason?: string;
   lastRun?: AutomationRun;
+  activeRunId?: string;
+  lastLinkedRunId?: string;
+  linkedSessionTitle?: string;
+  deletedAtUtc?: string;
   binding: AutomationBindingSummary;
 }
 
@@ -530,6 +542,20 @@ export interface CustomModel {
   apiKey?: string;
   apiKeyProtected?: string;
   credentialRevision?: number;
+}
+
+// Mirrors protocol.DeleteAutomationTaskRequest. DeleteAutomationTaskRequest soft-deletes one task while preserving its runs and linked conversations.
+export interface DeleteAutomationTaskRequest {
+  context: AutomationContext;
+  taskId: string;
+  expectedRevision: number;
+  ownerScope?: string;
+}
+
+// Mirrors protocol.DeleteAutomationTaskResult. DeleteAutomationTaskResult confirms the task hidden by a soft delete.
+export interface DeleteAutomationTaskResult {
+  context: AutomationContext;
+  taskId: string;
 }
 
 // Mirrors protocol.DirectoryAccessChanged. DirectoryAccessChanged 使某一工作区的目录视图失效。
@@ -1113,6 +1139,15 @@ export interface RetryNotice {
   reason: string;
   attempt: number;
   maxAttempts: number;
+}
+
+// Mirrors protocol.RunAutomationTaskNowRequest. RunAutomationTaskNowRequest starts one explicit manual occurrence without changing the task's automatic schedule.
+export interface RunAutomationTaskNowRequest {
+  context: AutomationContext;
+  taskId: string;
+  expectedRevision: number;
+  clientRequestId: string;
+  ownerScope?: string;
 }
 
 // Mirrors protocol.RuntimeInfo. RuntimeInfo 是运行时环境的完整状态，也是唯一的对外形状。 它同时是 RuntimeStatus()（纯读，不联网）的返回值和 EventRuntimes 的载荷。

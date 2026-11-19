@@ -127,7 +127,14 @@ func (a *App) GetAutomationDefaults() (AutomationDefaults, error) {
 		}
 	}
 	raw := loadRawConfig()
+	currentWorkspace := strings.TrimSpace(raw.CWD)
+	if currentWorkspace == "" {
+		currentWorkspace = strings.TrimSpace(a.workspaceDir())
+	}
 	recent := append([]string(nil), raw.RecentWorkspaces...)
+	if currentWorkspace != "" {
+		recent = mergeRecentWorkspaces(recent, currentWorkspace)
+	}
 	if recent == nil {
 		recent = []string{}
 	}
@@ -148,6 +155,7 @@ func (a *App) GetAutomationDefaults() (AutomationDefaults, error) {
 		Context:             started,
 		Available:           available,
 		UnavailableReason:   reason,
+		CurrentWorkspace:    currentWorkspace,
 		RecentWorkspaces:    recent,
 		Model:               summary,
 		PermissionMode:      mode,
@@ -301,6 +309,9 @@ func (a *App) UpdateAutomationTask(req UpdateAutomationTaskRequest) (AutomationT
 	if err != nil {
 		return AutomationTaskResult{}, automationWire(err)
 	}
+	if task.DeletedAtUTC != nil {
+		return AutomationTaskResult{}, automationWire(automation.ErrNotFound)
+	}
 	active, err := store.HasUnfinishedRun(ctx, task.ID)
 	if err != nil {
 		return AutomationTaskResult{}, automationWire(err)
@@ -312,7 +323,8 @@ func (a *App) UpdateAutomationTask(req UpdateAutomationTaskRequest) (AutomationT
 	if err != nil {
 		return AutomationTaskResult{}, automationWire(err)
 	}
-	if task.Workspace != draft.Workspace || task.ExecutionMode != draft.ExecutionMode {
+	workspaceChanged := !sameWorkspace(task.Workspace, draft.Workspace)
+	if workspaceChanged || task.ExecutionMode != draft.ExecutionMode {
 		task.ReusableSessionID = ""
 	}
 	task.Name = draft.Name
@@ -349,7 +361,14 @@ func (a *App) UpdateAutomationTask(req UpdateAutomationTaskRequest) (AutomationT
 	if err != nil {
 		return AutomationTaskResult{}, automationWire(err)
 	}
-	return AutomationTaskResult{Context: started, Task: wired}, nil
+	warning := ""
+	if workspaceChanged {
+		if err := rememberAutomationWorkspace(updated.Workspace); err != nil {
+			debugLog("automation workspace history: %v", err)
+			warning = automationWorkspaceWarning
+		}
+	}
+	return AutomationTaskResult{Context: started, Task: wired, Warning: warning}, nil
 }
 
 // SetAutomationTaskPaused sets the paused bit. Repeating the same state succeeds.
@@ -364,8 +383,12 @@ func (a *App) SetAutomationTaskPaused(req SetAutomationTaskPausedRequest) (Autom
 		return AutomationTaskResult{}, automationWire(errAutomationUnavailable)
 	}
 	ctx := context.Background()
-	if _, err := store.TaskForOwners(ctx, strings.TrimSpace(req.TaskID), owners); err != nil {
+	task, err := store.TaskForOwners(ctx, strings.TrimSpace(req.TaskID), owners)
+	if err != nil {
 		return AutomationTaskResult{}, automationWire(err)
+	}
+	if task.DeletedAtUTC != nil {
+		return AutomationTaskResult{}, automationWire(automation.ErrNotFound)
 	}
 	updated, err := svc.SetPaused(ctx, strings.TrimSpace(req.TaskID), req.ExpectedRevision, req.Paused)
 	if err != nil {
@@ -382,6 +405,62 @@ func (a *App) SetAutomationTaskPaused(req SetAutomationTaskPausedRequest) (Autom
 		return AutomationTaskResult{}, automationWire(err)
 	}
 	return AutomationTaskResult{Context: started, Task: wired}, nil
+}
+
+// RunAutomationTaskNow queues one explicit manual run without changing the
+// schedule or enabled/paused state.
+func (a *App) RunAutomationTaskNow(req RunAutomationTaskNowRequest) (AutomationRunResult, error) {
+	started, owners, err := a.beginAutomation(req.Context, req.OwnerScope)
+	if err != nil {
+		return AutomationRunResult{}, automationWire(err)
+	}
+	clientRequestID, err := cleanClientRequestID(req.ClientRequestID)
+	if err != nil {
+		return AutomationRunResult{}, automationWire(err)
+	}
+	svc := a.automationService()
+	store := a.automationStore()
+	if svc == nil || store == nil {
+		return AutomationRunResult{}, automationWire(errAutomationUnavailable)
+	}
+	ctx := context.Background()
+	if _, err := store.TaskForOwners(ctx, strings.TrimSpace(req.TaskID), owners); err != nil {
+		return AutomationRunResult{}, automationWire(err)
+	}
+	run, _, err := svc.RunNow(ctx, strings.TrimSpace(req.TaskID), req.ExpectedRevision, clientRequestID)
+	if err != nil {
+		return AutomationRunResult{}, automationWire(err)
+	}
+	if err := a.finishAutomation(started); err != nil {
+		return AutomationRunResult{}, automationWire(err)
+	}
+	return AutomationRunResult{Context: started, Run: wireRun(run)}, nil
+}
+
+// DeleteAutomationTask hides the task and closes its future scheduling while
+// preserving run history and session links.
+func (a *App) DeleteAutomationTask(req DeleteAutomationTaskRequest) (DeleteAutomationTaskResult, error) {
+	started, owners, err := a.beginAutomation(req.Context, req.OwnerScope)
+	if err != nil {
+		return DeleteAutomationTaskResult{}, automationWire(err)
+	}
+	svc := a.automationService()
+	store := a.automationStore()
+	if svc == nil || store == nil {
+		return DeleteAutomationTaskResult{}, automationWire(errAutomationUnavailable)
+	}
+	ctx := context.Background()
+	taskID := strings.TrimSpace(req.TaskID)
+	if _, err := store.TaskForOwners(ctx, taskID, owners); err != nil {
+		return DeleteAutomationTaskResult{}, automationWire(err)
+	}
+	if _, err := svc.DeleteTask(ctx, taskID, req.ExpectedRevision); err != nil {
+		return DeleteAutomationTaskResult{}, automationWire(err)
+	}
+	if err := a.finishAutomation(started); err != nil {
+		return DeleteAutomationTaskResult{}, automationWire(err)
+	}
+	return DeleteAutomationTaskResult{Context: started, TaskID: taskID}, nil
 }
 
 // ListAutomationRuns lists one task's runs, newest first.
@@ -1055,6 +1134,9 @@ func (a *App) onAutomationRunChanged(run automation.Run) {
 	a.sink.Emit(EventAutomationRunChanged, AutomationRunChanged{
 		Context: a.automationContextSnapshot(), Run: wireRun(run),
 	})
+	// 任务配置 revision 不变，但 lastRun/activeRun/linkedRun 已随 run revision
+	// 推进。同步一条任务快照，详情标题下的状态和关联会话入口无需轮询。
+	a.onAutomationTaskChanged(task)
 }
 
 func (a *App) emitAutomationService() {
@@ -1103,6 +1185,7 @@ func (a *App) wireTask(ctx context.Context, task automation.Task, owners []strin
 		ID: task.ID, Revision: task.Revision, Name: task.Name, Prompt: task.Prompt,
 		Workspace: task.Workspace, ExecutionMode: task.ExecutionMode, Schedule: scheduleToWire(task.Schedule),
 		State: task.State, NextRunAtUTC: fmtAutomationTime(task.NextRunAtUTC), BlockedReason: task.BlockedReason,
+		DeletedAtUTC: fmtAutomationTime(task.DeletedAtUTC),
 		Binding: AutomationBindingSummary{
 			ModelKind: task.Binding.ModelKind, ModelName: task.Binding.ModelName,
 			Bridge: task.Binding.Bridge, TenantID: task.Binding.TenantID,
@@ -1113,13 +1196,22 @@ func (a *App) wireTask(ctx context.Context, task automation.Task, owners []strin
 	if store == nil {
 		return wired, nil
 	}
-	page, err := store.ListRuns(ctx, automation.RunFilter{AllowedOwners: owners, TaskID: task.ID, Limit: 1})
+	page, err := store.ListRuns(ctx, automation.RunFilter{AllowedOwners: owners, TaskID: task.ID, Limit: 10})
 	if err != nil {
 		return AutomationTask{}, err
 	}
 	if len(page.Items) > 0 {
 		run := wireRun(page.Items[0])
 		wired.LastRun = &run
+	}
+	for _, run := range page.Items {
+		if wired.ActiveRunID == "" && isAutomationActiveStatus(run.Status) {
+			wired.ActiveRunID = run.ID
+		}
+		if run.SessionID != "" && (wired.LastLinkedRunID == "" || run.ID == wired.ActiveRunID) {
+			wired.LastLinkedRunID = run.ID
+			wired.LinkedSessionTitle = task.Name
+		}
 	}
 	return wired, nil
 }
@@ -1130,8 +1222,18 @@ func wireRun(run automation.Run) AutomationRun {
 		Status: run.Status, Reason: run.Reason, SessionID: run.SessionID, QuestionID: run.QuestionID,
 		ScheduledAtUTC: fmtAutomationTime(&run.ScheduledAtUTC), StartedAtUTC: fmtAutomationTime(run.StartedAtUTC),
 		FinishedAtUTC: fmtAutomationTime(run.FinishedAtUTC), Summary: run.Summary, MissedCount: run.MissedCount,
-		Name: run.TaskName, Prompt: run.Prompt, Workspace: run.Workspace, ExecutionMode: run.ExecutionMode,
+		Trigger: run.Trigger,
+		Name:    run.TaskName, Prompt: run.Prompt, Workspace: run.Workspace, ExecutionMode: run.ExecutionMode,
 		Schedule: scheduleToWire(run.Schedule),
+	}
+}
+
+func isAutomationActiveStatus(status string) bool {
+	switch status {
+	case automation.RunQueued, automation.RunSubmitting, automation.RunRunning, automation.RunWaitingPermission:
+		return true
+	default:
+		return false
 	}
 }
 

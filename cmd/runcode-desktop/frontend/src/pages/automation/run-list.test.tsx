@@ -90,6 +90,18 @@ describe('automation run list', () => {
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith('目录不存在')
   })
 
+  it('labels a user-triggered run as manual', async () => {
+    bridge.listAutomationRuns.mockResolvedValue({
+      context,
+      items: [run('manual', 'succeeded', { trigger: 'manual' })],
+    })
+    await act(async () => {
+      root.render(<RunList taskId="task-1" context={context} onOpen={async () => {}} />)
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(host.querySelector('[data-run-id="manual"]')?.textContent).toContain('手动执行')
+  })
+
   it('merges a run event without moving an older row and opens linked history', async () => {
     bridge.listAutomationRuns.mockResolvedValue({
       context,

@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"sort"
 	"sync"
 	"time"
 )
@@ -147,7 +148,7 @@ func (s *Service) admissionBlocked() bool {
 
 func (s *Service) ExitSummary(ctx context.Context) (ExitSummary, error) {
 	var enabled, unfinished int
-	if err := s.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE state=?`, TaskEnabled).Scan(&enabled); err != nil {
+	if err := s.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE state=? AND deleted_at_utc IS NULL`, TaskEnabled).Scan(&enabled); err != nil {
 		return ExitSummary{}, err
 	}
 	if err := s.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE status IN (?,?,?,?)`,
@@ -318,7 +319,9 @@ func (s *Service) dispatch(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	if task.State == TaskPaused {
+	// 手动执行是用户明确发起的一次性动作，暂停只停止后续自动调度，
+	// 因此这里只拦截定时触发的暂停任务。
+	if task.State == TaskPaused && next.Trigger != TriggerManual {
 		s.finishSkipped(ctx, next, "paused", now)
 		return
 	}
@@ -493,7 +496,7 @@ func (s *Service) clearActive(id string) {
 
 // claimDueIntoQueue claims due tasks even when the active slot is full.
 func (s *Service) claimDueIntoQueue(ctx context.Context, now time.Time) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id, revision FROM tasks WHERE state=? AND next_run_at_utc IS NOT NULL AND next_run_at_utc <= ? ORDER BY next_run_at_utc ASC, id ASC LIMIT 32`,
+	rows, err := s.store.db.QueryContext(ctx, `SELECT id, revision FROM tasks WHERE state=? AND deleted_at_utc IS NULL AND next_run_at_utc IS NOT NULL AND next_run_at_utc <= ? ORDER BY next_run_at_utc ASC, id ASC LIMIT 32`,
 		TaskEnabled, fmtTime(now))
 	if err != nil {
 		return
@@ -697,7 +700,8 @@ func (s *Service) finishSkipped(ctx context.Context, run *Run, reason string, no
 
 // reloadQueued re-validates persisted queued rows after Recover (which leaves them queued).
 func (s *Service) reloadQueued(ctx context.Context, now time.Time) error {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT id FROM runs WHERE status=? ORDER BY scheduled_at_utc ASC, id ASC`, RunQueued)
+	rows, err := s.store.db.QueryContext(ctx, `SELECT r.id FROM runs r INNER JOIN tasks t ON t.id=r.task_id
+		WHERE r.status=? AND t.deleted_at_utc IS NULL ORDER BY r.scheduled_at_utc ASC, r.id ASC`, RunQueued)
 	if err != nil {
 		return err
 	}
@@ -793,4 +797,54 @@ func (s *Service) SetPaused(ctx context.Context, taskID string, rev int64, pause
 		s.onTaskChange(got)
 	}
 	return got, nil
+}
+
+// RunNow queues one explicit manual run. The automatic schedule and task state
+// remain unchanged; global/task concurrency rules still apply.
+func (s *Service) RunNow(ctx context.Context, taskID string, expectedRevision int64, clientRequestID string) (Run, bool, error) {
+	run, inserted, err := s.store.InsertManualRun(ctx, taskID, expectedRevision, clientRequestID, s.clock.Now())
+	if err != nil {
+		return Run{}, false, err
+	}
+	if !inserted {
+		return run, false, nil
+	}
+	s.mu.Lock()
+	cp := run
+	s.queued = append(s.queued, &cp)
+	sort.SliceStable(s.queued, func(i, j int) bool {
+		if s.queued[i].ScheduledAtUTC.Equal(s.queued[j].ScheduledAtUTC) {
+			return s.queued[i].TaskID < s.queued[j].TaskID
+		}
+		return s.queued[i].ScheduledAtUTC.Before(s.queued[j].ScheduledAtUTC)
+	})
+	s.mu.Unlock()
+	s.nudge()
+	if s.onRunChange != nil {
+		s.onRunChange(run)
+	}
+	return run, true, nil
+}
+
+// DeleteTask removes a task from scheduling/listing while preserving its runs
+// and linked conversations.
+func (s *Service) DeleteTask(ctx context.Context, taskID string, expectedRevision int64) (Task, error) {
+	task, err := s.store.DeleteTask(ctx, taskID, expectedRevision, s.clock.Now())
+	if err != nil {
+		return Task{}, err
+	}
+	s.mu.Lock()
+	var kept []*Run
+	for _, run := range s.queued {
+		if run.TaskID != taskID {
+			kept = append(kept, run)
+		}
+	}
+	s.queued = kept
+	s.mu.Unlock()
+	s.nudge()
+	if s.onTaskChange != nil {
+		s.onTaskChange(task)
+	}
+	return task, nil
 }

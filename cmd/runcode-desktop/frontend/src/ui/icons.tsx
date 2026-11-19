@@ -232,10 +232,10 @@ export function Icon({ name, size = 18, className }: Props) {
     case 'more-grid':
       return (
         <svg {...common} {...stroke}>
-          <path d="M4 7h4M6 5v4" />
-          <path d="M16 7h4M18 5v4" />
-          <path d="M4 17h4M6 15v4" />
-          <path d="M16 17h4M18 15v4" />
+          <rect x="4" y="4" width="6" height="6" rx="1" />
+          <path d="M17 4v6M14 7h6" />
+          <rect x="4" y="14" width="6" height="6" rx="1" />
+          <rect x="14" y="14" width="6" height="6" rx="1" />
         </svg>
       )
     case 'close':

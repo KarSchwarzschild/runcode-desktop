@@ -277,3 +277,28 @@ Final checks:
 | `go test -race` in `cmd/runcode-server` | Same toolchain load failure (`0xc0000139`) |
 
 The user explicitly deferred real client acceptance after Step 9, so the Windows tray, cancellation/confirmation dialogs, Explorer restart, sleep/wake and real model round-trip remain release-time manual checks. Automated tests do not claim those as visually accepted.
+
+## Step 11A — task interaction and close/exit refinement
+
+Date: 2026-11-19. Plan: `C:\Users\yyzxc\Desktop\自动任务优化\自动任务交互优化执行方案.md`.
+
+| Field | Value |
+| --- | --- |
+| Schema | v2 adds soft deletion, run trigger and manual-run idempotency |
+| Protocol | `RunAutomationTaskNow`, `DeleteAutomationTask`, active/linked run fields and `currentWorkspace` |
+| Frontend | folded workspace picker, fixed detail header/footer, run-now/delete menu, editable action feedback |
+| Lifecycle | X chooser, safe cancel, hide/exit split, forced-quit fallback |
+| Verification | root Go tests with `-p 1`, desktop module tests/build, 953 frontend tests, build, typecheck, lint, protogen and new-code lint |
+
+Behavior completed:
+
+- The default workspace comes from the workspace saved in settings. The picker has no search input; it shows the selected path as a folded row, puts current plus MRU directories in a portal menu, and keeps “浏览其他目录...” fixed at the bottom. A browsed directory becomes selectable immediately without calling session APIs.
+- “创建时配置” was removed from create and detail views. Tasks continue to use the model, connection, tenant and permission mode already saved by the user.
+- Task detail has a fixed header and footer, an independently scrolling body, a title status line, circular play/pause control, three-box-plus more icon, immediate-run and delete actions, and a linked-session row.
+- Successful run-status events now refresh the selected task with run ordering that remains correct when a new run restarts at `runRevision=1`. Action errors remain visible on either tab.
+- Manual execution is idempotent by task plus `clientRequestId`, works while the task is paused, leaves task state and `nextRunAtUTC` unchanged, and uses the same queue/session/history pipeline.
+- Delete is a soft delete. It removes the task from lists and due claims, rejects edits, pause/resume and later runs, and preserves runs plus session links. Deleted-task tests also prove owner isolation and idempotent manual runs.
+- Every main-window X invokes the native chooser. Cancel keeps the visible window and scheduler unchanged; hide preserves the tray process; direct exit uses the same hold, bounded cleanup and Quit path as tray Exit. The active-run warning takes precedence.
+- The title-bar close button re-enables after the chooser is created or cancelled, so restoring from the tray cannot leave X permanently disabled. A host-level two-second `os.Exit(0)` fallback runs only if Wails `Quit` returned but the Windows process remained alive.
+
+Verification evidence is stored as `docs/automation/validation/step11a-*`. The first parallel root run hit the existing `internal/localusage` deadline while CPU-heavy suites overlapped; the test passed alone and the serial full root suite then passed. Real Windows tray/dialog acceptance was explicitly deferred by the user, so it is not marked visually accepted.

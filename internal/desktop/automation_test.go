@@ -461,6 +461,35 @@ func TestAutomationContextLateEvent(t *testing.T) {
 	}
 }
 
+func TestAutomationRunEventRefreshesTaskStatus(t *testing.T) {
+	app, sink := newAutomationCommandApp(t)
+	defaults, err := app.GetAutomationDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	created, err := app.CreateAutomationTask(CreateAutomationTaskRequest{
+		Context: defaults.Context, ClientRequestID: "run-status-task",
+		ExpectedBindingVersion: defaults.BindingVersion, Draft: automationDraft(t.TempDir()),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := attachAutomationRun(t, app, created.Task, "session-run-status", created.Task.Workspace)
+	app.onAutomationRunChanged(run)
+
+	event, ok := sink.lastOf(EventAutomationTaskChanged)
+	if !ok {
+		t.Fatal("run change did not emit a task status snapshot")
+	}
+	payload, ok := event.data.(hostproto.Envelope).Payload.(AutomationTaskChanged)
+	if !ok || payload.Task.ID != created.Task.ID || payload.Task.ActiveRunID != run.ID {
+		t.Fatalf("task status payload = %+v", event.data)
+	}
+	if payload.Task.LastRun == nil || payload.Task.LastRun.ID != run.ID {
+		t.Fatalf("last run = %+v, want %s", payload.Task.LastRun, run.ID)
+	}
+}
+
 func TestAutomationEnvelopeContextFollowsIdentity(t *testing.T) {
 	app, sink := newAutomationCommandApp(t)
 	defaults, err := app.GetAutomationDefaults()
@@ -853,6 +882,144 @@ func TestAutomationWindowController(t *testing.T) {
 	defaults, err := app.GetAutomationDefaults()
 	if err != nil || !defaults.BackgroundSupported {
 		t.Fatalf("background support = %+v, err=%v", defaults, err)
+	}
+}
+
+func TestAutomationManualRunIdempotencyAndSoftDelete(t *testing.T) {
+	app, _ := newAutomationCommandApp(t)
+	defaults, err := app.GetAutomationDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	active, err := app.CreateAutomationTask(CreateAutomationTaskRequest{
+		Context: defaults.Context, ClientRequestID: "manual-active-task",
+		ExpectedBindingVersion: defaults.BindingVersion, Draft: automationDraft(dir),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := RunAutomationTaskNowRequest{
+		Context: defaults.Context, TaskID: active.Task.ID, ExpectedRevision: active.Task.Revision,
+		ClientRequestID: "manual-once",
+	}
+	first, err := app.RunAutomationTaskNow(request)
+	if err != nil || first.Run.Trigger != automation.TriggerManual {
+		t.Fatalf("manual run = %+v err=%v", first.Run, err)
+	}
+	again, err := app.RunAutomationTaskNow(request)
+	if err != nil || again.Run.ID != first.Run.ID {
+		t.Fatalf("idempotent manual run = %+v err=%v, want %s", again.Run, err, first.Run.ID)
+	}
+	request.ClientRequestID = "manual-second"
+	if _, err := app.RunAutomationTaskNow(request); protocolCode(t, err) != "automation_task_active" {
+		t.Fatalf("second active manual run = %v", err)
+	}
+
+	owner, err := localAutomationOwner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := app.automationStore()
+	foreignSchedule := scheduleFromWire(futureOnceSchedule())
+	foreignNext, ok, err := automation.NextOccurrence(foreignSchedule, time.Now().UTC())
+	if err != nil || !ok {
+		t.Fatalf("foreign schedule = %v ok=%v", err, ok)
+	}
+	foreign := automation.Task{
+		ID: "task_foreign_manual", OwnerScope: "passport:xrun:not-this-user:other",
+		ClientRequestID: "foreign-manual", Revision: 1, Name: "hidden", Prompt: "hidden",
+		Workspace: dir, ExecutionMode: automation.ExecNewSessionEachRun, Schedule: foreignSchedule,
+		AnchorUTC: time.Now().UTC(), State: automation.TaskEnabled, NextRunAtUTC: &foreignNext,
+		Binding: staticBinding(t, app), CreatedAtUTC: time.Now().UTC(), UpdatedAtUTC: time.Now().UTC(),
+	}
+	if _, err := store.CreateTask(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.RunAutomationTaskNow(RunAutomationTaskNowRequest{
+		Context: defaults.Context, TaskID: foreign.ID, ExpectedRevision: foreign.Revision,
+		ClientRequestID: "foreign-run",
+	}); protocolCode(t, err) != "not_found" {
+		t.Fatalf("foreign run = %v", err)
+	}
+	if _, err := app.DeleteAutomationTask(DeleteAutomationTaskRequest{
+		Context: defaults.Context, TaskID: foreign.ID, ExpectedRevision: foreign.Revision,
+	}); protocolCode(t, err) != "not_found" {
+		t.Fatalf("foreign delete = %v", err)
+	}
+
+	history, err := app.CreateAutomationTask(CreateAutomationTaskRequest{
+		Context: defaults.Context, ClientRequestID: "manual-history-task",
+		ExpectedBindingVersion: defaults.BindingVersion, Draft: automationDraft(dir),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	domainTask, err := store.TaskForOwners(context.Background(), history.Task.ID, []string{owner})
+	if err != nil {
+		t.Fatal(err)
+	}
+	historyRun, _, err := store.InsertManualRun(
+		context.Background(), domainTask.ID, domainTask.Revision, "manual-history-run", time.Now().UTC(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	finished := time.Now().UTC()
+	historyRun.Status = automation.RunInterrupted
+	historyRun.Reason = "test completion"
+	historyRun.SessionID = "session-history"
+	historyRun.FinishedAtUTC = &finished
+	if _, err := store.SaveRun(context.Background(), historyRun, historyRun.RunRevision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.DeleteAutomationTask(DeleteAutomationTaskRequest{
+		Context: defaults.Context, TaskID: domainTask.ID, ExpectedRevision: domainTask.Revision,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := store.TaskForOwners(context.Background(), domainTask.ID, []string{owner})
+	if err != nil || deleted.DeletedAtUTC == nil {
+		t.Fatalf("deleted task = %+v err=%v", deleted, err)
+	}
+	if _, err := app.UpdateAutomationTask(UpdateAutomationTaskRequest{
+		Context: defaults.Context, TaskID: deleted.ID, ExpectedRevision: deleted.Revision,
+		Draft: automationDraft(dir),
+	}); protocolCode(t, err) != "not_found" {
+		t.Fatalf("update deleted task = %v", err)
+	}
+	if _, err := app.SetAutomationTaskPaused(SetAutomationTaskPausedRequest{
+		Context: defaults.Context, TaskID: deleted.ID, ExpectedRevision: deleted.Revision, Paused: false,
+	}); protocolCode(t, err) != "not_found" {
+		t.Fatalf("resume deleted task = %v", err)
+	}
+	runs, err := app.ListAutomationRuns(ListAutomationRunsRequest{
+		Context: defaults.Context, TaskID: deleted.ID, Limit: 10,
+	})
+	if err != nil || len(runs.Items) != 1 || runs.Items[0].ID != historyRun.ID {
+		t.Fatalf("history after delete = %+v err=%v", runs.Items, err)
+	}
+}
+
+func TestAutomationDefaultsUsesSettingsWorkspace(t *testing.T) {
+	app, _ := newAutomationCommandApp(t)
+	current := filepath.Join(t.TempDir(), "Test-guokai-client")
+	if err := updateRawConfig(func(cfg *desktopConfig) error {
+		cfg.CWD = current
+		cfg.RecentWorkspaces = []string{filepath.Join(t.TempDir(), "imagegen-client"), current}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	defaults, err := app.GetAutomationDefaults()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defaults.CurrentWorkspace != current {
+		t.Fatalf("current workspace = %q, want %q", defaults.CurrentWorkspace, current)
+	}
+	if len(defaults.RecentWorkspaces) == 0 || defaults.RecentWorkspaces[0] != current {
+		t.Fatalf("recent workspaces = %v, want current first", defaults.RecentWorkspaces)
 	}
 }
 

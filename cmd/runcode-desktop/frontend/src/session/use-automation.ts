@@ -4,10 +4,12 @@ import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
 import {
   Events,
   createAutomationTask,
+  deleteAutomationTask,
   errText,
   getAutomationDefaults,
   listAutomationTasks,
   onEnvelope,
+  runAutomationTaskNow,
   setAutomationTaskPaused,
   updateAutomationTask,
   type AutomationContext,
@@ -47,6 +49,8 @@ export interface AutomationController {
   saveCreate: (draft: AutomationTaskDraft) => Promise<void>
   updateTask: (taskId: string, expectedRevision: number, draft: AutomationTaskDraft) => Promise<AutomationTask>
   setPaused: (task: AutomationTask, paused: boolean) => Promise<AutomationTask>
+  runNow: (task: AutomationTask) => Promise<void>
+  deleteTask: (task: AutomationTask) => Promise<void>
   notice: string
   selectTask: (id: string) => void
   setFilter: (filter: AutomationFilter) => void
@@ -216,6 +220,50 @@ export function useAutomation(enabled: boolean): AutomationController {
     }
   }, [acceptTask])
 
+  const runNow = useCallback(async (task: AutomationTask) => {
+    const started = stateRef.current.context
+    if (!started) throw new Error('自动化上下文还没有准备好')
+    setPendingTaskId(task.id)
+    try {
+      const result = await runAutomationTaskNow({
+        context: started,
+        taskId: task.id,
+        expectedRevision: task.revision,
+        clientRequestId: crypto.randomUUID(),
+      })
+      if (!sameAutomationContext(result.context, stateRef.current.context)) {
+        throw new Error('身份已变化，请刷新后重试')
+      }
+    } catch (e) {
+      if (e instanceof Error && e.message === '身份已变化，请刷新后重试') throw e
+      throw new Error(errText(e))
+    } finally {
+      setPendingTaskId('')
+    }
+  }, [])
+
+  const deleteTask = useCallback(async (task: AutomationTask) => {
+    const started = stateRef.current.context
+    if (!started) throw new Error('自动化上下文还没有准备好')
+    setPendingTaskId(task.id)
+    try {
+      const result = await deleteAutomationTask({
+        context: started,
+        taskId: task.id,
+        expectedRevision: task.revision,
+      })
+      if (!sameAutomationContext(result.context, stateRef.current.context)) {
+        throw new Error('身份已变化，请刷新后重试')
+      }
+      dispatch({ type: 'remove', id: task.id })
+    } catch (e) {
+      if (e instanceof Error && e.message === '身份已变化，请刷新后重试') throw e
+      throw new Error(errText(e))
+    } finally {
+      setPendingTaskId('')
+    }
+  }, [])
+
   const refresh = useCallback(() => setReload((n) => n + 1), [])
 
   const loadMore = useCallback(() => {
@@ -266,6 +314,8 @@ export function useAutomation(enabled: boolean): AutomationController {
     saveCreate,
     updateTask,
     setPaused,
+    runNow,
+    deleteTask,
     notice,
     selectTask,
     setFilter,

@@ -154,6 +154,33 @@ func TestServiceResumeFutureOnly(t *testing.T) {
 	}
 }
 
+func TestServiceRunNowDoesNotMoveScheduleOrEnablePausedTask(t *testing.T) {
+	now := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
+	svc, st, runner, _ := testService(t, now)
+	task := dueTask(now)
+	task.State = TaskPaused
+	created, err := svc.CreateTask(context.Background(), task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := fmtTimePtr(created.NextRunAtUTC)
+	run, inserted, err := svc.RunNow(context.Background(), created.ID, created.Revision, "manual-run-now")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted || run.Trigger != TriggerManual {
+		t.Fatalf("manual run = %+v inserted=%v", run, inserted)
+	}
+	waitStarts(t, svc, runner, 1, 2*time.Second)
+	after, err := st.getTask(context.Background(), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.State != TaskPaused || fmtTimePtr(after.NextRunAtUTC) != before {
+		t.Fatalf("manual run changed task: before=%s after=%+v", before, after)
+	}
+}
+
 func TestServiceMissedAndBusy(t *testing.T) {
 	now := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
 	svc, st, runner, clock := testService(t, now)

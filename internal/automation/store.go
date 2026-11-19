@@ -204,6 +204,119 @@ func (s *Store) CreateTask(ctx context.Context, task Task) (Task, error) {
 	return s.getTask(ctx, task.ID)
 }
 
+// InsertManualRun creates one explicit user-triggered run. It is idempotent by
+// task + clientRequestId and never advances the task's schedule.
+func (s *Store) InsertManualRun(ctx context.Context, taskID string, expectedRevision int64, clientRequestID string, now time.Time) (Run, bool, error) {
+	if existing, err := s.getManualRunByClientRequest(ctx, taskID, clientRequestID); err == nil {
+		return existing, false, nil
+	} else if !errors.Is(err, ErrNotFound) {
+		return Run{}, false, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Run{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	task, err := scanTask(tx.QueryRowContext(ctx, `SELECT id, owner_scope, client_request_id, revision, name, prompt, workspace, execution_mode,
+		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, deleted_at_utc, created_at_utc, updated_at_utc
+		FROM tasks WHERE id=?`, taskID))
+	if err != nil {
+		return Run{}, false, err
+	}
+	if task.Revision != expectedRevision {
+		return Run{}, false, ErrConflict
+	}
+	if task.DeletedAtUTC != nil || task.State == TaskEnded {
+		return Run{}, false, ErrConflict
+	}
+	var unfinished int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE task_id=? AND status IN (?,?,?,?)`,
+		taskID, RunQueued, RunSubmitting, RunRunning, RunWaitingPermission).Scan(&unfinished); err != nil {
+		return Run{}, false, err
+	}
+	if unfinished > 0 {
+		return Run{}, false, ErrTaskActive
+	}
+	scheduled := now.UTC()
+	run := Run{
+		ID: fmt.Sprintf("run_manual_%s_%d", taskID, scheduled.UnixNano()), TaskID: taskID,
+		TaskRevision: task.Revision, RunRevision: 1, ScheduledAtUTC: scheduled,
+		Status: RunQueued, Trigger: TriggerManual, ClientRequestID: clientRequestID,
+		TaskName: task.Name, Prompt: task.Prompt, Workspace: task.Workspace,
+		ExecutionMode: task.ExecutionMode, Schedule: task.Schedule, Binding: task.Binding,
+	}
+	run.QueuedAtUTC = &scheduled
+	schedJSON, _ := json.Marshal(run.Schedule)
+	bindJSON, _ := json.Marshal(run.Binding)
+	_, err = tx.ExecContext(ctx, `INSERT INTO runs(
+		id, task_id, task_revision, run_revision, scheduled_at_utc, status, reason, session_id, question_id,
+		queued_at_utc, started_at_utc, finished_at_utc, summary, missed_count, trigger, client_request_id,
+		task_name, prompt, workspace, execution_mode, schedule_json, binding_json
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		run.ID, run.TaskID, run.TaskRevision, run.RunRevision, fmtTime(run.ScheduledAtUTC), run.Status, "", "", "",
+		fmtTimePtr(run.QueuedAtUTC), nil, nil, "", 0, run.Trigger, run.ClientRequestID,
+		run.TaskName, run.Prompt, run.Workspace, run.ExecutionMode, string(schedJSON), string(bindJSON),
+	)
+	if err != nil {
+		if isUnique(err) {
+			_ = tx.Rollback()
+			existing, lookupErr := s.getManualRunByClientRequest(ctx, taskID, clientRequestID)
+			return existing, false, lookupErr
+		}
+		return Run{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Run{}, false, err
+	}
+	return run, true, nil
+}
+
+func (s *Store) getManualRunByClientRequest(ctx context.Context, taskID, clientRequestID string) (Run, error) {
+	var id string
+	err := s.db.QueryRowContext(ctx, `SELECT id FROM runs
+		WHERE task_id=? AND client_request_id=? AND trigger=?`,
+		taskID, clientRequestID, TriggerManual).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Run{}, ErrNotFound
+	}
+	if err != nil {
+		return Run{}, err
+	}
+	return s.getRun(ctx, id)
+}
+
+// DeleteTask soft-deletes a task. Existing runs and session links remain
+// queryable so history and clocks continue to resolve.
+func (s *Store) DeleteTask(ctx context.Context, taskID string, expectedRevision int64, now time.Time) (Task, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Task{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var unfinished int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM runs WHERE task_id=? AND status IN (?,?,?,?)`,
+		taskID, RunQueued, RunSubmitting, RunRunning, RunWaitingPermission).Scan(&unfinished); err != nil {
+		return Task{}, err
+	}
+	if unfinished > 0 {
+		return Task{}, ErrTaskActive
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE tasks SET deleted_at_utc=?, revision=revision+1, updated_at_utc=?
+		WHERE id=? AND revision=? AND deleted_at_utc IS NULL`,
+		fmtTime(now.UTC()), fmtTime(now.UTC()), taskID, expectedRevision)
+	if err != nil {
+		return Task{}, err
+	}
+	n, _ := res.RowsAffected()
+	if n != 1 {
+		return Task{}, ErrConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return Task{}, err
+	}
+	return s.getTask(ctx, taskID)
+}
+
 func (s *Store) UpdateTask(ctx context.Context, task Task, expectedRevision int64) (Task, error) {
 	cur, err := s.getTask(ctx, task.ID)
 	if err != nil {
@@ -211,6 +324,9 @@ func (s *Store) UpdateTask(ctx context.Context, task Task, expectedRevision int6
 	}
 	if cur.Revision != expectedRevision {
 		return Task{}, ErrConflict
+	}
+	if cur.DeletedAtUTC != nil {
+		return Task{}, ErrNotFound
 	}
 	if !ownerAllowed(cur.OwnerScope, []string{cur.OwnerScope}) {
 		return Task{}, ErrNotFound
@@ -261,6 +377,9 @@ func (s *Store) SetPaused(ctx context.Context, taskID string, expectedRevision i
 	if cur.Revision != expectedRevision {
 		return Task{}, ErrConflict
 	}
+	if cur.DeletedAtUTC != nil {
+		return Task{}, ErrNotFound
+	}
 	want := TaskPaused
 	if !paused {
 		want = TaskEnabled
@@ -291,7 +410,7 @@ func (s *Store) ClaimDue(ctx context.Context, taskID string, expectedRevision in
 
 	var task Task
 	row := tx.QueryRowContext(ctx, `SELECT id, owner_scope, client_request_id, revision, name, prompt, workspace, execution_mode,
-		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, created_at_utc, updated_at_utc
+		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, deleted_at_utc, created_at_utc, updated_at_utc
 		FROM tasks WHERE id=?`, taskID)
 	task, err = scanTask(row)
 	if err != nil {
@@ -300,7 +419,7 @@ func (s *Store) ClaimDue(ctx context.Context, taskID string, expectedRevision in
 	if task.Revision != expectedRevision {
 		return nil, ErrConflict
 	}
-	if task.State != TaskEnabled {
+	if task.DeletedAtUTC != nil || task.State != TaskEnabled {
 		return nil, nil
 	}
 	if task.NextRunAtUTC == nil || task.NextRunAtUTC.After(now.UTC()) {
@@ -311,7 +430,7 @@ func (s *Store) ClaimDue(ctx context.Context, taskID string, expectedRevision in
 	runID := fmt.Sprintf("run_%s_%d", task.ID, scheduled.UnixNano())
 	run := Run{
 		ID: runID, TaskID: task.ID, TaskRevision: task.Revision, RunRevision: 1,
-		ScheduledAtUTC: scheduled, Status: RunQueued,
+		ScheduledAtUTC: scheduled, Status: RunQueued, Trigger: TriggerScheduled,
 		TaskName: task.Name, Prompt: task.Prompt, Workspace: task.Workspace,
 		ExecutionMode: task.ExecutionMode, Schedule: task.Schedule, Binding: task.Binding,
 	}
@@ -321,11 +440,11 @@ func (s *Store) ClaimDue(ctx context.Context, taskID string, expectedRevision in
 	bindJSON, _ := json.Marshal(run.Binding)
 	_, err = tx.ExecContext(ctx, `INSERT INTO runs(
 		id, task_id, task_revision, run_revision, scheduled_at_utc, status, reason, session_id, question_id,
-		queued_at_utc, started_at_utc, finished_at_utc, summary, missed_count,
+		queued_at_utc, started_at_utc, finished_at_utc, summary, missed_count, trigger, client_request_id,
 		task_name, prompt, workspace, execution_mode, schedule_json, binding_json
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		run.ID, run.TaskID, run.TaskRevision, run.RunRevision, fmtTime(run.ScheduledAtUTC), run.Status, "", "", "",
-		fmtTimePtr(run.QueuedAtUTC), nil, nil, "", 0,
+		fmtTimePtr(run.QueuedAtUTC), nil, nil, "", 0, run.Trigger, run.ClientRequestID,
 		run.TaskName, run.Prompt, run.Workspace, run.ExecutionMode, string(schedJSON), string(bindJSON),
 	)
 	if err != nil {
@@ -413,7 +532,7 @@ func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) (TaskPage, err
 	args := []any{}
 	var b strings.Builder
 	b.WriteString(`SELECT id, owner_scope, client_request_id, revision, name, prompt, workspace, execution_mode,
-		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, created_at_utc, updated_at_utc
+		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, deleted_at_utc, created_at_utc, updated_at_utc
 		FROM tasks WHERE owner_scope IN (`)
 	for i, o := range owners {
 		if i > 0 {
@@ -422,7 +541,7 @@ func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) (TaskPage, err
 		b.WriteByte('?')
 		args = append(args, o)
 	}
-	b.WriteString(`)`)
+	b.WriteString(`) AND deleted_at_utc IS NULL`)
 	if filter.State != "" {
 		b.WriteString(` AND state=?`)
 		args = append(args, filter.State)
@@ -477,6 +596,7 @@ func (s *Store) ListRuns(ctx context.Context, filter RunFilter) (RunPage, error)
 	var b strings.Builder
 	b.WriteString(`SELECT r.id, r.task_id, r.task_revision, r.run_revision, r.scheduled_at_utc, r.status, r.reason,
 		r.session_id, r.question_id, r.queued_at_utc, r.started_at_utc, r.finished_at_utc, r.summary, r.missed_count,
+		r.trigger, r.client_request_id,
 		r.task_name, r.prompt, r.workspace, r.execution_mode, r.schedule_json, r.binding_json
 		FROM runs r INNER JOIN tasks t ON t.id = r.task_id
 		WHERE t.owner_scope IN (`)
@@ -544,14 +664,14 @@ func (s *Store) Recover(ctx context.Context, now time.Time) error {
 
 func (s *Store) getTask(ctx context.Context, id string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT id, owner_scope, client_request_id, revision, name, prompt, workspace, execution_mode,
-		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, created_at_utc, updated_at_utc
+		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, deleted_at_utc, created_at_utc, updated_at_utc
 		FROM tasks WHERE id=?`, id)
 	return scanTask(row)
 }
 
 func (s *Store) getTaskByClientRequest(ctx context.Context, owner, req string) (Task, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT id, owner_scope, client_request_id, revision, name, prompt, workspace, execution_mode,
-		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, created_at_utc, updated_at_utc
+		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json, blocked_reason, deleted_at_utc, created_at_utc, updated_at_utc
 		FROM tasks WHERE owner_scope=? AND client_request_id=?`, owner, req)
 	return scanTask(row)
 }
@@ -559,6 +679,7 @@ func (s *Store) getTaskByClientRequest(ctx context.Context, owner, req string) (
 func (s *Store) getRun(ctx context.Context, id string) (Run, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT id, task_id, task_revision, run_revision, scheduled_at_utc, status, reason,
 		session_id, question_id, queued_at_utc, started_at_utc, finished_at_utc, summary, missed_count,
+		trigger, client_request_id,
 		task_name, prompt, workspace, execution_mode, schedule_json, binding_json FROM runs WHERE id=?`, id)
 	return scanRun(row)
 }
@@ -570,9 +691,9 @@ type scannable interface {
 func scanTask(row scannable) (Task, error) {
 	var t Task
 	var sched, bind string
-	var next, anchor, created, updated sql.NullString
+	var next, anchor, deleted, created, updated sql.NullString
 	err := row.Scan(&t.ID, &t.OwnerScope, &t.ClientRequestID, &t.Revision, &t.Name, &t.Prompt, &t.Workspace, &t.ExecutionMode,
-		&sched, &anchor, &t.State, &next, &t.ReusableSessionID, &bind, &t.BlockedReason, &created, &updated)
+		&sched, &anchor, &t.State, &next, &t.ReusableSessionID, &bind, &t.BlockedReason, &deleted, &created, &updated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Task{}, ErrNotFound
 	}
@@ -589,6 +710,7 @@ func scanTask(row scannable) (Task, error) {
 	t.CreatedAtUTC = parseTime(created.String)
 	t.UpdatedAtUTC = parseTime(updated.String)
 	t.NextRunAtUTC = parseTimePtr(next)
+	t.DeletedAtUTC = parseTimePtr(deleted)
 	return t, nil
 }
 
@@ -598,6 +720,7 @@ func scanRun(row scannable) (Run, error) {
 	var queued, started, finished sql.NullString
 	err := row.Scan(&r.ID, &r.TaskID, &r.TaskRevision, &r.RunRevision, &scheduled, &r.Status, &r.Reason,
 		&r.SessionID, &r.QuestionID, &queued, &started, &finished, &r.Summary, &r.MissedCount,
+		&r.Trigger, &r.ClientRequestID,
 		&r.TaskName, &r.Prompt, &r.Workspace, &r.ExecutionMode, &sched, &bind)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Run{}, ErrNotFound
@@ -789,11 +912,11 @@ func (s *Store) InsertRun(ctx context.Context, run Run) (Run, error) {
 	run.Summary = clipSummary(run.Summary)
 	_, err = s.db.ExecContext(ctx, `INSERT INTO runs(
 		id, task_id, task_revision, run_revision, scheduled_at_utc, status, reason, session_id, question_id,
-		queued_at_utc, started_at_utc, finished_at_utc, summary, missed_count,
+		queued_at_utc, started_at_utc, finished_at_utc, summary, missed_count, trigger, client_request_id,
 		task_name, prompt, workspace, execution_mode, schedule_json, binding_json
-	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		run.ID, run.TaskID, run.TaskRevision, run.RunRevision, fmtTime(run.ScheduledAtUTC), run.Status, run.Reason, run.SessionID, run.QuestionID,
-		fmtTimePtr(run.QueuedAtUTC), fmtTimePtr(run.StartedAtUTC), fmtTimePtr(run.FinishedAtUTC), run.Summary, run.MissedCount,
+		fmtTimePtr(run.QueuedAtUTC), fmtTimePtr(run.StartedAtUTC), fmtTimePtr(run.FinishedAtUTC), run.Summary, run.MissedCount, run.Trigger, run.ClientRequestID,
 		run.TaskName, run.Prompt, run.Workspace, run.ExecutionMode, string(sched), string(bind),
 	)
 	if err != nil {

@@ -78,6 +78,17 @@ describe('automation draft', () => {
     expect(late.schedule.monthDay).toBe(18)
   })
 
+  it('uses the workspace saved in settings before the recent-workspace list', () => {
+    const current = 'C:\\Users\\yyzxc\\Desktop\\Test-guokai-client'
+    const next = defaultAutomationDraft(
+      new Date('2026-11-18T01:07:01Z'),
+      'Asia/Shanghai',
+      ['D:\\workspace\\imagegen-client', 'D:\\workspace\\Bridge'],
+      current,
+    )
+    expect(next.workspace).toBe(current)
+  })
+
   it('keeps the draft when the backend rejects an expired once', () => {
     const current = draft({ name: '只跑一次', schedule: { mode: 'once', interval: undefined } })
     const kept = applySaveError(current, '该一次性计划已经过期')

@@ -406,11 +406,13 @@ export type {
   AutomationDefaults, AutomationEventSource, AutomationModelSummary, AutomationOrigin, AutomationRun,
   AutomationRunChanged, AutomationRunPage, AutomationSchedule, AutomationServiceChanged, AutomationSessionResult,
   AutomationTask, AutomationTaskChanged, AutomationTaskDraft, AutomationTaskPage, AutomationTaskResult,
+  AutomationRunResult, DeleteAutomationTaskRequest, DeleteAutomationTaskResult,
   CreateAutomationTaskRequest, ListAutomationRunsRequest, ListAutomationTasksRequest, OpenAutomationSessionRequest,
-  SessionAutomationRunsRequest, SetAutomationTaskPausedRequest, UpdateAutomationTaskRequest,
+  RunAutomationTaskNowRequest, SessionAutomationRunsRequest, SetAutomationTaskPausedRequest, UpdateAutomationTaskRequest,
 } from './protocol/types'
 export {
   getAutomationDefaults, listAutomationTasks, createAutomationTask, updateAutomationTask,
-  setAutomationTaskPaused, listAutomationRuns, listSessionAutomationRuns, getAutomationConversation,
+  setAutomationTaskPaused, runAutomationTaskNow, deleteAutomationTask,
+  listAutomationRuns, listSessionAutomationRuns, getAutomationConversation,
   openAutomationSession, closeMainWindow, requestAppExit,
 } from './protocol/commands'

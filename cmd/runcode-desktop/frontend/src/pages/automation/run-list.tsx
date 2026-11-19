@@ -161,7 +161,9 @@ export function RunList({ taskId, context, onOpen }: {
               {success && <span className="text-green flex-none"><CheckMark size={14} /></span>}
               <span className="flex-1 min-w-0">
                 <span className="block text-[13px] text-ink">
-                  {openingId === run.id ? '正在打开历史' : `${runLabel(run.status)} · ${formatStamp(run.scheduledAtUTC)}`}
+                  {openingId === run.id
+                    ? '正在打开历史'
+                    : `${run.trigger === 'manual' ? '手动执行 · ' : ''}${runLabel(run.status)} · ${formatStamp(run.scheduledAtUTC)}`}
                 </span>
                 {run.reason && <span className="block text-[12px] text-muted select-text whitespace-pre-wrap break-words">{run.reason}</span>}
               </span>

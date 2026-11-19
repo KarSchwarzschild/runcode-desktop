@@ -43,6 +43,16 @@ it('routes title-bar close through the shared window lifecycle command', async (
   expect(api.closeMainWindow).toHaveBeenCalledTimes(1)
 })
 
+it('re-enables close after the native chooser returns or is cancelled', async () => {
+  await act(async () => root.render(<TitleBar />))
+  const close = host.querySelector('button[title="关闭"]') as HTMLButtonElement
+  await act(async () => close.click())
+  await act(async () => { await Promise.resolve() })
+  expect(close.disabled).toBe(false)
+  await act(async () => close.click())
+  expect(api.closeMainWindow).toHaveBeenCalledTimes(2)
+})
+
 it('surfaces a close failure without pretending the window was hidden', async () => {
   api.closeMainWindow.mockRejectedValueOnce(new Error('窗口不可用'))
   const onError = vi.fn()

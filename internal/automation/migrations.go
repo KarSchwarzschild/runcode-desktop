@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-const schemaVersion = 1
+const schemaVersion = 2
 
 func migrate(db *sql.DB) error {
 	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -102,6 +102,16 @@ CREATE TABLE session_links (
   task_name TEXT NOT NULL,
   PRIMARY KEY (owner_scope, workspace, session_id, task_id)
 );
+`)
+		return err
+	case 2:
+		_, err := tx.Exec(`
+ALTER TABLE tasks ADD COLUMN deleted_at_utc TEXT;
+ALTER TABLE runs ADD COLUMN trigger TEXT NOT NULL DEFAULT 'scheduled';
+ALTER TABLE runs ADD COLUMN client_request_id TEXT NOT NULL DEFAULT '';
+CREATE UNIQUE INDEX runs_manual_client_request
+  ON runs(task_id, client_request_id)
+  WHERE trigger='manual' AND client_request_id <> '';
 `)
 		return err
 	default:

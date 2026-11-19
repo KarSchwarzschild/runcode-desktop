@@ -10,11 +10,34 @@ import (
 	"github.com/wt68/runcode/internal/automation"
 )
 
-const exitSummaryTimeout = 5 * time.Second
+const (
+	exitSummaryTimeout      = 5 * time.Second
+	defaultQuitFallbackWait = 2 * time.Second
+)
 
 // ExitConfirmation is the native prompt data prepared before any cleanup starts.
 // SummaryKnown is false when the task database could not be queried.
 type ExitConfirmation struct {
+	EnabledCount    int
+	UnfinishedCount int
+	SummaryKnown    bool
+	Message         string
+}
+
+// CloseChoice is the user's response to the main-window close chooser.
+type CloseChoice string
+
+const (
+	// CloseCancel keeps the main window visible and leaves scheduling untouched.
+	CloseCancel CloseChoice = "cancel"
+	// CloseHide hides only the main window and leaves the tray process running.
+	CloseHide CloseChoice = "hide"
+	// CloseExit uses the same bounded cleanup pipeline as the tray Exit action.
+	CloseExit CloseChoice = "exit"
+)
+
+// CloseConfirmation is shown for every main-window X press on a background-capable host.
+type CloseConfirmation struct {
 	EnabledCount    int
 	UnfinishedCount int
 	SummaryKnown    bool
@@ -31,10 +54,13 @@ type WindowLifecycleOptions struct {
 	Show                func()
 	Focus               func()
 	ConfirmExit         func(ExitConfirmation, func(bool))
+	ConfirmClose        func(CloseConfirmation, func(CloseChoice))
 	ExitSummary         func(context.Context) (automation.ExitSummary, error)
 	HoldAdmission       func(reason string) (release func(), err error)
 	PrepareExit         func(time.Duration) bool
 	Quit                func()
+	ForceQuit           func()
+	QuitFallbackDelay   time.Duration
 	ReportError         func(error)
 }
 
@@ -46,7 +72,9 @@ type WindowHostOptions struct {
 	Show                func()
 	Focus               func()
 	ConfirmExit         func(ExitConfirmation, func(bool))
+	ConfirmClose        func(CloseConfirmation, func(CloseChoice))
 	Quit                func()
+	ForceQuit           func()
 	ReportError         func(error)
 }
 
@@ -62,6 +90,9 @@ type WindowLifecycle struct {
 }
 
 func NewWindowLifecycle(opts WindowLifecycleOptions) *WindowLifecycle {
+	if opts.QuitFallbackDelay <= 0 {
+		opts.QuitFallbackDelay = defaultQuitFallbackWait
+	}
 	return &WindowLifecycle{opts: opts}
 }
 
@@ -76,10 +107,12 @@ func NewAppWindowLifecycle(app *App, host WindowHostOptions) *WindowLifecycle {
 		Show:                host.Show,
 		Focus:               host.Focus,
 		ConfirmExit:         host.ConfirmExit,
+		ConfirmClose:        host.ConfirmClose,
 		ExitSummary:         app.automationExitSummary,
 		HoldAdmission:       app.holdAutomationAdmission,
 		PrepareExit:         func(limit time.Duration) bool { return app.PrepareExit(limit) },
 		Quit:                host.Quit,
+		ForceQuit:           host.ForceQuit,
 		ReportError:         host.ReportError,
 	})
 }
@@ -104,17 +137,78 @@ func (l *WindowLifecycle) CloseMainWindow() error {
 	if !l.opts.BackgroundSupported {
 		return l.RequestAppExit()
 	}
-	if l.Quitting() {
+	l.mu.Lock()
+	if l.quitting || l.confirming {
+		l.mu.Unlock()
 		return nil
 	}
-	if l.opts.Hide == nil {
-		return errors.New("无法隐藏主窗口")
+	l.confirming = true
+	l.mu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), exitSummaryTimeout)
+	summary, summaryErr := automation.ExitSummary{}, error(nil)
+	if l.opts.ExitSummary != nil {
+		summary, summaryErr = l.opts.ExitSummary(ctx)
 	}
-	if err := l.opts.Hide(); err != nil {
-		_ = l.RestoreMainWindow()
-		return fmt.Errorf("隐藏主窗口失败: %w", err)
+	cancel()
+	if l.opts.ConfirmClose == nil {
+		l.cancelConfirmation()
+		return errors.New("原生关闭确认不可用")
 	}
+	l.opts.ConfirmClose(closeConfirmation(summary, summaryErr), l.finishClose)
 	return nil
+}
+
+func closeConfirmation(summary automation.ExitSummary, summaryErr error) CloseConfirmation {
+	known := summaryErr == nil
+	var message string
+	switch {
+	case !known:
+		message = "无法确认后台任务状态。\n\n直接退出会停止客户端和后台自动化任务。"
+	case summary.UnfinishedCount > 0:
+		message = fmt.Sprintf(
+			"自动化任务正在执行。直接退出会中断当前执行，并停止后续自动化任务。\n\n未完成运行：%d 个",
+			summary.UnfinishedCount,
+		)
+	case summary.EnabledCount > 0:
+		message = fmt.Sprintf(
+			"当前有 %d 个已开启的自动化任务。直接退出后这些任务将停止。",
+			summary.EnabledCount,
+		)
+	default:
+		message = "请选择关闭方式。\n\n直接退出会停止客户端和后台自动化任务。"
+	}
+	return CloseConfirmation{
+		EnabledCount: summary.EnabledCount, UnfinishedCount: summary.UnfinishedCount,
+		SummaryKnown: known, Message: message,
+	}
+}
+
+func (l *WindowLifecycle) finishClose(choice CloseChoice) {
+	l.mu.Lock()
+	if !l.confirming {
+		l.mu.Unlock()
+		return
+	}
+	if choice != CloseExit {
+		l.confirming = false
+	}
+	l.mu.Unlock()
+	switch choice {
+	case CloseExit:
+		// Re-enter the common confirmation state and suppress the second prompt:
+		// the close chooser has already made the destructive choice explicit.
+		l.finishExit(true)
+	case CloseHide:
+		if l.opts.Hide == nil {
+			l.report(errors.New("无法隐藏主窗口"))
+			return
+		}
+		if err := l.opts.Hide(); err != nil {
+			_ = l.RestoreMainWindow()
+			l.report(fmt.Errorf("隐藏主窗口失败: %w", err))
+		}
+	case CloseCancel:
+	}
 }
 
 func (l *WindowLifecycle) RestoreMainWindow() error {
@@ -237,6 +331,11 @@ func (l *WindowLifecycle) finishExit(confirmed bool) {
 	go func() {
 		l.opts.PrepareExit(ExitTimeout)
 		l.opts.Quit()
+		// Wails 的 Quit 返回后事件循环理论上应立刻结束。若宿主仍存活，
+		// 2 秒后改由外壳强退，避免隐藏窗口和托盘继续扣住单实例进程。
+		if l.opts.ForceQuit != nil {
+			time.AfterFunc(l.opts.QuitFallbackDelay, l.opts.ForceQuit)
+		}
 	}()
 }
 

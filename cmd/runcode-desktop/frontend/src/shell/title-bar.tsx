@@ -32,6 +32,9 @@ function WindowControls({ onError }: { onError?: (message: string) => void }) {
       await closeMainWindow()
     } catch (e) {
       onError?.(errText(e))
+    } finally {
+      // closeMainWindow 只等到原生确认框创建完成；取消或隐藏后都必须恢复按钮，
+      // 否则窗口从托盘恢复时标题栏 X 会永久禁用。
       setClosing(false)
     }
   }

@@ -9,10 +9,10 @@ import { EXECUTION_MODES, applySaveError, scheduleForSave, validateAutomationDra
 import { ScheduleFields } from './schedule-fields'
 import { WorkspacePicker } from './workspace-picker'
 
-export function TaskForm({ initial, recent = [], modelSummary, zoneNote, canSave = true, onSave, onCancel, onDirty, onOpenSettings }: {
+export function TaskForm({ initial, recent = [], currentWorkspace, zoneNote, canSave = true, onSave, onCancel, onDirty, onOpenSettings }: {
   initial: AutomationTaskDraft
   recent?: string[]
-  modelSummary?: string
+  currentWorkspace?: string
   zoneNote?: string
   canSave?: boolean
   onSave: (draft: AutomationTaskDraft) => Promise<void>
@@ -61,9 +61,9 @@ export function TaskForm({ initial, recent = [], modelSummary, zoneNote, canSave
   }
 
   return (
-    <form className="flex flex-col min-h-full" onSubmit={(e) => { e.preventDefault(); void save() }} onKeyDown={onKeyDown}>
-      <div className="px-4 py-3 border-b border-line text-[15px] font-semibold text-ink">新建自动化任务</div>
-      <div className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-3">
+    <form className="flex h-full min-h-0 flex-col overflow-hidden" onSubmit={(e) => { e.preventDefault(); void save() }} onKeyDown={onKeyDown}>
+      <div className="flex-none px-4 py-3 border-b border-line text-[15px] font-semibold text-ink">新建自动化任务</div>
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 flex flex-col gap-3">
         <label className={LABEL_CLS}>
           任务名称
           <input aria-label="任务名称" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} className={`${FIELD_CLS} w-full`} />
@@ -80,9 +80,16 @@ export function TaskForm({ initial, recent = [], modelSummary, zoneNote, canSave
             {EXECUTION_MODES.map((mode) => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
           </SelectField>
         </label>
-        <div className={LABEL_CLS}>
+        <div className="flex items-center gap-3 text-[13px] text-muted">
           <span>关联工作区</span>
-          <WorkspacePicker value={draft.workspace} recent={recent} onChange={(workspace) => setDraft({ ...draft, workspace })} />
+          <div className="min-w-0 flex-1">
+            <WorkspacePicker
+              value={draft.workspace}
+              current={currentWorkspace}
+              recent={recent}
+              onChange={(workspace) => setDraft({ ...draft, workspace })}
+            />
+          </div>
           {errors.workspace && <InlineError variant="text">{errors.workspace}</InlineError>}
         </div>
         <ScheduleFields value={draft.schedule} onChange={(schedule) => setDraft({ ...draft, schedule })} />
@@ -90,10 +97,6 @@ export function TaskForm({ initial, recent = [], modelSummary, zoneNote, canSave
         {errors.weekdays && <InlineError variant="text">{errors.weekdays}</InlineError>}
         {errors.schedule && <InlineError variant="text">{errors.schedule}</InlineError>}
         {zoneNote && <Banner tone="warning">{zoneNote}</Banner>}
-        <div className="rounded-field bg-surface2 border border-line px-3 py-2 text-[12px] text-muted">
-          <div className="text-ink">创建时配置</div>
-          <div>{modelSummary || '未选择可保存的模型'}</div>
-        </div>
         {saveError && <Banner tone="danger">{saveError}</Banner>}
         {!canSave && (
           <Banner tone="warning" title="还不能保存">

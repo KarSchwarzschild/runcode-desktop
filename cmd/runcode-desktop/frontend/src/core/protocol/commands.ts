@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateAutomationTaskRequest, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionAutomationRunsRequest, SessionImageGenerationView, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SetSessionImageGenerationRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationRunResult, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, ConversationInfo, CreateAutomationTaskRequest, CustomModel, DeleteAutomationTaskRequest, DeleteAutomationTaskResult, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RunAutomationTaskNowRequest, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionAutomationRunsRequest, SessionImageGenerationView, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SetSessionImageGenerationRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -143,6 +143,12 @@ export function createAutomationTask(req: CreateAutomationTaskRequest): Promise<
 // kind: idempotent-set
 export function deleteAgent(name: string, scope: string): Promise<AgentList> {
   return call<AgentList>('DeleteAgent', name, scope);
+}
+
+// DeleteAutomationTask hides the task and closes its future scheduling while preserving run history and session links.
+// kind: trigger
+export function deleteAutomationTask(req: DeleteAutomationTaskRequest): Promise<DeleteAutomationTaskResult> {
+  return call<DeleteAutomationTaskResult>('DeleteAutomationTask', req);
 }
 
 // DeleteCustomModel 按名称删除，返回最新列表。未知名称是幂等 no-op。
@@ -683,6 +689,12 @@ export function reviewEdit(sessionID: string, snapshotID: string): Promise<EditD
 // kind: trigger
 export function revokeDirectoryAccess(req: DirectoryAccessRequest): Promise<DirectoryAccessView> {
   return call<DirectoryAccessView>('RevokeDirectoryAccess', req);
+}
+
+// RunAutomationTaskNow queues one explicit manual run without changing the schedule or enabled/paused state.
+// kind: trigger
+export function runAutomationTaskNow(req: RunAutomationTaskNowRequest): Promise<AutomationRunResult> {
+  return call<AutomationRunResult>('RunAutomationTaskNow', req);
 }
 
 // RuntimeStatus 返回运行时环境的当前状态（纯读，不联网）。

@@ -158,7 +158,11 @@ type (
 	CreateAutomationTaskRequest    = protocol.CreateAutomationTaskRequest
 	UpdateAutomationTaskRequest    = protocol.UpdateAutomationTaskRequest
 	SetAutomationTaskPausedRequest = protocol.SetAutomationTaskPausedRequest
+	RunAutomationTaskNowRequest    = protocol.RunAutomationTaskNowRequest
+	DeleteAutomationTaskRequest    = protocol.DeleteAutomationTaskRequest
 	AutomationTaskResult           = protocol.AutomationTaskResult
+	AutomationRunResult            = protocol.AutomationRunResult
+	DeleteAutomationTaskResult     = protocol.DeleteAutomationTaskResult
 	ListAutomationRunsRequest      = protocol.ListAutomationRunsRequest
 	SessionAutomationRunsRequest   = protocol.SessionAutomationRunsRequest
 	AutomationRunPage              = protocol.AutomationRunPage

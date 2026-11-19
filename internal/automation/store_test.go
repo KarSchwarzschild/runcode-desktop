@@ -2,6 +2,9 @@ package automation
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -28,7 +31,7 @@ func sampleTask(id, owner, req string) Task {
 		ExecutionMode: ExecReuseSession,
 		Schedule:      Schedule{Mode: ModeDaily, TimeZone: "Asia/Shanghai", StartDate: "2026-11-19", TimeOfDay: "09:00:00", Interval: 1},
 		AnchorUTC:     now, State: TaskEnabled, NextRunAtUTC: &next,
-		Binding: Binding{ModelKind: "passport", ModelName: "m1", BindingVersion: 1},
+		Binding:      Binding{ModelKind: "passport", ModelName: "m1", BindingVersion: 1},
 		CreatedAtUTC: now, UpdatedAtUTC: now,
 	}
 }
@@ -57,6 +60,87 @@ func TestStoreCreateRequestIdempotent(t *testing.T) {
 	}
 	if len(page.Items) != 1 {
 		t.Fatalf("want 1 task, got %d", len(page.Items))
+	}
+}
+
+func TestStoreManualRunIsIdempotentAndDoesNotMoveSchedule(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	task, err := st.CreateTask(ctx, sampleTask("manual", "owner-a", "req-manual"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	before := task.NextRunAtUTC
+	now := time.Date(2026, 11, 18, 12, 30, 0, 0, time.UTC)
+	run, inserted, err := st.InsertManualRun(ctx, task.ID, task.Revision, "manual-req", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !inserted || run.Trigger != TriggerManual || run.ClientRequestID != "manual-req" {
+		t.Fatalf("manual run = %+v inserted=%v", run, inserted)
+	}
+	again, insertedAgain, err := st.InsertManualRun(ctx, task.ID, task.Revision, "manual-req", now.Add(time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if insertedAgain || again.ID != run.ID {
+		t.Fatalf("idempotent manual run = %+v inserted=%v", again, insertedAgain)
+	}
+	after, err := st.getTask(ctx, task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fmtTimePtr(after.NextRunAtUTC) != fmtTimePtr(before) || after.Revision != task.Revision {
+		t.Fatalf("manual run changed schedule: before=%v after=%+v", before, after)
+	}
+	if _, _, err := st.InsertManualRun(ctx, task.ID, task.Revision, "manual-req-2", now.Add(2*time.Second)); !errors.Is(err, ErrTaskActive) {
+		t.Fatalf("active manual run err = %v", err)
+	}
+}
+
+func TestStoreSoftDeletePreservesRunsAndLinks(t *testing.T) {
+	st := testStore(t)
+	ctx := context.Background()
+	task, err := st.CreateTask(ctx, sampleTask("delete-me", "owner-a", "req-delete"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 18, 12, 30, 0, 0, time.UTC)
+	run, _, err := st.InsertManualRun(ctx, task.ID, task.Revision, "manual-delete", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DeleteTask(ctx, task.ID, task.Revision, now); !errors.Is(err, ErrTaskActive) {
+		t.Fatalf("delete active task err = %v", err)
+	}
+	run.Status = RunInterrupted
+	run.Reason = "test"
+	run.FinishedAtUTC = &now
+	if _, err := st.SaveRun(ctx, run, run.RunRevision); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.LinkSession(ctx, SessionLink{
+		OwnerScope: "owner-a", Workspace: task.Workspace, SessionID: "session-delete", TaskID: task.ID, TaskName: task.Name,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deleted, err := st.DeleteTask(ctx, task.ID, task.Revision, now.Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.DeletedAtUTC == nil || deleted.Revision != task.Revision+1 {
+		t.Fatalf("deleted task = %+v", deleted)
+	}
+	page, err := st.ListTasks(ctx, TaskFilter{AllowedOwners: []string{"owner-a"}, Limit: 10})
+	if err != nil || len(page.Items) != 0 {
+		t.Fatalf("visible after delete = %+v err=%v", page.Items, err)
+	}
+	if _, err := st.LinkForOwners(ctx, task.ID, "session-delete", []string{"owner-a"}); err != nil {
+		t.Fatalf("history link deleted: %v", err)
+	}
+	runs, err := st.ListRuns(ctx, RunFilter{AllowedOwners: []string{"owner-a"}, TaskID: task.ID, Limit: 10})
+	if err != nil || len(runs.Items) != 1 {
+		t.Fatalf("history runs = %+v err=%v", runs.Items, err)
 	}
 }
 
@@ -177,6 +261,65 @@ func TestStoreMigrationFailurePreservesData(t *testing.T) {
 	}
 	if len(page.Items) != 1 {
 		t.Fatalf("data lost after reopen: %d", len(page.Items))
+	}
+}
+
+func TestStoreMigratesV1TaskToCurrentSchema(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "v1.sqlite3")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec(`CREATE TABLE schema_migrations (
+		version INTEGER PRIMARY KEY NOT NULL,
+		applied_at TEXT NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := applyMigration(tx, 1); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations(version, applied_at) VALUES (1, datetime('now'))`); err != nil {
+		t.Fatal(err)
+	}
+	task := sampleTask("v1-task", "owner-a", "v1-request")
+	schedJSON, _ := json.Marshal(task.Schedule)
+	bindJSON, _ := json.Marshal(task.Binding)
+	if _, err := tx.Exec(`INSERT INTO tasks(
+		id, owner_scope, client_request_id, revision, name, prompt, workspace, execution_mode,
+		schedule_json, anchor_utc, state, next_run_at_utc, reusable_session_id, binding_json,
+		blocked_reason, created_at_utc, updated_at_utc
+	) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		task.ID, task.OwnerScope, task.ClientRequestID, task.Revision, task.Name, task.Prompt,
+		task.Workspace, task.ExecutionMode, string(schedJSON), fmtTime(task.AnchorUTC), task.State,
+		fmtTimePtr(task.NextRunAtUTC), task.ReusableSessionID, string(bindJSON), task.BlockedReason,
+		fmtTime(task.CreatedAtUTC), fmtTime(task.UpdatedAtUTC),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	st, err := OpenStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	page, err := st.ListTasks(context.Background(), TaskFilter{AllowedOwners: []string{"owner-a"}, Limit: 10})
+	if err != nil || len(page.Items) != 1 || page.Items[0].ID != task.ID {
+		t.Fatalf("migrated task = %+v err=%v", page.Items, err)
+	}
+	if page.Items[0].DeletedAtUTC != nil {
+		t.Fatalf("v1 task gained a deleted timestamp: %+v", page.Items[0])
 	}
 }
 

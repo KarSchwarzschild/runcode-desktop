@@ -7,13 +7,13 @@ import "time"
 
 // Schedule modes (wire + domain). No "custom" / cron.
 const (
-	ModeWeekly        = "weekly"
-	ModeWeekdays      = "weekdays"
-	ModeDaily         = "daily"
-	ModeEveryHours    = "every_hours"
-	ModeEveryMinutes  = "every_minutes"
-	ModeMonthly       = "monthly"
-	ModeOnce          = "once"
+	ModeWeekly       = "weekly"
+	ModeWeekdays     = "weekdays"
+	ModeDaily        = "daily"
+	ModeEveryHours   = "every_hours"
+	ModeEveryMinutes = "every_minutes"
+	ModeMonthly      = "monthly"
+	ModeOnce         = "once"
 )
 
 // Execution modes.
@@ -31,15 +31,22 @@ const (
 
 // Run statuses (subset used by store/service; wire may extend reasons).
 const (
-	RunQueued             = "queued"
-	RunSubmitting         = "submitting"
-	RunRunning            = "running"
-	RunWaitingPermission  = "waiting_permission"
-	RunSucceeded          = "succeeded"
-	RunFailed             = "failed"
-	RunInterrupted        = "interrupted"
-	RunTimedOut           = "timed_out"
-	RunSkipped            = "skipped"
+	RunQueued            = "queued"
+	RunSubmitting        = "submitting"
+	RunRunning           = "running"
+	RunWaitingPermission = "waiting_permission"
+	RunSucceeded         = "succeeded"
+	RunFailed            = "failed"
+	RunInterrupted       = "interrupted"
+	RunTimedOut          = "timed_out"
+	RunSkipped           = "skipped"
+)
+
+const (
+	// TriggerScheduled is a run claimed by the automatic schedule.
+	TriggerScheduled = "scheduled"
+	// TriggerManual is a user-requested run; it does not advance the schedule.
+	TriggerManual = "manual"
 )
 
 // Schedule is the structured time rule (scheme §5). Times are calendar fields
@@ -77,41 +84,44 @@ type Binding struct {
 
 // Task is the persisted automation definition.
 type Task struct {
-	ID                 string
-	OwnerScope         string
-	ClientRequestID    string
-	Revision           int64
-	Name               string
-	Prompt             string
-	Workspace          string
-	ExecutionMode      string
-	Schedule           Schedule
-	AnchorUTC          time.Time
-	State              string
-	NextRunAtUTC       *time.Time
-	ReusableSessionID  string
-	Binding            Binding
-	BlockedReason      string
-	CreatedAtUTC       time.Time
-	UpdatedAtUTC       time.Time
+	ID                string
+	OwnerScope        string
+	ClientRequestID   string
+	Revision          int64
+	Name              string
+	Prompt            string
+	Workspace         string
+	ExecutionMode     string
+	Schedule          Schedule
+	AnchorUTC         time.Time
+	State             string
+	NextRunAtUTC      *time.Time
+	ReusableSessionID string
+	Binding           Binding
+	BlockedReason     string
+	DeletedAtUTC      *time.Time
+	CreatedAtUTC      time.Time
+	UpdatedAtUTC      time.Time
 }
 
 // Run is one claimed occurrence.
 type Run struct {
-	ID             string
-	TaskID         string
-	TaskRevision   int64
-	RunRevision    int64
-	ScheduledAtUTC time.Time
-	Status         string
-	Reason         string
-	SessionID      string
-	QuestionID     string
-	QueuedAtUTC    *time.Time
-	StartedAtUTC   *time.Time
-	FinishedAtUTC  *time.Time
-	Summary        string
-	MissedCount    int64
+	ID              string
+	TaskID          string
+	TaskRevision    int64
+	RunRevision     int64
+	ScheduledAtUTC  time.Time
+	Status          string
+	Reason          string
+	SessionID       string
+	QuestionID      string
+	QueuedAtUTC     *time.Time
+	StartedAtUTC    *time.Time
+	FinishedAtUTC   *time.Time
+	Summary         string
+	MissedCount     int64
+	Trigger         string
+	ClientRequestID string
 	// Frozen snapshot fields (enough to execute / display without re-read races).
 	TaskName      string
 	Prompt        string

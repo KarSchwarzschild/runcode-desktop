@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { useState } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const bridge = vi.hoisted(() => ({
@@ -14,7 +13,7 @@ vi.mock('@/core/bridge', () => ({
   pickWorkspaceFolder: bridge.pickWorkspaceFolder,
   openSession: bridge.openSession,
   resumeSession: bridge.resumeSession,
-  errText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
+  errText: (e: unknown) => e instanceof Error ? e.message : String(e),
 }))
 
 import { WorkspacePicker } from './workspace-picker'
@@ -35,54 +34,81 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount())
   host.remove()
+  document.querySelectorAll('[role="listbox"]').forEach((el) => el.remove())
 })
 
-function Harness({ recent = ['D:\\资料', 'C:\\Work Files'] }: { recent?: string[] }) {
-  const [value, setValue] = useState('D:\\资料')
+function Harness() {
+  const [value, setValue] = useState('C:\\Users\\yyzxc\\Desktop\\Test-guokai-client')
   return (
     <>
-      <WorkspacePicker value={value} recent={recent} onChange={setValue} />
+      <WorkspacePicker
+        value={value}
+        current="C:\\Users\\yyzxc\\Desktop\\Test-guokai-client"
+        recent={['C:\\Users\\yyzxc\\Desktop\\Client-Platform\\imagegen-client', 'C:\\Users\\yyzxc\\Desktop\\Bridge']}
+        onChange={setValue}
+      />
       <div data-value={value} />
     </>
   )
 }
 
+function clickBrowse() {
+  const browse = [...document.querySelectorAll<HTMLButtonElement>('[role="listbox"] button')]
+    .find((button) => button.textContent?.includes('浏览其他目录...'))
+  if (!browse) throw new Error('browse workspace button not found')
+  browse.click()
+}
+
 describe('workspace picker', () => {
-  it('filters history and keeps the previous path when the native dialog is cancelled', async () => {
+  it('uses a folded current workspace and shows current and history without a search box', async () => {
     await act(async () => { root.render(<Harness />) })
-    const search = host.querySelector('input') as HTMLInputElement
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'work')
-      search.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    expect(host.textContent).toContain('C:\\Work Files')
-    expect(host.textContent).not.toContain('D:\\资料')
-    expect(host.textContent).toContain('浏览其他目录...')
-
-    bridge.pickWorkspaceFolder.mockResolvedValue('')
-    const browse = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('浏览其他目录...'))
-    await act(async () => { browse!.click() })
-    expect(host.querySelector('[data-value]')?.getAttribute('data-value')).toBe('D:\\资料')
-    expect(bridge.openSession).not.toHaveBeenCalled()
-    expect(bridge.resumeSession).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('Test-guokai-client')
+    expect(host.querySelector('input')).toBeNull()
+    expect(host.textContent).not.toContain('imagegen-client')
+    await act(async () => (host.querySelector('button[aria-haspopup="listbox"]') as HTMLButtonElement).click())
+    const list = document.querySelector('[role="listbox"]') as HTMLElement
+    const text = list.textContent ?? ''
+    expect(text).toContain('Test-guokai-client')
+    expect(text).toContain('imagegen-client')
+    expect(text).toContain('Bridge')
+    expect(text).toContain('C:\\Users\\yyzxc\\Desktop\\Test-guokai-client')
+    expect(text).toContain('浏览其他目录...')
+    expect(list.querySelector('[role="option"][aria-selected="true"]')?.textContent).toContain('Test-guokai-client')
   })
 
-  it('reports a chosen directory only through onChange', async () => {
+  it('selects a history item through onChange and closes the list', async () => {
     await act(async () => { root.render(<Harness />) })
-    bridge.pickWorkspaceFolder.mockResolvedValue('D:\\新 目录\\项目')
-    const browse = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('浏览其他目录...'))
-    await act(async () => { browse!.click() })
+    await act(async () => (host.querySelector('button[aria-haspopup="listbox"]') as HTMLButtonElement).click())
+    const choice = [...document.querySelectorAll('[role="option"]')].find((el) => el.textContent?.includes('Bridge')) as HTMLButtonElement
+    await act(async () => choice.click())
+    expect(host.querySelector('[data-value]')?.getAttribute('data-value')).toBe('C:\\Users\\yyzxc\\Desktop\\Bridge')
+    expect(document.querySelector('[role="listbox"]')).toBeNull()
+  })
+
+  it('keeps the old value on cancellation and adds a newly browsed directory immediately', async () => {
+    await act(async () => { root.render(<Harness />) })
+    await act(async () => (host.querySelector('button[aria-haspopup="listbox"]') as HTMLButtonElement).click())
+    bridge.pickWorkspaceFolder.mockResolvedValueOnce('')
+    await act(async () => clickBrowse())
+    expect(host.querySelector('[data-value]')?.getAttribute('data-value')).toBe('C:\\Users\\yyzxc\\Desktop\\Test-guokai-client')
+
+    bridge.pickWorkspaceFolder.mockResolvedValueOnce('D:\\新 目录\\项目')
+    // 取消原生目录选择后折叠菜单保持打开，用户可以直接再次浏览。
+    await act(async () => clickBrowse())
     expect(host.querySelector('[data-value]')?.getAttribute('data-value')).toBe('D:\\新 目录\\项目')
+
+    await act(async () => (host.querySelector('button[aria-haspopup="listbox"]') as HTMLButtonElement).click())
+    expect(document.querySelector('[role="listbox"]')?.textContent).toContain('D:\\新 目录\\项目')
     expect(bridge.openSession).not.toHaveBeenCalled()
     expect(bridge.resumeSession).not.toHaveBeenCalled()
   })
 
-  it('shows a banner when the native picker fails', async () => {
+  it('shows native picker failures without changing the value', async () => {
     await act(async () => { root.render(<Harness />) })
-    bridge.pickWorkspaceFolder.mockRejectedValue(new Error('无法打开目录选择器'))
-    const browse = [...host.querySelectorAll('button')].find((b) => b.textContent?.includes('浏览其他目录...'))
-    await act(async () => { browse!.click() })
-    expect(host.textContent).toContain('无法打开目录选择器')
-    expect(host.querySelector('[data-value]')?.getAttribute('data-value')).toBe('D:\\资料')
+    await act(async () => (host.querySelector('button[aria-haspopup="listbox"]') as HTMLButtonElement).click())
+    bridge.pickWorkspaceFolder.mockRejectedValueOnce(new Error('无法打开目录选择器'))
+    await act(async () => clickBrowse())
+    expect(document.querySelector('[role="listbox"]')?.textContent).toContain('无法打开目录选择器')
+    expect(host.querySelector('[data-value]')?.getAttribute('data-value')).toBe('C:\\Users\\yyzxc\\Desktop\\Test-guokai-client')
   })
 })

@@ -98,7 +98,7 @@ function addDays(year: string, month: string, day: string, offset: number) {
   }
 }
 
-export function defaultAutomationDraft(now: Date, timeZone: string | undefined, recent: string[]): AutomationTaskDraft {
+export function defaultAutomationDraft(now: Date, timeZone: string | undefined, recent: string[], currentWorkspace = ''): AutomationTaskDraft {
   const { zone } = resolveTimeZone(timeZone)
   const parts = zonedParts(now, zone)
   const seconds = parts.hour * 3600 + parts.minute * 60 + parts.second
@@ -113,7 +113,7 @@ export function defaultAutomationDraft(now: Date, timeZone: string | undefined, 
   return {
     name: '',
     prompt: '',
-    workspace: recent.find((item) => item.trim()) ?? '',
+    workspace: currentWorkspace.trim() || recent.find((item) => item.trim()) || '',
     executionMode: 'reuse_session',
     schedule: {
       mode: 'daily',

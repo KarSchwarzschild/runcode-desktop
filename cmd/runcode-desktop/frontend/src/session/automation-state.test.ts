@@ -58,6 +58,50 @@ describe('automation state', () => {
     expect(state.tasks.a?.name).toBe('第四版')
   })
 
+  it('accepts a same-revision task snapshot when its run revision advanced', () => {
+    let state = reduceAutomation(emptyAutomationState(), { type: 'bind', context: ctx(1) })
+    state = snap(state, ctx(1), 0, [task('a', 2, {
+      lastRun: {
+        id: 'run-a', taskId: 'a', taskRevision: 2, runRevision: 1, status: 'queued',
+        scheduledAtUTC: '2026-11-19T01:00:00Z', schedule: task('seed', 1).schedule,
+      },
+    })])
+    state = reduceAutomation(state, {
+      type: 'event',
+      context: ctx(1),
+      task: task('a', 2, {
+        lastRun: {
+          id: 'run-a', taskId: 'a', taskRevision: 2, runRevision: 2, status: 'running',
+          scheduledAtUTC: '2026-11-19T01:00:00Z', schedule: task('seed', 1).schedule,
+        },
+      }),
+    })
+    expect(state.tasks.a?.lastRun?.runRevision).toBe(2)
+    expect(state.tasks.a?.lastRun?.status).toBe('running')
+  })
+
+  it('accepts a newer run even when its run revision restarts at one', () => {
+    let state = reduceAutomation(emptyAutomationState(), { type: 'bind', context: ctx(1) })
+    state = snap(state, ctx(1), 0, [task('a', 2, {
+      lastRun: {
+        id: 'run-old', taskId: 'a', taskRevision: 2, runRevision: 5, status: 'succeeded',
+        scheduledAtUTC: '2026-11-19T01:00:00Z', schedule: task('seed', 1).schedule,
+      },
+    })])
+    state = reduceAutomation(state, {
+      type: 'event',
+      context: ctx(1),
+      task: task('a', 2, {
+        lastRun: {
+          id: 'run-new', taskId: 'a', taskRevision: 2, runRevision: 1, status: 'running',
+          scheduledAtUTC: '2026-11-19T02:00:00Z', schedule: task('seed', 1).schedule,
+        },
+      }),
+    })
+    expect(state.tasks.a?.lastRun?.id).toBe('run-new')
+    expect(state.tasks.a?.lastRun?.status).toBe('running')
+  })
+
   it('clears the cache on a new context and drops late responses and events', () => {
     let state = reduceAutomation(emptyAutomationState(), { type: 'bind', context: ctx(1) })
     state = snap(state, ctx(1), 0, [task('a', 2, { name: '旧任务' })])

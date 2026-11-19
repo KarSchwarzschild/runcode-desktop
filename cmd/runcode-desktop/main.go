@@ -363,8 +363,8 @@ func main() {
 	hostLife = createDesktopWindowLifecycle(app, mainWin, deskApp, brandTitle)
 	deskApp.SetWindowController(hostLife)
 
-	// 普通关闭只隐藏主窗并取消 Wails 的销毁。真正退出时 Quitting=true，钩子不再
-	// Cancel，让 OnShutdown 走共享的 20 秒收尾后结束同一个进程。
+	// 每次标题栏 X / Alt+F4 都取消 Wails 的默认销毁并进入“隐藏 / 退出 / 取消”
+	// 确认。真正退出时 Quitting=true，钩子才放行 OnShutdown 的共享有界收尾。
 	mainWin.RegisterHook(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		if hostLife.Quitting() {
 			return

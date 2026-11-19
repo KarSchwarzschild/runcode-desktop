@@ -104,13 +104,13 @@ it('creates, pauses and opens linked history without submitting a chat turn', as
   expect(host.querySelector('input[aria-label="任务名称"]') as HTMLInputElement).toBeTruthy()
 
   await act(async () => {
-    ;([...host.querySelectorAll('button')].find((button) => button.textContent === '暂停') as HTMLButtonElement).click()
+    ;(host.querySelector('button[aria-label="暂停任务"]') as HTMLButtonElement).click()
   })
   await act(async () => { await Promise.resolve() })
   expect(api.setAutomationTaskPaused).toHaveBeenCalledWith(expect.objectContaining({
     taskId: 'task-1', expectedRevision: 1, paused: true,
   }))
-  expect([...host.querySelectorAll('button')].some((button) => button.textContent === '恢复')).toBe(true)
+  expect(host.querySelector('button[aria-label="恢复任务"]')).toBeTruthy()
 
   await act(async () => {
     ;([...host.querySelectorAll('button')].find((button) => button.textContent === '任务运行记录') as HTMLButtonElement).click()

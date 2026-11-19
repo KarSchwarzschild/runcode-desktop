@@ -181,6 +181,8 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"CreateAutomationTask":      hostproto.CommandTrigger,
 	"UpdateAutomationTask":      hostproto.CommandTrigger,
 	"SetAutomationTaskPaused":   hostproto.CommandIdempotentSet,
+	"RunAutomationTaskNow":      hostproto.CommandTrigger,
+	"DeleteAutomationTask":      hostproto.CommandTrigger,
 	"OpenAutomationSession":     hostproto.CommandTrigger,
 	"CloseMainWindow":           hostproto.CommandTrigger,
 	"RequestAppExit":            hostproto.CommandTrigger,

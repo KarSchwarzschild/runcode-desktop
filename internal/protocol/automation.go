@@ -100,6 +100,7 @@ type AutomationRun struct {
 	FinishedAtUTC  string             `json:"finishedAtUTC,omitempty"`
 	Summary        string             `json:"summary,omitempty"`
 	MissedCount    int64              `json:"missedCount,omitempty"`
+	Trigger        string             `json:"trigger,omitempty"`
 	Name           string             `json:"name,omitempty"`
 	Prompt         string             `json:"prompt,omitempty"`
 	Workspace      string             `json:"workspace,omitempty"`
@@ -109,18 +110,22 @@ type AutomationRun struct {
 
 // AutomationTask is the desensitized task snapshot.
 type AutomationTask struct {
-	ID            string                   `json:"id"`
-	Revision      int64                    `json:"revision"`
-	Name          string                   `json:"name"`
-	Prompt        string                   `json:"prompt"`
-	Workspace     string                   `json:"workspace"`
-	ExecutionMode string                   `json:"executionMode"`
-	Schedule      AutomationSchedule       `json:"schedule"`
-	State         string                   `json:"state"`
-	NextRunAtUTC  string                   `json:"nextRunAtUTC,omitempty"`
-	BlockedReason string                   `json:"blockedReason,omitempty"`
-	LastRun       *AutomationRun           `json:"lastRun,omitempty"`
-	Binding       AutomationBindingSummary `json:"binding"`
+	ID                 string                   `json:"id"`
+	Revision           int64                    `json:"revision"`
+	Name               string                   `json:"name"`
+	Prompt             string                   `json:"prompt"`
+	Workspace          string                   `json:"workspace"`
+	ExecutionMode      string                   `json:"executionMode"`
+	Schedule           AutomationSchedule       `json:"schedule"`
+	State              string                   `json:"state"`
+	NextRunAtUTC       string                   `json:"nextRunAtUTC,omitempty"`
+	BlockedReason      string                   `json:"blockedReason,omitempty"`
+	LastRun            *AutomationRun           `json:"lastRun,omitempty"`
+	ActiveRunID        string                   `json:"activeRunId,omitempty"`
+	LastLinkedRunID    string                   `json:"lastLinkedRunId,omitempty"`
+	LinkedSessionTitle string                   `json:"linkedSessionTitle,omitempty"`
+	DeletedAtUTC       string                   `json:"deletedAtUtc,omitempty"`
+	Binding            AutomationBindingSummary `json:"binding"`
 }
 
 // AutomationDefaults is the context bootstrap. available=false leaves chat usable.
@@ -128,6 +133,7 @@ type AutomationDefaults struct {
 	Context             AutomationContext      `json:"context"`
 	Available           bool                   `json:"available"`
 	UnavailableReason   string                 `json:"unavailableReason,omitempty"`
+	CurrentWorkspace    string                 `json:"currentWorkspace"`
 	RecentWorkspaces    []string               `json:"recentWorkspaces"`
 	Model               AutomationModelSummary `json:"model"`
 	PermissionMode      string                 `json:"permissionMode,omitempty"`
@@ -183,12 +189,43 @@ type SetAutomationTaskPausedRequest struct {
 	OwnerScope       string            `json:"ownerScope,omitempty"`
 }
 
+// RunAutomationTaskNowRequest starts one explicit manual occurrence without
+// changing the task's automatic schedule.
+type RunAutomationTaskNowRequest struct {
+	Context          AutomationContext `json:"context"`
+	TaskID           string            `json:"taskId"`
+	ExpectedRevision int64             `json:"expectedRevision"`
+	ClientRequestID  string            `json:"clientRequestId"`
+	OwnerScope       string            `json:"ownerScope,omitempty"`
+}
+
+// DeleteAutomationTaskRequest soft-deletes one task while preserving its runs
+// and linked conversations.
+type DeleteAutomationTaskRequest struct {
+	Context          AutomationContext `json:"context"`
+	TaskID           string            `json:"taskId"`
+	ExpectedRevision int64             `json:"expectedRevision"`
+	OwnerScope       string            `json:"ownerScope,omitempty"`
+}
+
 // AutomationTaskResult is one task plus the context it was read under.
 // Warning is set when the task was saved but the workspace MRU was not.
 type AutomationTaskResult struct {
 	Context AutomationContext `json:"context"`
 	Task    AutomationTask    `json:"task"`
 	Warning string            `json:"warning,omitempty"`
+}
+
+// AutomationRunResult is one manual run plus the context it was accepted under.
+type AutomationRunResult struct {
+	Context AutomationContext `json:"context"`
+	Run     AutomationRun     `json:"run"`
+}
+
+// DeleteAutomationTaskResult confirms the task hidden by a soft delete.
+type DeleteAutomationTaskResult struct {
+	Context AutomationContext `json:"context"`
+	TaskID  string            `json:"taskId"`
 }
 
 // ListAutomationRunsRequest lists one task's runs, newest first.

@@ -35,6 +35,7 @@ export type AutomationAction =
   | { type: 'snapshot'; context: AutomationContext; generation: number; page: AutomationTaskPage }
   | { type: 'append'; context: AutomationContext; generation: number; page: AutomationTaskPage }
   | { type: 'event'; context: AutomationContext; task: AutomationTask }
+  | { type: 'remove'; id: string }
   | { type: 'fail'; generation: number; error: string; context?: AutomationContext }
   | { type: 'unavailable'; generation: number; context: AutomationContext; reason: string }
   | { type: 'select'; id: string }
@@ -69,7 +70,27 @@ export function taskMatchesQuery(task: AutomationTask, query: AutomationListQuer
 
 function mergeTask(tasks: Record<string, AutomationTask>, task: AutomationTask): Record<string, AutomationTask> {
   const prev = tasks[task.id]
-  if (prev && prev.revision >= task.revision) return tasks
+  if (prev) {
+    if (prev.revision > task.revision) return tasks
+    if (prev.revision === task.revision) {
+      // 任务配置没变时 revision 不变，但执行状态会随 run revision 推进。
+      // 新一轮的 runRevision 会从 1 重新开始，不能跨 run 比较该字段；
+      // 不同 run 以 scheduledAtUTC（服务端列表排序）判定先后。
+      const prevRun = prev.lastRun
+      const nextRun = task.lastRun
+      if (!prevRun) {
+        if (!nextRun) return tasks
+      } else if (!nextRun) {
+        return tasks
+      } else if (prevRun.id !== nextRun.id) {
+        const prevAt = Date.parse(prevRun.scheduledAtUTC)
+        const nextAt = Date.parse(nextRun.scheduledAtUTC)
+        if (nextAt < prevAt || (nextAt === prevAt && nextRun.id <= prevRun.id)) return tasks
+      } else if ((nextRun.runRevision ?? 0) <= (prevRun.runRevision ?? 0)) {
+        return tasks
+      }
+    }
+  }
   return { ...tasks, [task.id]: task }
 }
 
@@ -197,6 +218,16 @@ export function reduceAutomation(state: AutomationState, action: AutomationActio
     case 'event': {
       if (!state.context) return { ...state, early: [...state.early, { context: action.context, task: action.task }] }
       if (!sameAutomationContext(state.context, action.context)) return state
+      if (action.task.deletedAtUtc) {
+        const tasks = { ...state.tasks }
+        delete tasks[action.task.id]
+        return {
+          ...state,
+          tasks,
+          selectedTaskId: state.selectedTaskId === action.task.id ? '' : state.selectedTaskId,
+          list: { ...state.list, ids: state.list.ids.filter((id) => id !== action.task.id) },
+        }
+      }
       const tasks = mergeTask(state.tasks, action.task)
       if (tasks === state.tasks) return state
       const stored = tasks[action.task.id]
@@ -204,6 +235,16 @@ export function reduceAutomation(state: AutomationState, action: AutomationActio
         ...state,
         tasks,
         list: { ...state.list, ids: placeEvent(state.list.ids, stored, state.list.query) },
+      }
+    }
+    case 'remove': {
+      const tasks = { ...state.tasks }
+      delete tasks[action.id]
+      return {
+        ...state,
+        tasks,
+        selectedTaskId: state.selectedTaskId === action.id ? '' : state.selectedTaskId,
+        list: { ...state.list, ids: state.list.ids.filter((id) => id !== action.id) },
       }
     }
     case 'fail': {

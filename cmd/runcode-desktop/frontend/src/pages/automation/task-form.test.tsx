@@ -86,6 +86,7 @@ describe('task form fields', () => {
     expect([...exec.options].map((o) => o.textContent)).toEqual(['新建会话并复用', '每次新建会话'])
     expect(host.textContent).not.toContain('自定义')
     expect(host.textContent).not.toContain('cron')
+    expect(host.textContent).not.toContain('创建时配置')
     const zones = [...(host.querySelector('select[aria-label="时区"]') as HTMLSelectElement).options].map((o) => o.value)
     expect(zones).toContain('Asia/Shanghai')
     expect(zones.every((zone) => !zone.includes('中国标准时间'))).toBe(true)
