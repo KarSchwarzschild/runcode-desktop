@@ -14,3 +14,5 @@ The screenshots render the production tool card, task manager and task form comp
 | `step8-form-150pct-bottom.jpg` | Bottom of the 150% form after scrolling, with timezone summary and visible 取消／保存 controls. |
 
 The seven schedule choices were also asserted in `task-form.test.tsx`: weekly, weekdays, daily, every N hours, every N minutes, monthly and once. No custom/cron option exists. Native folder selection is delegated to the existing `PickWorkspaceFolder`; `TestAutomationWorkspacePickerContract` verifies selected, cancelled and unsupported-dialog outcomes.
+
+Step 10–11 regression logs are stored beside this file as `step11-*`. `requirements-matrix.md` maps R01–R10 to tests and the remaining Windows manual checks.

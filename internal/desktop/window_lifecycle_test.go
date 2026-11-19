@@ -31,8 +31,7 @@ func newLifecycleHarness(t *testing.T) (*WindowLifecycle, *lifecycleHarness) {
 		quit:     make(chan struct{}, 1),
 		reported: make(chan error, 1),
 	}
-	var life *WindowLifecycle
-	life = NewWindowLifecycle(WindowLifecycleOptions{
+	life := NewWindowLifecycle(WindowLifecycleOptions{
 		BackgroundSupported: true,
 		Hide: func() error {
 			h.record("hide")

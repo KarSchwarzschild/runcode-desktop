@@ -216,3 +216,64 @@ Deferred:
 - No real Passport, Codex, or OA round trip. No race-detector PASS.
 
 Next: Step 10 Windows background residency and confirmed exit.
+
+## Step 10 — Windows tray, background residency, and confirmed exit
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(desktop): keep scheduled tasks running in branded tray` |
+| Lifecycle tests | `go test ./internal/desktop -run 'Window\|Exit\|PrepareExit\|AutomationWindowController'` → PASS |
+| Automation | `go test ./internal/automation -count=10` → PASS, including shutdown admission, blocked drain and paused-active exit counts |
+| Desktop module | `go -C cmd/runcode-desktop test ./...` and `go -C cmd/runcode-desktop build ./...` → PASS |
+| Frontend | title-bar lifecycle tests plus all automation tests/typecheck/lint → PASS |
+
+Notes:
+
+- `WindowLifecycle` owns close/exit policy. A supported host close only hides and restores focus without cleanup. Real exit queries enabled and unfinished counts, uses the native question before taking any irreversible action, and treats an unreadable summary conservatively.
+- Confirmation is deduplicated. Cancel performs no hold or cleanup. Confirm acquires the scheduler hold before `PrepareExit`, then runs the shared 20-second cleanup and quits. Hold/cleanup setup failures keep the process alive and report an error.
+- Windows embeds the branded `build/appicon.png` in its system tray. Left/double-click restores the existing window; right-click refreshes the pending-run menu and opens it. No `AttachWindow` is used.
+- The tray pending entry restores the window and emits `automation:open_manager`; the frontend bridge routes it to the existing management overlay.
+- The title-bar close now calls `closeMainWindow()`. Native close and title-bar close share the same hook; Kylin/V2 uses exit behavior instead of claiming tray support.
+- `BackgroundSupported` now comes from the installed host. On platforms without a tray, the automation window explicitly warns that closing the client stops tasks.
+- `PrepareExit` now stops automation admission before recorder/session drain. Queued runs are interrupted, the active run is cancelled, and the database closes only after the shared exit deadline.
+
+Deferred:
+
+- Real Windows tray icon/menu/Shell-restart and native confirmation screenshots were not run because the user explicitly deferred real test-client acceptance.
+- Race detector still cannot load on this Windows toolchain (`0xc0000139`).
+
+## Step 11 — integration and failure coverage
+
+| Field | Value |
+| --- | --- |
+| Commit | `test(automation): cover scheduling recovery and desktop integration` |
+| Integration | `TestAutomationIntegrationScheduleReceiptLinkAndRestart` → PASS |
+| Frontend flow | `automation-flow.test.tsx` → PASS |
+| Requirement matrix | `docs/automation/validation/requirements-matrix.md` |
+
+The integration test proves: save does not execute, fake-clock advance starts one unfocused run, receipt and terminal facts are persisted, `session_link` points to the task-owned workspace/session, and a service restart before the next occurrence neither replays the terminal round nor creates a duplicate submission.
+
+Failure injection is covered by existing focused tests rather than a second test implementation:
+
+- invalid/missing model binding and directory disappearance: `TestAutomationWorkspaceMissing`, reuse/config drift tests;
+- accepted-but-unrecorded receipt: the receipt-write phase of `TestAutomationRunnerFastTerminal`;
+- duplicate/late terminal: `TestAutomationReplay...` service tests and `TestAutomationStoppedTurnEndNotSuccess`;
+- busy queue and 60-minute timeout: `TestServiceMissedAndBusy`, `TestServiceRunTimeout`;
+- identity/context changes: `TestAutomationCommandsScopeAndRevision`, `TestAutomationContextLateResponse`, `TestAutomationContextLateEvent`.
+
+Final checks:
+
+| Check | Result |
+| --- | --- |
+| `go run ./tools/protogen --check` | PASS |
+| `go build ./...` | PASS |
+| `go test ./internal/... ./cmd/runcode/...` | PASS |
+| `go -C cmd/runcode-server test ./...` / build | PASS |
+| `go -C cmd/runcode-desktop test ./...` / build | PASS |
+| Frontend typecheck/lint/Vitest/build | PASS; 96 files, 942 tests |
+| `golangci-lint run --new-from-rev=a93bd42 ./...` | PASS, 0 issues |
+| Full historical golangci run | 528 pre-existing repository findings; log retained |
+| `go test -race ./internal/... ./cmd/runcode/...` | NOT RUN TO COMPLETION: Windows toolchain exits `0xc0000139` before tests |
+| `go test -race` in `cmd/runcode-server` | Same toolchain load failure (`0xc0000139`) |
+
+The user explicitly deferred real client acceptance after Step 9, so the Windows tray, cancellation/confirmation dialogs, Explorer restart, sleep/wake and real model round-trip remain release-time manual checks. Automated tests do not claim those as visually accepted.

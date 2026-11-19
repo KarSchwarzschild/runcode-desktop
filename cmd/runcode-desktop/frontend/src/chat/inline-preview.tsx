@@ -31,6 +31,8 @@ type Props = {
   relatedPaths?: string[]
   sessionId?: string
   previewId?: string
+  /** 路径型文件没有围栏源码时，图面仍可打开右侧预览。 */
+  openImagePreview?: boolean
   onOpenCodePreview?: (target: CodePreviewTarget) => void
 }
 
@@ -57,7 +59,7 @@ function reportPaths(sessionId: string | undefined, paths: string[] | undefined,
 
 export function InlinePreview({
   kind, source, defaultNode, streaming = false, onHeightChange, messageId, relatedPaths, sessionId,
-  previewId, onOpenCodePreview,
+  previewId, openImagePreview = false, onOpenCodePreview,
 }: Props) {
   const [renderSource, setRenderSource] = useState<string | null>(() => streaming ? null : source)
   const [ready, setReady] = useState<Ready | null>(null)
@@ -294,16 +296,31 @@ export function InlinePreview({
         <SourceShell>{defaultNode}</SourceShell>
       ) : (
         <div className="p-2 overflow-hidden rounded-b-lg">
-          {/* 图面不再单击开右侧专用预览（尤其 Mermaid inline-static）；全屏走顶栏。 */}
-          <img
-            src={ready.url}
-            alt={`${title}图`}
-            width={ready.width}
-            height={ready.height}
-            style={INLINE_IMAGE_STYLE}
-            className="block max-w-full w-auto h-auto mx-auto object-contain"
-            onLoad={() => notify.current?.()}
-          />
+          {(() => {
+            const image = (
+              <img
+                src={ready.url}
+                alt={`${title}图`}
+                width={ready.width}
+                height={ready.height}
+                style={INLINE_IMAGE_STYLE}
+                className="block max-w-full w-auto h-auto mx-auto object-contain pointer-events-none"
+                onLoad={() => notify.current?.()}
+              />
+            )
+            // 普通 SVG 图面保持轻量预览；只有“文件路径出现、无围栏源码”的入口
+            // 仍支持单击图面进入约定面板。Mermaid 继续只保留右侧源码入口。
+            return kind === 'svg' && openImagePreview && onOpenCodePreview ? (
+              <button
+                type="button"
+                className="block w-full text-left cursor-pointer"
+                aria-label={`在右侧预览打开${title}`}
+                onClick={openSidePreview}
+              >
+                {image}
+              </button>
+            ) : image
+          })()}
         </div>
       )}
       <ImageLightbox

@@ -35,6 +35,11 @@ export function AutomationManager({ auto, onDirty, onCancelCreate, onOpenSetting
     <div className="relative flex-1 min-h-0">
       <div className="h-full overflow-y-auto overscroll-contain">
         {auto.notice && <div className="px-5 pt-4"><Banner tone="warning">{auto.notice}</Banner></div>}
+        {auto.defaults?.available && !auto.defaults.backgroundSupported && (
+          <div className="px-5 pt-4">
+            <Banner tone="warning">当前平台不支持后台驻留，关闭客户端后任务将停止。</Banner>
+          </div>
+        )}
         <TaskList auto={auto} />
       </div>
       {auto.createOpen && initial && (

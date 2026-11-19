@@ -3,7 +3,6 @@ package desktop
 import (
 	"context"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +15,6 @@ import (
 type exitAutomationRunner struct {
 	starts atomic.Int32
 	cancel atomic.Int32
-	mu     sync.Mutex
 }
 
 func (r *exitAutomationRunner) Start(context.Context, automation.Task, automation.Run) (automation.Submission, error) {

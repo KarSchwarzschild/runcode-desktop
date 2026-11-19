@@ -89,6 +89,7 @@ describe('automation workspace dialog', () => {
 
     await act(async () => { trigger.click() })
     expect(host.querySelector('[role="dialog"]')).toBeTruthy()
+    expect(host.textContent).toContain('关闭客户端后任务将停止')
     const close = [...host.querySelectorAll('button')].find((b) => b.getAttribute('aria-label') === '关闭')
     expect(close).toBeTruthy()
     await act(async () => { close!.click() })

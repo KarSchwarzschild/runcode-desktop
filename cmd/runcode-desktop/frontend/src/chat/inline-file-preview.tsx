@@ -104,6 +104,7 @@ export function InlineFilePreview({ path, sessionId, messageId, previewId, onOpe
           previewId={previewId || path}
           sessionId={sessionId}
           relatedPaths={[path]}
+          openImagePreview
           onOpenCodePreview={onOpenCodePreview}
         />
       ) : error ? (
