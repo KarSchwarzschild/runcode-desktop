@@ -157,6 +157,15 @@ func TestMainCloseActiveRunWarnsAndCanExit(t *testing.T) {
 	}
 }
 
+func TestCloseConfirmationExplainsNativeYesNoFallback(t *testing.T) {
+	prompt := closeConfirmation(automation.ExitSummary{EnabledCount: 2, UnfinishedCount: 1}, nil)
+	for _, want := range []string{"隐藏主窗/是", "直接退出/否", "取消", "正在执行"} {
+		if !strings.Contains(prompt.Message, want) {
+			t.Fatalf("close prompt %q does not explain %q", prompt.Message, want)
+		}
+	}
+}
+
 func TestMainCloseCancelChangesNothing(t *testing.T) {
 	life, h := newLifecycleHarness(t)
 	life.opts.ConfirmClose = func(prompt CloseConfirmation, decide func(CloseChoice)) {
@@ -208,7 +217,7 @@ func TestExitConfirmationCounts(t *testing.T) {
 				if len(prompts) != 1 {
 					t.Fatalf("prompts = %d, want 1", len(prompts))
 				}
-				if !strings.Contains(prompts[0].Message, "退出后自动化任务") {
+				if !strings.Contains(prompts[0].Message, "停止后台自动化任务") {
 					t.Fatalf("prompt = %q", prompts[0].Message)
 				}
 				if tc.err != nil && !strings.Contains(prompts[0].Message, "无法确认后台任务状态") {
@@ -230,6 +239,15 @@ func TestExitConfirmationCounts(t *testing.T) {
 				t.Fatal("no-prompt exit did not quit")
 			}
 		})
+	}
+}
+
+func TestExitConfirmationExplainsNativeYesNoFallback(t *testing.T) {
+	prompt := exitConfirmation(automation.ExitSummary{EnabledCount: 2, UnfinishedCount: 1}, nil)
+	for _, want := range []string{"退出/是", "取消/否", "关闭窗口", "已开启任务"} {
+		if !strings.Contains(prompt.Message, want) {
+			t.Fatalf("exit prompt %q does not explain %q", prompt.Message, want)
+		}
 	}
 }
 

@@ -160,22 +160,25 @@ func (l *WindowLifecycle) CloseMainWindow() error {
 
 func closeConfirmation(summary automation.ExitSummary, summaryErr error) CloseConfirmation {
 	known := summaryErr == nil
-	var message string
+	message := "请选择关闭方式：\n\n" +
+		"“隐藏主窗/是”：隐藏主窗口，后台自动化任务继续运行。\n" +
+		"“直接退出/否”：结束客户端，并停止后台自动化任务。\n" +
+		"“取消”、Esc 或关闭提示框：取消本次操作，继续使用客户端。"
 	switch {
 	case !known:
-		message = "无法确认后台任务状态。\n\n直接退出会停止客户端和后台自动化任务。"
+		message += "\n\n无法确认后台任务状态；直接退出可能中断正在执行的自动化任务。"
 	case summary.UnfinishedCount > 0:
-		message = fmt.Sprintf(
-			"自动化任务正在执行。直接退出会中断当前执行，并停止后续自动化任务。\n\n未完成运行：%d 个",
+		message += fmt.Sprintf(
+			"\n\n自动化任务正在执行：%d 个。直接退出会中断当前执行。",
 			summary.UnfinishedCount,
 		)
 	case summary.EnabledCount > 0:
-		message = fmt.Sprintf(
-			"当前有 %d 个已开启的自动化任务。直接退出后这些任务将停止。",
+		message += fmt.Sprintf(
+			"\n\n当前有 %d 个已开启任务；直接退出后这些任务将停止。",
 			summary.EnabledCount,
 		)
 	default:
-		message = "请选择关闭方式。\n\n直接退出会停止客户端和后台自动化任务。"
+		message += "\n\n当前没有正在执行或等待执行的自动化任务。"
 	}
 	return CloseConfirmation{
 		EnabledCount: summary.EnabledCount, UnfinishedCount: summary.UnfinishedCount,
@@ -270,14 +273,16 @@ func (l *WindowLifecycle) RequestAppExit() error {
 
 func exitConfirmation(summary automation.ExitSummary, summaryErr error) ExitConfirmation {
 	known := summaryErr == nil
-	var message string
+	message := "请选择退出方式：\n\n" +
+		"“退出/是”：结束客户端并停止后台自动化任务。\n" +
+		"“取消/否”、Esc 或关闭窗口：取消退出，后台任务继续运行。"
 	if known {
-		message = fmt.Sprintf(
-			"退出后自动化任务将无法执行。\n\n已开启任务：%d 个\n未完成运行：%d 个\n\n确定要退出吗？",
+		message += fmt.Sprintf(
+			"\n\n已开启任务：%d 个；未完成运行：%d 个。",
 			summary.EnabledCount, summary.UnfinishedCount,
 		)
 	} else {
-		message = "无法确认后台任务状态。\n\n退出后自动化任务将无法执行，确定仍要退出吗？"
+		message += "\n\n无法确认后台任务状态；退出可能中断正在执行的自动化任务。"
 	}
 	return ExitConfirmation{
 		EnabledCount: summary.EnabledCount, UnfinishedCount: summary.UnfinishedCount,

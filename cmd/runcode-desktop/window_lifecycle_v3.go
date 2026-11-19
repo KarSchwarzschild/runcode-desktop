@@ -42,21 +42,28 @@ func createDesktopWindowLifecycle(
 		Focus:      mainWin.Focus,
 		ConfirmExit: func(prompt desktop.ExitConfirmation, decide func(bool)) {
 			dialog := app.Dialog.Question().
-				SetTitle("退出" + title).
+				SetTitle("退出客户端").
 				SetMessage(prompt.Message)
-			cancel := dialog.AddButton("取消").OnClick(func() { decide(false) })
-			dialog.AddButton("退出").OnClick(func() { decide(true) })
-			dialog.SetDefaultButton(cancel)
+			yes, no, cancelLabel := questionButtonLabels(runtime.GOOS, "退出", "取消", "取消")
+			cancel := dialog.AddButton(cancelLabel).OnClick(func() { decide(false) })
+			dialog.AddButton(yes).OnClick(func() { decide(true) })
+			if runtime.GOOS == "windows" {
+				noButton := dialog.AddButton(no).OnClick(func() { decide(false) })
+				dialog.SetDefaultButton(noButton)
+			} else {
+				dialog.SetDefaultButton(cancel)
+			}
 			dialog.SetCancelButton(cancel)
 			dialog.Show()
 		},
 		ConfirmClose: func(prompt desktop.CloseConfirmation, decide func(desktop.CloseChoice)) {
 			dialog := app.Dialog.Question().
-				SetTitle("关闭" + title).
+				SetTitle("关闭客户端").
 				SetMessage(prompt.Message)
-			hide := dialog.AddButton("隐藏主窗").OnClick(func() { decide(desktop.CloseHide) })
-			dialog.AddButton("直接退出").OnClick(func() { decide(desktop.CloseExit) })
-			cancel := dialog.AddButton("取消").OnClick(func() { decide(desktop.CloseCancel) })
+			yes, no, cancelLabel := questionButtonLabels(runtime.GOOS, "隐藏主窗", "直接退出", "取消")
+			hide := dialog.AddButton(yes).OnClick(func() { decide(desktop.CloseHide) })
+			dialog.AddButton(no).OnClick(func() { decide(desktop.CloseExit) })
+			cancel := dialog.AddButton(cancelLabel).OnClick(func() { decide(desktop.CloseCancel) })
 			dialog.SetDefaultButton(hide)
 			// 按 Esc 或点确认框的关闭按钮都取消本次操作，窗口和调度保持原状。
 			dialog.SetCancelButton(cancel)
@@ -72,4 +79,14 @@ func createDesktopWindowLifecycle(
 	})
 	installAutomationTray(app, mainWin, life, title, restore)
 	return life
+}
+
+// Wails v3 beta.9 的 Windows Question 对话框始终显示系统“是/否”按钮，
+// 并按 MessageBox 返回值 Yes/No/Cancel 匹配回调，不使用自定义显示标签。
+// Windows 必须注册这些英文内部标签，否则按钮看似可点但 decide 永远不会执行。
+func questionButtonLabels(goos, primary, secondary, cancel string) (string, string, string) {
+	if goos == "windows" {
+		return "Yes", "No", "Cancel"
+	}
+	return primary, secondary, cancel
 }
