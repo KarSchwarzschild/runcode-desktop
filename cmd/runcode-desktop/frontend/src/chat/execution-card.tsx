@@ -8,6 +8,7 @@ import { Icon, toolIcon } from '@/ui/icons'
 import { CheckMark, Spinner } from '@/ui/glyphs'
 import { DiffStat } from '@/ui/badges'
 import { type ToolEvent } from '@/core/bridge'
+import { IMAGE_GENERATION_TOOL } from '@/core/image-generation'
 import { diffStats, failText, toolVerbTarget } from './tool-text'
 import { ToolDetail } from './tool-detail'
 
@@ -18,20 +19,24 @@ export function ExecutionCard({ tools, harmAllows, oaBlocked }: {
   oaBlocked?: Record<string, string>
 }) {
   const [sel, setSel] = useState<number | null>(null)
-  const runningIdx = tools.findIndex((t) => t.type !== 'completed' && t.type !== 'failed')
-  const activeIdx = sel != null && sel < tools.length ? sel : runningIdx
+  // 生图结果由行下预览承担；执行卡只显示真正需要展开参数/输出的工具。
+  const visibleTools = tools.filter((t) => t.toolName !== IMAGE_GENERATION_TOOL)
+  const runningIdx = visibleTools.findIndex((t) => t.type !== 'completed' && t.type !== 'failed')
+  const activeIdx = sel != null && sel < visibleTools.length ? sel : runningIdx
+
+  if (visibleTools.length === 0) return null
 
   return (
     <div className="anim-rise">
-      {tools.length > 1 && (
+      {visibleTools.length > 1 && (
         <div className="flex items-center gap-1.5 px-1 pb-1.5 text-[12px] text-faint">
           <Icon name="terminal" size={13} className="flex-none" />
           <span className="font-medium">执行过程</span>
-          <span className="font-mono">· {tools.length} 步</span>
+          <span className="font-mono">· {visibleTools.length} 步</span>
           {runningIdx >= 0 && <span className="w-[6px] h-[6px] rounded-full bg-primary blip ml-0.5" />}
         </div>
       )}
-      {tools.map((t, i) => {
+      {visibleTools.map((t, i) => {
         const st = t.type === 'failed' ? 'failed' : t.type === 'completed' ? 'done' : 'running'
         const active = activeIdx === i
         const { verb, target } = toolVerbTarget(t)

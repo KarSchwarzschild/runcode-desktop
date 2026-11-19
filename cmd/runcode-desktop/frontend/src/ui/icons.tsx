@@ -13,7 +13,8 @@ export const TOOL_ICON: Record<string, string> = {
   Read: 'file', Write: 'pencil', Edit: 'pencil', Delete: 'trash',
   Bash: 'terminal', BashOutput: 'terminal', KillShell: 'terminal',
   Grep: 'search', Glob: 'search', WebFetch: 'globe', WebSearch: 'globe',
-  TodoWrite: 'grid', Analyze: 'sparkles', analyze_image: 'file-image', AskUser: 'chat', open_preview: 'file',
+  TodoWrite: 'grid', Analyze: 'sparkles', analyze_image: 'file-image', image_generate: 'image-plus',
+  AskUser: 'chat', open_preview: 'file',
   Task: 'bot', Skill: 'book', Remember: 'sparkles',
   Wait: 'clock', GetCurrentTime: 'clock', install_runtime: 'terminal',
   'general-purpose': 'bot', 'code-reviewer': 'shield', 'code-explorer': 'search',
@@ -110,6 +111,15 @@ export function Icon({ name, size = 18, className }: Props) {
           <rect x="13.5" y="3.5" width="7" height="7" rx="1.6" />
           <rect x="3.5" y="13.5" width="7" height="7" rx="1.6" />
           <rect x="13.5" y="13.5" width="7" height="7" rx="1.6" />
+        </svg>
+      )
+    case 'image-plus':
+      return (
+        <svg {...common} {...stroke}>
+          <path d="M20 13v4.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5v-11A2.5 2.5 0 0 1 6.5 4H13" />
+          <path d="m4.5 17 4.2-4.2a1.4 1.4 0 0 1 2 0l4.8 4.8" />
+          <path d="m12.4 13.2 1.8-1.8a1.4 1.4 0 0 1 2 0L20 15.1" />
+          <path d="M18 3v6M15 6h6" />
         </svg>
       )
     case 'book':

@@ -250,7 +250,7 @@ export function groupBlocks(blocks: Block[]): Group[] {
         out.push({ kind: 'skill', id: b.id, tool: b.tool })
         continue
       }
-      // image_generate 与 Glob／Grep 等同进执行卡；行下预览由 chat-pane 挂载。
+      // image_generate 保留在 exec 组供行下预览投影，ExecutionCard 会过滤它，不渲染折叠行。
       // A Task delegation is its own observable card (its sub-agent's live text and
       // nested tool calls), so it never folds into the compact exec list — otherwise
       // its nested activity is dropped. Adjacent Task calls (a parallel fan-out
