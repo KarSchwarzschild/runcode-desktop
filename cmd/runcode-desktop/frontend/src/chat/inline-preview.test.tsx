@@ -3,6 +3,7 @@ import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InlinePreview } from './inline-preview'
+import { AssistantMarkdown } from './assistant-markdown'
 import { InlinePreviewBudgetProvider } from './inline-preview-budget'
 import {
   PREVIEW_LIMITS, htmlInlineScale, clampHtmlZoomPercent, stepHtmlZoomPercent,
@@ -218,6 +219,29 @@ describe('InlinePreview lifecycle', () => {
 
     // 模拟输入框更新导致父组件重建回调；相同源码不应再次进入 Mermaid。
     await act(async () => draw(() => {}))
+    await act(async () => { await Promise.resolve() })
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+  })
+
+  it('Markdown 父级重渲染不会重挂载 Mermaid 预览', async () => {
+    mermaid.render.mockResolvedValue({
+      ok: true,
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>',
+      width: 20,
+      height: 10,
+    })
+    const source = '流程图：\n\n```mermaid\ngraph TD;A-->B\n```'
+    const draw = () => root.render(createElement(
+      AssistantMarkdown,
+      { messageId: 'm1', children: source, onOpenCodePreview: () => {} },
+    ))
+
+    await act(async () => draw())
+    await act(async () => { await Promise.resolve() })
+    expect(mermaid.render).toHaveBeenCalledTimes(1)
+
+    // 输入框每次变更都会重渲染包含消息的父树；同一份 Markdown 不应重挂载预览。
+    await act(async () => draw())
     await act(async () => { await Promise.resolve() })
     expect(mermaid.render).toHaveBeenCalledTimes(1)
   })

@@ -1,5 +1,6 @@
 ﻿import type { ReactNode } from 'react'
-import ReactMarkdown from 'react-markdown'
+import { useMemo, useRef } from 'react'
+import ReactMarkdown, { type ExtraProps } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 
@@ -43,6 +44,32 @@ function classList(value: unknown): string[] {
 // theme colors; inline code gets a compact chip.
 export function Markdown({ children, onOpenFile, resolveFile, textOnly = false, renderCodeBlock }: MarkdownProps) {
   const source = children
+  const renderState = useRef({ source, textOnly, renderCodeBlock })
+  renderState.current = { source, textOnly, renderCodeBlock }
+  // ReactMarkdown treats a replaced `pre` component function as a new element
+  // type. Keep its identity stable so composer keystrokes cannot remount an
+  // inline Mermaid/SVG preview.
+  const PreBlock = useMemo(() => function PreBlock({ node, children: preChildren, ...props }: JSX.IntrinsicElements['pre'] & ExtraProps) {
+    const current = renderState.current
+    const defaultNode = <pre className="my-2 bg-inset border border-line2 rounded-lg p-3 overflow-auto text-[13px] font-mono leading-[1.55]" {...props}>{preChildren}</pre>
+    if (current.textOnly || !current.renderCodeBlock || !node) return defaultNode
+    const code = node.children?.[0]
+    if (!code || code.type !== 'element' || code.tagName !== 'code') return defaultNode
+    const start = node.position?.start?.offset
+    const end = node.position?.end?.offset
+    if (typeof start !== 'number' || typeof end !== 'number') return defaultNode
+    const langClass = classList(code.properties?.className).find((c) => c.startsWith('language-'))
+    const lang = langClass ? langClass.slice('language-'.length) : ''
+    const meta = typeof (code.data as { meta?: unknown } | undefined)?.meta === 'string'
+      ? (code.data as { meta: string }).meta
+      : ''
+    // highlight 后的文本末尾常带换行；classify 会 trim，这里保留解析器原文形状。
+    const value = hastText(code).replace(/\n$/, '')
+    // 用原文切片核对偏移仍落在本条消息里，防止错位时误判围栏。
+    if (start < 0 || end > current.source.length || end <= start) return defaultNode
+    const rendered = current.renderCodeBlock({ lang, meta, value, start, end, defaultNode })
+    return rendered ?? defaultNode
+  }, [])
   return (
     <div className="mdx">
       <ReactMarkdown
@@ -72,26 +99,7 @@ export function Markdown({ children, onOpenFile, resolveFile, textOnly = false, 
           table: (props) => <table className="my-2 border-collapse text-[13px] block overflow-auto" {...props} />,
           th: (props) => <th className="border border-line2 px-2 py-1 bg-surface2 text-left" {...props} />,
           td: (props) => <td className="border border-line2 px-2 py-1" {...props} />,
-          pre: ({ node, children: preChildren, ...props }) => {
-            const defaultNode = <pre className="my-2 bg-inset border border-line2 rounded-lg p-3 overflow-auto text-[13px] font-mono leading-[1.55]" {...props}>{preChildren}</pre>
-            if (textOnly || !renderCodeBlock || !node) return defaultNode
-            const code = node.children?.[0]
-            if (!code || code.type !== 'element' || code.tagName !== 'code') return defaultNode
-            const start = node.position?.start?.offset
-            const end = node.position?.end?.offset
-            if (typeof start !== 'number' || typeof end !== 'number') return defaultNode
-            const langClass = classList(code.properties?.className).find((c) => c.startsWith('language-'))
-            const lang = langClass ? langClass.slice('language-'.length) : ''
-            const meta = typeof (code.data as { meta?: unknown } | undefined)?.meta === 'string'
-              ? (code.data as { meta: string }).meta
-              : ''
-            // highlight 后的文本末尾常带换行；classify 会 trim，这里保留解析器原文形状。
-            const value = hastText(code).replace(/\n$/, '')
-            // 用原文切片核对偏移仍落在本条消息里，防止错位时误判围栏。
-            if (start < 0 || end > source.length || end <= start) return defaultNode
-            const rendered = renderCodeBlock({ lang, meta, value, start, end, defaultNode })
-            return rendered ?? defaultNode
-          },
+          pre: PreBlock,
           code: ({ className, children: codeChildren, ...rest }) => {
             const text = String(codeChildren ?? '')
             const isBlock = /language-/.test(className || '') || text.includes('\n')

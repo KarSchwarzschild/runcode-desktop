@@ -42,7 +42,7 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-it('reads a path-only SVG through the source session reference and releases it once', async () => {
+it('reads a path-only SVG through the source session reference without opening the side preview', async () => {
   const open = vi.fn()
   await act(async () => root.render(
     <InlineFilePreview path="charts/a.svg" sessionId="S" messageId="m1" previewId="file:charts/a.svg" onOpenCodePreview={open} />,
@@ -54,7 +54,7 @@ it('reads a path-only SVG through the source session reference and releases it o
   expect(api.releaseArtifact).toHaveBeenCalledTimes(1)
 
   await act(async () => (host.querySelector('img') as HTMLImageElement).click())
-  expect(open).toHaveBeenCalledWith(expect.objectContaining({ kind: 'file', relPath: 'charts/a.svg' }))
+  expect(open).not.toHaveBeenCalled()
 })
 
 it('reports not_found without auto-generating a replacement', async () => {
