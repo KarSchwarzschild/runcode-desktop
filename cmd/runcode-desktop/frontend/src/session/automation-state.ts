@@ -86,8 +86,16 @@ function mergeTask(tasks: Record<string, AutomationTask>, task: AutomationTask):
         const prevAt = Date.parse(prevRun.scheduledAtUTC)
         const nextAt = Date.parse(nextRun.scheduledAtUTC)
         if (nextAt < prevAt || (nextAt === prevAt && nextRun.id <= prevRun.id)) return tasks
-      } else if ((nextRun.runRevision ?? 0) <= (prevRun.runRevision ?? 0)) {
-        return tasks
+      } else {
+        const prevRevision = prevRun.runRevision ?? 0
+        const nextRevision = nextRun.runRevision ?? 0
+        if (nextRevision < prevRevision) return tasks
+        if (
+          nextRevision === prevRevision
+          && task.linkedSessionTitle === prev.linkedSessionTitle
+          && task.lastLinkedRunId === prev.lastLinkedRunId
+          && task.activeRunId === prev.activeRunId
+        ) return tasks
       }
     }
   }

@@ -270,16 +270,18 @@ export function TaskDetail({
               <div className="mt-2 flex items-center gap-3 border-t border-line pt-3">
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium text-ink">关联会话</div>
-                  <div className="text-[11px] text-muted">{linkedRunId ? task.linkedSessionTitle || task.name : '暂无关联会话'}</div>
+                  <div data-linked-task-title className="truncate text-[11px] text-muted">{task.name}</div>
                 </div>
                 <button
                   type="button"
                   disabled={!linkedRunId || pending}
-                  title={linkedRunId ? `打开关联会话：${task.linkedSessionTitle || task.name}` : '暂无关联会话'}
+                  title={linkedRunId ? `打开关联会话：${task.linkedSessionTitle || '未命名对话'}` : '暂无关联会话'}
                   className="flex min-w-0 max-w-[190px] items-center gap-1 rounded-field border border-line2 bg-surface2 px-2.5 py-1.5 text-[12px] text-ink2 disabled:text-faint"
                   onClick={() => linkedRunId && onOpenRun(task.id, linkedRunId)}
                 >
-                  <span className="truncate">{linkedRunId ? task.linkedSessionTitle || task.name : '暂无关联会话'}</span>
+                  <span data-linked-session-title className="truncate">
+                    {linkedRunId ? task.linkedSessionTitle || '未命名对话' : '暂无关联会话'}
+                  </span>
                   <Icon name="chevron-down" size={12} className="-rotate-90 flex-none" />
                 </button>
               </div>

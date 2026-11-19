@@ -61,6 +61,14 @@ func TestAutomationReplayLinkAndWorkspace(t *testing.T) {
 	if err := sessions.SaveTitle(wsB, idB, "同名对话"); err != nil {
 		t.Fatal(err)
 	}
+	tasks, err := app.ListAutomationTasks(ListAutomationTasksRequest{Context: defaults.Context})
+	if err != nil {
+		t.Fatal(err)
+	}
+	linkedTask, ok := findAutomationTask(tasks.Items, domain.ID)
+	if !ok || linkedTask.LinkedSessionTitle != "同名对话" {
+		t.Fatalf("linked session title = %+v, want conversation title 同名对话", linkedTask)
+	}
 
 	app.mu.Lock()
 	app.workspace = wsA
@@ -157,6 +165,15 @@ func TestAutomationReplayLinkAndWorkspace(t *testing.T) {
 	if !ok || sum.Kind != "agent" || sum.Automation == nil || sum.Automation.TaskID != domain.ID || sum.Automation.TaskName != "每周整理" {
 		t.Fatalf("renamed clock after restart = %+v", sum)
 	}
+}
+
+func findAutomationTask(items []AutomationTask, id string) (AutomationTask, bool) {
+	for _, item := range items {
+		if item.ID == id {
+			return item, true
+		}
+	}
+	return AutomationTask{}, false
 }
 
 func findSummary(list []SessionSummary, id string) (SessionSummary, bool) {

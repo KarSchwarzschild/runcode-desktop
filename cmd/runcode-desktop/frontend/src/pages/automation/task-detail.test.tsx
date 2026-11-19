@@ -206,6 +206,10 @@ describe('automation task detail', () => {
     expect(onRunNow).toHaveBeenCalledTimes(1)
 
     const linkedButton = [...host.querySelectorAll('button')].find((button) => button.title.includes('打开关联会话')) as HTMLButtonElement
+    expect(host.querySelector('[data-linked-task-title]')?.textContent).toBe('整理记录')
+    expect(host.querySelector('[data-linked-session-title]')?.textContent).toBe('生成一句问候')
+    expect(linkedButton.textContent).toContain('生成一句问候')
+    expect(linkedButton.textContent).not.toContain('整理记录')
     await act(async () => linkedButton.click())
     expect(onOpenRun).toHaveBeenCalledWith('task-1', 'run-linked')
 

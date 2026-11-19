@@ -25,6 +25,10 @@ function task(id: string, revision: number, extra: Partial<AutomationTask> = {})
     nextRunAtUTC: extra.nextRunAtUTC,
     blockedReason: extra.blockedReason,
     lastRun: extra.lastRun,
+    activeRunId: extra.activeRunId,
+    lastLinkedRunId: extra.lastLinkedRunId,
+    linkedSessionTitle: extra.linkedSessionTitle,
+    deletedAtUtc: extra.deletedAtUtc,
     binding: extra.binding ?? { modelKind: 'passport', modelName: 'model-a', bindingVersion: 1 },
   }
 }
@@ -100,6 +104,25 @@ describe('automation state', () => {
     })
     expect(state.tasks.a?.lastRun?.id).toBe('run-new')
     expect(state.tasks.a?.lastRun?.status).toBe('running')
+  })
+
+  it('accepts a same-run conversation title without changing task revision', () => {
+    const lastRun = {
+      id: 'run-a', taskId: 'a', taskRevision: 2, runRevision: 3, status: 'succeeded',
+      scheduledAtUTC: '2026-11-19T01:00:00Z', sessionId: 'session-a', schedule: task('seed', 1).schedule,
+    }
+    let state = reduceAutomation(emptyAutomationState(), { type: 'bind', context: ctx(1) })
+    state = snap(state, ctx(1), 0, [task('a', 2, {
+      lastRun, lastLinkedRunId: 'run-a', linkedSessionTitle: 'say hello',
+    })])
+    state = reduceAutomation(state, {
+      type: 'event',
+      context: ctx(1),
+      task: task('a', 2, {
+        lastRun, lastLinkedRunId: 'run-a', linkedSessionTitle: '问候用户',
+      }),
+    })
+    expect(state.tasks.a?.linkedSessionTitle).toBe('问候用户')
   })
 
   it('clears the cache on a new context and drops late responses and events', () => {

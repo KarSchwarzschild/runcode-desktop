@@ -105,6 +105,16 @@ export function useAutomation(enabled: boolean): AutomationController {
 
   useEffect(() => {
     if (!enabled) return
+    return onEnvelope(Events.SessionRenamed, (env) => {
+      const sessionID = env.payload?.id
+      if (!sessionID) return
+      const linked = Object.values(stateRef.current.tasks).some((task) => task.lastRun?.sessionId === sessionID)
+      if (linked) setReload((n) => n + 1)
+    })
+  }, [enabled])
+
+  useEffect(() => {
+    if (!enabled) return
     const ticket = ++ticketRef.current
     appendTicket.current += 1
     let cancelled = false

@@ -278,6 +278,15 @@ func (a *App) openAutomationSession(ctx context.Context, b automation.Binding, d
 func (a *App) automationSessionConfig(b automation.Binding, dir string) (cfg engine.Config, passport bool, tenant string, ref modelReference, profile string, err error) {
 	cfg.CWD = dir
 	cfg.PermissionMode = b.PermissionMode
+	// 自动化任务必须和普通对话一样把消息写入 JSONL；否则会话只剩 meta，
+	// 成功运行无法回放，后续“复用会话”也会误判历史已删除而不断新建。
+	cfg.PersistSession = true
+	cfg.SessionBackend = sessions.BackendJSONL
+	cfg.Telemetry = "off"
+	cfg.Transcript = "off"
+	cfg.MaxIterations = 1000
+	cfg.WebProxy = loadRawConfig().WebProxy
+	cfg.DisabledTools, cfg.DisabledAgents, cfg.DisabledSkills = effectiveDisabled(dir)
 	switch b.ModelKind {
 	case automationKindPlatform:
 		iss, sub, err := a.passportPrincipal()

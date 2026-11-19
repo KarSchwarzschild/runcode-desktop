@@ -1210,7 +1210,15 @@ func (a *App) wireTask(ctx context.Context, task automation.Task, owners []strin
 		}
 		if run.SessionID != "" && (wired.LastLinkedRunID == "" || run.ID == wired.ActiveRunID) {
 			wired.LastLinkedRunID = run.ID
-			wired.LinkedSessionTitle = task.Name
+			title, titleErr := sessions.LoadTitle(run.Workspace, run.SessionID)
+			if titleErr != nil {
+				debugLog("automation session title: %v", titleErr)
+			}
+			wired.LinkedSessionTitle = firstNonEmpty(
+				strings.TrimSpace(title),
+				strings.TrimSpace(run.Prompt),
+				task.Name,
+			)
 		}
 	}
 	return wired, nil

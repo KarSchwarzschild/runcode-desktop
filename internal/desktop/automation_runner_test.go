@@ -163,11 +163,30 @@ func TestAutomationPlatformConfigWiresRegisteredProviderAndBridge(t *testing.T) 
 	if cfg.Model != "platform-model" || !passport || tenant != "tenant-a" {
 		t.Fatalf("config=%+v passport=%v tenant=%q", cfg, passport, tenant)
 	}
+	if !cfg.PersistSession || cfg.SessionBackend != sessions.BackendJSONL {
+		t.Fatalf("session persistence = %v backend=%q", cfg.PersistSession, cfg.SessionBackend)
+	}
 	if cfg.TokenSource == nil || cfg.OnUnauthorized == nil {
 		t.Fatal("platform automation config must wire token refresh")
 	}
 	if token, err := cfg.TokenSource(); err != nil || token == "" {
 		t.Fatalf("TokenSource = %q, %v", token, err)
+	}
+}
+
+func TestAutomationCustomConfigPersistsJSONLHistory(t *testing.T) {
+	app := newIdentityApp(t)
+	saveStaticProfile(t, app)
+	binding := staticBinding(t, app)
+	cfg, passport, _, _, _, err := app.automationSessionConfig(binding, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if passport {
+		t.Fatal("static custom binding was marked as Passport")
+	}
+	if !cfg.PersistSession || cfg.SessionBackend != sessions.BackendJSONL {
+		t.Fatalf("session persistence = %v backend=%q", cfg.PersistSession, cfg.SessionBackend)
 	}
 }
 

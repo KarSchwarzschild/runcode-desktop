@@ -30,6 +30,7 @@ vi.mock('@/core/bridge', () => ({
     AutomationTaskChanged: 'automation:task_changed',
     AutomationContextChanged: 'automation:context_changed',
     AutomationServiceChanged: 'automation:service_changed',
+    SessionRenamed: 'session:renamed',
   },
 }))
 
@@ -197,5 +198,31 @@ describe('use automation controller', () => {
     })
     await rejection
     expect(controller.pendingTaskId).toBe('')
+  })
+
+  it('reloads a linked task after its conversation receives a generated title', async () => {
+    const linked = {
+      ...task,
+      lastRun: {
+        id: 'run-linked', taskId: task.id, taskRevision: task.revision, runRevision: 2,
+        status: 'succeeded' as const, scheduledAtUTC: '2026-11-19T01:00:00Z',
+        sessionId: 'session-linked', schedule,
+      },
+      lastLinkedRunId: 'run-linked',
+      linkedSessionTitle: 'say hello',
+    }
+    api.listAutomationTasks
+      .mockResolvedValueOnce({ context, items: [linked] })
+      .mockResolvedValueOnce({ context, items: [{ ...linked, linkedSessionTitle: '问候用户' }] })
+    await renderController()
+
+    await act(async () => {
+      api.handlers.get('session:renamed')?.({ payload: { id: 'session-linked', title: '问候用户' } })
+      await Promise.resolve()
+    })
+    await act(async () => { await Promise.resolve() })
+
+    expect(api.listAutomationTasks).toHaveBeenCalledTimes(2)
+    expect(controller.tasks[0]?.linkedSessionTitle).toBe('问候用户')
   })
 })
