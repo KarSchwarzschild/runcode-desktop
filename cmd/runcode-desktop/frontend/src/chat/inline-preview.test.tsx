@@ -139,25 +139,32 @@ describe('InlinePreview lifecycle', () => {
     expect(host.textContent).toMatch(/暂不支持|unsupported-type|预览不可用/)
   })
 
-  it('提供标题和仅代码/图表两态切换，并在预览态显示全屏入口', async () => {
+  it('用单个按钮直接切换代码和图片，不显示视图下拉', async () => {
     await act(async () => {
       root.render(createElement(InlinePreview, {
         kind: 'svg', source: svgOk, defaultNode: createElement('code', null, 'SOURCE'),
       }))
     })
-    expect(host.textContent).toContain('SVG 预览')
+    expect(host.textContent).not.toContain('SVG 预览')
+    const controls = host.querySelector('[data-inline-preview-controls]') as HTMLElement
+    expect(controls).toBeTruthy()
+    expect(controls.parentElement?.className).not.toMatch(/\bborder(?:-|\b)/)
+    expect(controls.className).toContain('opacity-0')
+    expect(controls.className).toContain('group-hover:opacity-100')
     expect(host.querySelector('button[title="全屏"]')).toBeTruthy()
 
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    expect(host.textContent).toContain('仅显示图表')
-    expect(host.textContent).toContain('仅显示代码')
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    const viewCode = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看代码') as HTMLButtonElement
+    expect(viewCode).toBeTruthy()
+    expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent === '查看图片')).toBe(false)
+    await act(async () => viewCode.click())
     expect(host.textContent).toContain('SOURCE')
     expect(host.querySelector('img')).toBeNull()
     expect(host.querySelector('button[title="全屏"]')).toBeNull()
+    const viewImage = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看图片') as HTMLButtonElement
+    expect(viewImage).toBeTruthy()
+    expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent === '查看代码')).toBe(false)
 
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示图表') as HTMLButtonElement).click())
+    await act(async () => viewImage.click())
     expect(host.querySelector('img')).toBeTruthy()
     expect(host.querySelector('button[title="全屏"]')).toBeTruthy()
   })
@@ -173,14 +180,15 @@ describe('InlinePreview lifecycle', () => {
       ))
     })
     await act(async () => { await Promise.resolve() })
-    expect(host.textContent).toContain('HTML 预览')
+    expect(host.textContent).not.toContain('HTML 预览')
+    const controls = host.querySelector('[data-inline-preview-controls]') as HTMLElement
+    expect(controls).toBeTruthy()
+    expect(controls.parentElement?.className).not.toMatch(/\bborder(?:-|\b)/)
     expect(host.querySelector('button[title="全屏"]')).toBeNull()
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    expect(host.textContent).toContain('仅显示页面')
-    expect(host.textContent).toContain('仅显示代码')
+    expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent === '查看代码')).toBe(true)
   })
 
-  it('Mermaid 成功渲染后使用 Mermaid 预览标题', async () => {
+  it('Mermaid 成功渲染后不显示常驻标题，但保留全屏按钮', async () => {
     mermaid.render.mockResolvedValue({
       ok: true,
       svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="10"><rect width="20" height="10"/></svg>',
@@ -193,8 +201,26 @@ describe('InlinePreview lifecycle', () => {
       }))
     })
     await act(async () => { await Promise.resolve() })
-    expect(host.textContent).toContain('Mermaid 预览')
+    expect(host.textContent).not.toContain('Mermaid 预览')
     expect(host.querySelector('button[title="全屏"]')).toBeTruthy()
+  })
+
+  it('高窄 Mermaid 的悬浮按钮跟随实际图宽靠右', async () => {
+    mermaid.render.mockResolvedValue({
+      ok: true,
+      svg: '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="100"><rect width="20" height="100"/></svg>',
+      width: 20,
+      height: 100,
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreview, {
+        kind: 'mermaid', source: 'graph TD;A-->B', defaultNode: createElement('code', null, 'SOURCE'),
+      }))
+    })
+    await act(async () => { await Promise.resolve() })
+    const controls = host.querySelector('[data-inline-preview-controls]') as HTMLElement
+    expect(controls.parentElement?.style.width).toContain('min(20px, 100%')
+    expect(controls.parentElement?.style.width).toContain('0.2 * clamp(240px, 42vh, 420px)')
   })
 
   it('相同 Mermaid 源码在父组件重渲染时只调用一次 render', async () => {
@@ -260,7 +286,7 @@ describe('InlinePreview lifecycle', () => {
     expect(document.body.querySelector('[role="dialog"]')).toBeNull()
   })
 
-  it('SVG／Mermaid 图面单击不再打开右侧预览；全屏仍可用；HTML 仍从标题进入', async () => {
+  it('SVG／Mermaid 图面单击不再打开右侧预览；全屏仍可用；HTML 从悬浮按钮进入', async () => {
     const open = vi.fn()
     await act(async () => {
       root.render(createElement(InlinePreview, {
@@ -316,9 +342,9 @@ describe('InlinePreview lifecycle', () => {
       ))
     })
     await act(async () => { await Promise.resolve() })
-    const titleButton = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === 'HTML 预览') as HTMLButtonElement
-    expect(titleButton).toBeTruthy()
-    await act(async () => titleButton.click())
+    const openButton = host.querySelector('button[title="在右侧预览打开"]') as HTMLButtonElement
+    expect(openButton).toBeTruthy()
+    await act(async () => openButton.click())
     expect(open).toHaveBeenLastCalledWith(expect.objectContaining({
       kind: 'inline-static',
       ownerKey: 'inline:S:m2:11:20',
@@ -491,8 +517,7 @@ describe('InlinePreview lifecycle', () => {
     expect(host.querySelector('button[title="复制源码"]')).toBeNull()
     expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent?.includes('复制'))).toBe(false)
 
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看代码') as HTMLButtonElement).click())
     const copyBtn = host.querySelector('button[title="复制源码"]') as HTMLButtonElement
     expect(copyBtn).toBeTruthy()
     expect(copyBtn.className).not.toMatch(/bg-ink/)
@@ -514,11 +539,9 @@ describe('InlinePreview lifecycle', () => {
     })
     await act(async () => { await Promise.resolve() })
     // 同 root 重渲会保留 view state；先切回预览态再断言复制隐藏。
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示图表') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看图片') as HTMLButtonElement).click())
     expect(host.querySelector('button[title="复制源码"]')).toBeNull()
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看代码') as HTMLButtonElement).click())
     bridge.copyText.mockClear()
     await act(async () => (host.querySelector('button[title="复制源码"]') as HTMLButtonElement).click())
     expect(bridge.copyText).toHaveBeenCalledWith(mmd)
@@ -532,11 +555,11 @@ describe('InlinePreview lifecycle', () => {
       ))
     })
     await act(async () => { await Promise.resolve() })
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示页面') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看代码') as HTMLButtonElement).click())
+    expect(host.querySelector('button[title="复制源码"]')).toBeTruthy()
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看页面') as HTMLButtonElement).click())
     expect(host.querySelector('button[title="复制源码"]')).toBeNull()
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看代码') as HTMLButtonElement).click())
     bridge.copyText.mockClear()
     await act(async () => (host.querySelector('button[title="复制源码"]') as HTMLButtonElement).click())
     expect(bridge.copyText).toHaveBeenCalledWith(html)
@@ -552,14 +575,13 @@ describe('InlinePreview lifecycle', () => {
         defaultNode: createElement('pre', null, longLine),
       }))
     })
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看代码') as HTMLButtonElement).click())
     const shell = host.querySelector('[data-inline-source-shell]') as HTMLElement
     expect(shell).toBeTruthy()
     expect(shell.className).toMatch(/overflow-y-auto/)
     expect(shell.className).toMatch(/break-words|whitespace-pre-wrap|overflow-wrap/)
     expect(shell.style.maxHeight || shell.className).toBeTruthy()
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.includes('复制')) as HTMLButtonElement).click())
+    await act(async () => (host.querySelector('button[title="复制源码"]') as HTMLButtonElement).click())
     expect(bridge.copyText).toHaveBeenCalledWith(svgOk)
   })
 
@@ -731,8 +753,7 @@ describe('InlinePreview lifecycle', () => {
     expect(label()).toBe(`${HTML_ZOOM_MIN}%`)
     expect((controls.querySelector('button[aria-label="缩小"]') as HTMLButtonElement).disabled).toBe(true)
 
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
-    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '查看代码') as HTMLButtonElement).click())
     expect(host.querySelector('[data-html-zoom-controls]')).toBeNull()
   })
 
