@@ -13,6 +13,7 @@ import {
   type SettingsSection,
   type SettingsSectionId,
 } from './navigation-model'
+import { SettingsSearch } from './settings-search'
 import './settings.css'
 
 export function SettingsNavigation({
@@ -88,6 +89,7 @@ function WideNavigation({
 
   return (
     <nav ref={navRef} aria-label="设置目录" className="settings-nav">
+      <SettingsSearch categories={categories} onSelect={onNavigate} />
       <ul className="settings-nav-groups">
         {categories.map((c) => {
           const expanded = c.id === expandedCategoryId
@@ -149,6 +151,7 @@ function CompactNavigation({ categories, activeId, pending, onPending, onNavigat
   }
   return (
     <nav ref={barRef} aria-label="设置目录" className="settings-compact-nav">
+      <SettingsSearch categories={categories} onSelect={onNavigate} />
       <div className="flex items-end gap-2">
         <label className={`${LABEL_CLS} flex-1 min-w-0`}>
           设置目录

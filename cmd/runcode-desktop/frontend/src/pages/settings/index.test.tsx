@@ -210,6 +210,7 @@ async function typeInto(el: HTMLInputElement, value: string) {
 describe('SettingsPage navigation shell', () => {
   it('showsOnlyTheSelectedCategoryAndExpandsItsCategoryHeading', async () => {
     await mount(page())
+    expect(host.querySelector('input[placeholder="搜索设置"]')).not.toBeNull()
     expect(navButton('账号与登录').getAttribute('aria-expanded')).toBe('true')
     expect(navButton('模型与对话').getAttribute('aria-expanded')).toBe('false')
     expect(host.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(false)
@@ -218,6 +219,24 @@ describe('SettingsPage navigation shell', () => {
     expect(host.querySelector<HTMLElement>('#settings-passport')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(false)
     expect(host.querySelector<HTMLElement>('#settings-login')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(false)
     expect(host.querySelector<HTMLElement>('#settings-session')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(true)
+  })
+
+  it('navigatesFromTheSettingsSearchResult', async () => {
+    await mount(page())
+    const input = host.querySelector<HTMLInputElement>('input[placeholder="搜索设置"]')!
+    await act(async () => {
+      input.focus()
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(input, '图片识别')
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, data: '图片识别', inputType: 'insertText' }))
+    })
+    const result = Array.from(host.querySelectorAll<HTMLButtonElement>('[role="option"]')).find((node) => node.textContent?.includes('图片识别'))
+    if (!result) throw new Error('search result missing')
+    await act(async () => result.click())
+    await flush()
+    expect(navButton('图片与录音').getAttribute('aria-expanded')).toBe('true')
+    expect(host.querySelector('.settings-page-heading')?.textContent).toContain('图片与录音')
+    expect(host.querySelector('nav [aria-current="location"]')?.textContent).toBe('图片识别')
   })
 
   it('switchesTheExpandedCategoryAndCollapsesThePreviousOne', async () => {

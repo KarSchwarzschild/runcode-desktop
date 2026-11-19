@@ -63,9 +63,6 @@ function AppShell() {
     if (previousView.current === 'settings' && view !== 'settings') void settingsSaves.flushAll()
     previousView.current = view
   }, [settingsSaves, view])
-  const goView = (next: View) => {
-    setView(next)
-  }
   // 输入草稿按会话存：在 A 里写了一半切到 B，那半句不该跟着过去。
   const taRef = useRef<HTMLTextAreaElement>(null)
   // 侧栏折叠态：上提到这里，让折叠开关能放到主栏顶部状态条（「空闲」前），

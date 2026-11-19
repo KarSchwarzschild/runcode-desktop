@@ -189,6 +189,18 @@ async function click(el: HTMLElement) {
   await act(async () => { el.click() })
 }
 
+async function typeSearch(value: string) {
+  const input = document.querySelector<HTMLInputElement>('input[placeholder="搜索设置"]')
+  if (!input) throw new Error('settings search missing')
+  await act(async () => {
+    input.focus()
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    setter.call(input, value)
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, data: value, inputType: 'insertText' }))
+  })
+  return input
+}
+
 async function userScroll(m: Mounted, top: number) {
   m.scroller.scrollTop = top
   await act(async () => { m.scroller.dispatchEvent(new Event('scroll')) })
@@ -202,6 +214,55 @@ async function deliverScrollEvent(m: Mounted) {
 }
 
 describe('SettingsNavigation (wide)', () => {
+  it('searchesSettingsAndNavigatesToTheSelectedSection', async () => {
+    const onNavigate = vi.fn()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => root.render(
+      <SettingsNavigation
+        categories={buildSettingsNavigation(FULL)}
+        activeId="passport"
+        expandedCategoryId="account"
+        onNavigate={onNavigate}
+        onToggleCategory={() => {}}
+        narrow={false}
+        compactNavRef={{ current: null }}
+      />,
+    ))
+
+    const input = await typeSearch('图片识别')
+    expect(host.querySelector('[role="listbox"]')?.textContent).toContain('图片识别')
+    expect(host.querySelector('[role="listbox"]')?.textContent).toContain('图片与录音')
+    await click(button(host, '图片识别图片与录音'))
+    expect(onNavigate).toHaveBeenCalledWith('vision')
+    expect(input.value).toBe('')
+    expect(host.querySelector('[role="listbox"]')).toBeNull()
+    await act(async () => root.unmount())
+  })
+
+  it('selectsTheFirstSearchResultWithEnter', async () => {
+    const onNavigate = vi.fn()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => root.render(
+      <SettingsNavigation
+        categories={buildSettingsNavigation(FULL)}
+        activeId="passport"
+        expandedCategoryId="account"
+        onNavigate={onNavigate}
+        onToggleCategory={() => {}}
+        narrow={false}
+        compactNavRef={{ current: null }}
+      />,
+    ))
+    const input = await typeSearch('上下文审核')
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+    expect(onNavigate).toHaveBeenCalledWith('context-audit')
+    await act(async () => root.unmount())
+  })
+
   it('rendersCategoryHeadingsAsExpandableButtons', async () => {
     const onToggleCategory = vi.fn()
     const host = document.createElement('div')
