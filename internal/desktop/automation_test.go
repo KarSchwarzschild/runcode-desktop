@@ -839,22 +839,32 @@ func TestAutomationWindowController(t *testing.T) {
 		t.Fatal(app.RequestAppExit())
 	}
 	var closed, exited bool
-	app.SetWindowController(automationWindow{closeFn: func() error { closed = true; return nil }, exitFn: func() error { exited = true; return nil }})
+	app.SetWindowController(automationWindow{
+		closeFn:    func() error { closed = true; return nil },
+		exitFn:     func() error { exited = true; return nil },
+		background: true,
+	})
 	if err := app.CloseMainWindow(); err != nil || !closed {
 		t.Fatalf("close = %v closed=%v", err, closed)
 	}
 	if err := app.RequestAppExit(); err != nil || !exited {
 		t.Fatalf("exit = %v exited=%v", err, exited)
 	}
+	defaults, err := app.GetAutomationDefaults()
+	if err != nil || !defaults.BackgroundSupported {
+		t.Fatalf("background support = %+v, err=%v", defaults, err)
+	}
 }
 
 type automationWindow struct {
-	closeFn func() error
-	exitFn  func() error
+	closeFn    func() error
+	exitFn     func() error
+	background bool
 }
 
-func (w automationWindow) CloseMainWindow() error { return w.closeFn() }
-func (w automationWindow) RequestAppExit() error  { return w.exitFn() }
+func (w automationWindow) CloseMainWindow() error    { return w.closeFn() }
+func (w automationWindow) RequestAppExit() error     { return w.exitFn() }
+func (w automationWindow) BackgroundSupported() bool { return w.background }
 
 func attachAutomationRun(t *testing.T, app *App, task AutomationTask, sessionID, workspace string) automation.Run {
 	t.Helper()

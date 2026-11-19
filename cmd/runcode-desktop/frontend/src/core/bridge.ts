@@ -11,6 +11,7 @@
 
 import { onEnvelope as onCoreEnvelope, type EventMap } from './protocol/events'
 import type { AutomationEventSource, Envelope as WireEnvelope } from './protocol/types'
+import { Events as RuntimeEvents } from '@wailsio/runtime'
 
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
@@ -122,6 +123,12 @@ export function onEnvelope<K extends keyof EventMap>(
   return onCoreEnvelope(event, (data) => {
     handler(data as DesktopEnvelope<EventMap[K]>)
   })
+}
+
+// 托盘“查看待处理任务”是宿主原生事件，不携带 Core Envelope；这里集中封装，
+// 页面组件仍只依赖 bridge，不直接访问 Wails runtime。
+export function onAutomationOpenManager(handler: () => void): () => void {
+  return RuntimeEvents.On('automation:open_manager', () => handler())
 }
 
 // ---- commands (generated; same lowerCamel names the old helpers used) ---------

@@ -67,6 +67,7 @@ func (e automationInvalid) Error() string { return string(e) }
 type WindowController interface {
 	CloseMainWindow() error
 	RequestAppExit() error
+	BackgroundSupported() bool
 }
 
 // autoCtl is the process identity generation and the task-store availability.
@@ -150,7 +151,7 @@ func (a *App) GetAutomationDefaults() (AutomationDefaults, error) {
 		RecentWorkspaces:    recent,
 		Model:               summary,
 		PermissionMode:      mode,
-		BackgroundSupported: false,
+		BackgroundSupported: a.automationBackgroundSupported(),
 		BindingVersion:      version,
 	}, nil
 }
@@ -630,7 +631,7 @@ func (a *App) stopAutomation(ctx context.Context) {
 	}
 	a.auto.mu.Unlock()
 	if svc != nil {
-		_ = svc.PrepareShutdown(ctx)
+		_ = a.prepareAutomationShutdown(ctx)
 		svc.Stop()
 	}
 	a.auto.mu.Lock()
@@ -647,6 +648,17 @@ func (a *App) stopAutomation(ctx context.Context) {
 	a.autoCtl.mu.Lock()
 	a.autoCtl.available = false
 	a.autoCtl.mu.Unlock()
+}
+
+// prepareAutomationShutdown closes admission and cancels queued/active runs
+// before session cleanup starts. It intentionally stops short of closing the DB:
+// terminal facts and session links may still be written while sessions drain.
+func (a *App) prepareAutomationShutdown(ctx context.Context) error {
+	svc := a.automationService()
+	if svc == nil {
+		return nil
+	}
+	return svc.PrepareShutdown(ctx)
 }
 
 func (a *App) markAutomationUnavailable(reason string) {
@@ -1058,7 +1070,7 @@ func (a *App) emitAutomationService() {
 		reason = ""
 	}
 	a.sink.Emit(EventAutomationServiceChanged, AutomationServiceChanged{
-		Context: ctx, Available: available, BackgroundSupported: false, Reason: reason,
+		Context: ctx, Available: available, BackgroundSupported: a.automationBackgroundSupported(), Reason: reason,
 	})
 }
 

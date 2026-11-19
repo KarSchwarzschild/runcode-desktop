@@ -2,6 +2,7 @@ package automation
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 	"time"
@@ -117,12 +118,16 @@ func TestServicePauseKeepsCurrentRun(t *testing.T) {
 	}
 	clock.Advance(0)
 	waitStarts(t, svc, runner, 1, 2*time.Second)
-	cur, err := svc.store.getTask(context.Background(), created.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := svc.SetPaused(context.Background(), cur.ID, cur.Revision, true); err != nil {
-		t.Fatal(err)
+	for attempt := 0; ; attempt++ {
+		cur, err := svc.store.getTask(context.Background(), created.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = svc.SetPaused(context.Background(), cur.ID, cur.Revision, true); err == nil {
+			break
+		} else if !errors.Is(err, ErrConflict) || attempt == 5 {
+			t.Fatal(err)
+		}
 	}
 	if runner.startCount() < 1 {
 		t.Fatal("pause must not prevent already started run count")
@@ -393,5 +398,92 @@ func TestServiceAdmissionHolds(t *testing.T) {
 	}
 	if runner.startCount() != 1 {
 		t.Fatalf("after releases want 1 start, got %d", runner.startCount())
+	}
+}
+
+func TestServicePrepareShutdownBlocksAndDrains(t *testing.T) {
+	now := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
+	svc, st, runner, clock := testService(t, now)
+	past := now.Add(-time.Second)
+	for _, id := range []string{"active", "queued"} {
+		task := dueTask(now)
+		task.ID = id
+		task.ClientRequestID = "req-" + id
+		task.NextRunAtUTC = &past
+		if _, err := st.CreateTask(context.Background(), task); err != nil {
+			t.Fatal(err)
+		}
+	}
+	clock.Advance(0)
+	svc.Wake()
+	waitStarts(t, svc, runner, 1, 2*time.Second)
+	waitRun(t, svc, st, "queued", 2*time.Second, func(r Run) bool { return r.Status == RunQueued })
+
+	if err := svc.PrepareShutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(runner.cancel) != 1 {
+		t.Fatalf("cancel count = %d, want active run", len(runner.cancel))
+	}
+	page, err := st.ListRuns(context.Background(), RunFilter{AllowedOwners: []string{"owner-a"}, TaskID: "queued", Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	interrupted := false
+	for _, run := range page.Items {
+		if run.Status == RunInterrupted && run.Reason == "shutdown" {
+			interrupted = true
+		}
+	}
+	if !interrupted {
+		t.Fatalf("queued shutdown run = %+v", page.Items)
+	}
+
+	late := dueTask(clock.Now())
+	late.ID = "late"
+	late.ClientRequestID = "req-late-shutdown"
+	due := clock.Now().Add(-time.Second)
+	late.NextRunAtUTC = &due
+	if _, err := st.CreateTask(context.Background(), late); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(time.Second)
+	svc.Wake()
+	time.Sleep(50 * time.Millisecond)
+	if runner.startCount() != 1 {
+		t.Fatalf("shutdown admitted a new run: starts=%d", runner.startCount())
+	}
+}
+
+func TestServiceExitSummaryCountsPausedActiveRun(t *testing.T) {
+	now := time.Date(2026, 11, 18, 10, 0, 0, 0, time.UTC)
+	svc, _, runner, clock := testService(t, now)
+	task := dueTask(now)
+	past := now.Add(-time.Second)
+	task.NextRunAtUTC = &past
+	created, err := svc.CreateTask(context.Background(), task)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(0)
+	svc.Wake()
+	waitStarts(t, svc, runner, 1, 2*time.Second)
+	for attempt := 0; ; attempt++ {
+		cur, err := svc.store.getTask(context.Background(), created.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = svc.SetPaused(context.Background(), cur.ID, cur.Revision, true); err == nil {
+			break
+		} else if !errors.Is(err, ErrConflict) || attempt == 5 {
+			t.Fatal(err)
+		}
+	}
+	summary, err := svc.ExitSummary(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.EnabledCount != 0 || summary.UnfinishedCount != 1 {
+		t.Fatalf("paused active summary = %+v", summary)
 	}
 }
