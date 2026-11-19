@@ -6,13 +6,23 @@ import { contextAuditStatus, copyText, errText, openInBrowser, setContextAudit, 
 import { Toggle } from '@/ui/toggle'
 import { Section } from './section'
 
-export function ContextAuditSection() {
+export function ContextAuditSection({ onAvailabilityChange }: {
+  onAvailabilityChange?: (supported: boolean) => void
+} = {}) {
   const [info, setInfo] = useState<ContextAuditInfo | null>(null)
   const [busy, setBusy] = useState(false)
   const [msg, setMsg] = useState('')
   useEffect(() => {
-    contextAuditStatus().then(setInfo).catch(() => {})
-  }, [])
+    let alive = true
+    contextAuditStatus().then((next) => {
+      if (!alive) return
+      setInfo(next)
+      onAvailabilityChange?.(!!next?.supported)
+    }).catch(() => {
+      if (alive) onAvailabilityChange?.(false)
+    })
+    return () => { alive = false }
+  }, [onAvailabilityChange])
   if (!info?.supported) return null
 
   async function toggle(next: boolean) {

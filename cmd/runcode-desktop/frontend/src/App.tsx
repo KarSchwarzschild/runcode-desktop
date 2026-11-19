@@ -42,12 +42,30 @@ import { MarketPage } from '@/pages/market'
 import { PermissionsPage } from '@/pages/permissions'
 import { MemoryPage } from '@/pages/memory'
 import { SettingsPage } from '@/pages/settings'
+import { SettingsSaveProvider, useSettingsSaveRegistry } from '@/pages/settings/settings-save-provider'
 import { StartForm } from '@/pages/start'
 
 export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory'
 
 export default function App() {
+  return (
+    <SettingsSaveProvider>
+      <AppShell />
+    </SettingsSaveProvider>
+  )
+}
+
+function AppShell() {
   const [view, setView] = useState<View>('chat')
+  const settingsSaves = useSettingsSaveRegistry()
+  const previousView = useRef<View>(view)
+  useEffect(() => {
+    if (previousView.current === 'settings' && view !== 'settings') void settingsSaves.flushAll()
+    previousView.current = view
+  }, [settingsSaves, view])
+  const goView = (next: View) => {
+    setView(next)
+  }
   // 输入草稿按会话存：在 A 里写了一半切到 B，那半句不该跟着过去。
   const taRef = useRef<HTMLTextAreaElement>(null)
   // 侧栏折叠态：上提到这里，让折叠开关能放到主栏顶部状态条（「空闲」前），
