@@ -27,14 +27,20 @@ export const HTML_PREVIEW_CSP = [
 
 // 宿主外壳自带的样式排在生成样式之前：生成样式可以覆盖字体与背景这类观感，
 // 但覆盖不了动画禁用与控件不可操作（!important）。
+// height/min-height 用 !important：静态预览不是真机视口，压掉 100vh／满高 flex 对测高的破坏。
 const SHELL_CSS = [
-  'html,body{margin:0}',
+  'html,body{margin:0;min-height:auto!important;height:auto!important}',
   // position:relative 让绝对定位的子元素计入 body 的 scrollHeight，测高才准。
   'body{position:relative;padding:12px;font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei","PingFang SC","Noto Sans CJK SC",sans-serif;color:#1f2328;background:#fff;overflow-wrap:anywhere}',
   '*,*::before,*::after{animation:none!important;transition:none!important}',
   'a,button,input,select,textarea,label,summary{pointer-events:none!important;cursor:default!important}',
   'img,svg{max-width:100%;height:auto}',
 ].join('\n')
+
+/** 测试与调试可读外壳 CSS（含抗 100vh 规则）。 */
+export function previewShellCss(): string {
+  return SHELL_CSS
+}
 
 export type HtmlBodySanitizer = (html: string) => string
 
@@ -149,6 +155,25 @@ export function measureDocumentHeight(doc: Document): number {
   const body = doc.body
   if (!body) return 0
   return Math.ceil(Math.max(body.scrollHeight, body.getBoundingClientRect().height))
+}
+
+/**
+ * 先把 iframe 拉到探测高度再量内容，避免短视口下 flex／100vh 主栏塌缩只剩底栏。
+ * 探测后恢复调用方传入的高度字符串（通常交给 React style 再写回收敛值）。
+ */
+export function probeIframeContentHeight(
+  frame: HTMLIFrameElement,
+  probePx: number = PREVIEW_LIMITS.htmlMaxHeight,
+): number {
+  const doc = frame.contentDocument
+  if (!doc?.body) return 0
+  const prev = frame.style.height
+  frame.style.height = `${Math.max(1, Math.ceil(probePx))}px`
+  // 强制一次布局，再读 scrollHeight。
+  void frame.getBoundingClientRect()
+  const measured = measureDocumentHeight(doc)
+  frame.style.height = prev
+  return measured
 }
 
 // 正文的 DOMPurify 静态白名单。用独立实例：钩子挂在默认实例上会连带改变 Mermaid

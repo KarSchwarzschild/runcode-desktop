@@ -2,9 +2,10 @@
 import { describe, it, expect } from 'vitest'
 import {
   buildPreviewDocument, createHeightGovernor, extractHtml, hasVisibleContent, measureDocumentHeight, prepareStaticHtml,
-  renderStaticHtml, sanitizeHtmlBody,
+  previewShellCss, probeIframeContentHeight, renderStaticHtml, sanitizeHtmlBody,
   HTML_PREVIEW_CSP, HTML_PREVIEW_SANDBOX,
 } from './static-html'
+import { PREVIEW_LIMITS } from './static-detect'
 
 // 测试替身：只删 <script>，用来验证外壳与提取的结构。真实的正文清理（DOMPurify 静态
 // 白名单）单独测试；这里不能拿替身证明 X01/X02。
@@ -69,6 +70,12 @@ describe('buildPreviewDocument', () => {
     const doc = buildPreviewDocument({ body: '', css: '' })
     expect(doc).toContain('animation:none!important')
     expect(doc).toContain('pointer-events:none!important')
+  })
+  it('forces html/body height auto so 100vh layouts do not lock measure', () => {
+    const css = previewShellCss()
+    expect(css).toMatch(/min-height:\s*auto\s*!important/)
+    expect(css).toMatch(/height:\s*auto\s*!important/)
+    expect(buildPreviewDocument({ body: '', css: '' })).toContain('height:auto!important')
   })
 })
 
@@ -174,6 +181,27 @@ describe('measureDocumentHeight', () => {
     const empty = document.implementation.createHTMLDocument('')
     empty.body.remove()
     expect(measureDocumentHeight(empty)).toBe(0)
+  })
+})
+
+describe('probeIframeContentHeight', () => {
+  it('temporarily sets probe height then restores the previous inline height', () => {
+    const frame = document.createElement('iframe')
+    document.body.appendChild(frame)
+    const doc = frame.contentDocument
+    if (!doc) {
+      frame.remove()
+      return
+    }
+    doc.open()
+    doc.write('<!doctype html><body><div style="height:500px">list</div><div>cart</div></body>')
+    doc.close()
+    frame.style.height = '120px'
+    const probed = probeIframeContentHeight(frame, PREVIEW_LIMITS.htmlMaxHeight)
+    expect(Number.isFinite(probed)).toBe(true)
+    expect(probed).toBeGreaterThanOrEqual(0)
+    expect(frame.style.height).toBe('120px')
+    frame.remove()
   })
 })
 

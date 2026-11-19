@@ -18,12 +18,40 @@ export const PREVIEW_LIMITS = {
   htmlMaxHeight: 2400,
   /** 对话内 HTML 预览外壳可视高度上限（px）；超出外层纵向滚动。 */
   htmlInlineMaxHeight: 560,
-  /** 内联 HTML 按移动页设计宽等比缩放后铺满壳宽（可放大）。 */
+  /** 内联 HTML 移动页设计宽（CSS px）；100% 缩放 = 设计宽 1:1。 */
   htmlDesignWidth: 390,
+  /** 脚本页先提供稳定的移动端视口，避免 flex 主区在首次测高前被压成 0。 */
+  htmlScriptViewportHeight: 780,
   liveFrames: 4,
 } as const
 
-/** 内联 HTML 等比缩放：按壳宽铺满设计宽（可 >1），避免宽列右侧大块留白。 */
+/** 用户缩放相对设计宽；显示为 xx%，有效 scale = percent/100。 */
+export const HTML_ZOOM_MIN = 15
+export const HTML_ZOOM_MAX = 250
+export const HTML_ZOOM_STEP = 10
+
+export function clampHtmlZoomPercent(n: number): number {
+  if (!Number.isFinite(n)) return 100
+  return Math.min(HTML_ZOOM_MAX, Math.max(HTML_ZOOM_MIN, Math.round(n)))
+}
+
+export function stepHtmlZoomPercent(current: number, direction: 1 | -1): number {
+  return clampHtmlZoomPercent(current + direction * HTML_ZOOM_STEP)
+}
+
+/** 保持缩放前视区中心指向的内容位置；能放下时由容器 auto margin 居中。 */
+export function htmlZoomScrollLeft(opts: {
+  previousWidth: number; previousViewport: number; scrollLeft: number; width: number; viewport: number
+}): number {
+  const { previousWidth, previousViewport, scrollLeft, width, viewport } = opts
+  if (!(width > 0) || !(viewport > 0) || !Number.isFinite(width + viewport)) return 0
+  const center = previousWidth > previousViewport && previousViewport > 0 && Number.isFinite(previousWidth + scrollLeft)
+    ? (scrollLeft + previousViewport / 2) / previousWidth
+    : 0.5
+  return Math.max(0, Math.min(width - viewport, center * width - viewport / 2))
+}
+
+/** @deprecated 保留给旧单测；预览缩放以百分比和 100% 初始值表达。 */
 export function htmlInlineScale(availableWidth: number, designWidth: number = PREVIEW_LIMITS.htmlDesignWidth): number {
   if (!(availableWidth > 0) || !(designWidth > 0)) return 1
   return availableWidth / designWidth

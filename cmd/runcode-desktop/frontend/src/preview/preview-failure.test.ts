@@ -5,7 +5,7 @@ describe('previewFailureLabel', () => {
   it('maps known codes to Chinese phrases', () => {
     expect(previewFailureLabel('unsupported-type')).toBe('暂不支持此图型')
     expect(previewFailureLabel('platform-unsupported')).toBe('当前环境不支持该预览')
-    expect(previewFailureLabel('needs-script')).toContain('不执行代码')
+    expect(previewFailureLabel('needs-script')).toContain('未能加载的脚本')
     expect(previewFailureLabel('syntax')).toBe('语法无法解析')
     expect(previewFailureLabel('timeout')).toBe('渲染超时')
     expect(previewFailureLabel('busy')).toBe('预览队列繁忙')

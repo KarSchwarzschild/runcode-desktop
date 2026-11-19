@@ -21,7 +21,7 @@ const LABELS: Record<string, string> = {
   'parse-error': '无法解析',
   'not-svg': '不是有效的 SVG',
   'unsafe-dtd': '含有不安全的文档声明',
-  'needs-script': '需要脚本才能显示（本客户端不执行代码）',
+  'needs-script': '页面依赖未能加载的脚本，暂时无法显示',
   'no-language': '未标注语言',
   language: '语言不在预览范围',
   unclosed: '代码块未闭合',

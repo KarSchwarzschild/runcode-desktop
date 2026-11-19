@@ -4,7 +4,10 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { InlinePreview } from './inline-preview'
 import { InlinePreviewBudgetProvider } from './inline-preview-budget'
-import { PREVIEW_LIMITS, htmlInlineScale } from '@/preview/static-detect'
+import {
+  PREVIEW_LIMITS, htmlInlineScale, clampHtmlZoomPercent, stepHtmlZoomPercent,
+  HTML_ZOOM_MIN, HTML_ZOOM_MAX,
+} from '@/preview/static-detect'
 
 const mermaid = vi.hoisted(() => ({ render: vi.fn() }))
 const bridge = vi.hoisted(() => ({
@@ -544,7 +547,18 @@ describe('InlinePreview lifecycle', () => {
     expect(PREVIEW_LIMITS.htmlDesignWidth).toBeGreaterThanOrEqual(320)
   })
 
+  it('HTML 缩放纯函数：clamp / 步进', () => {
+    expect(clampHtmlZoomPercent(10)).toBe(HTML_ZOOM_MIN)
+    expect(clampHtmlZoomPercent(300)).toBe(HTML_ZOOM_MAX)
+    expect(clampHtmlZoomPercent(Number.NaN)).toBe(100)
+    expect(stepHtmlZoomPercent(100, 1)).toBe(110)
+    expect(stepHtmlZoomPercent(20, -1)).toBe(HTML_ZOOM_MIN)
+    expect(stepHtmlZoomPercent(250, 1)).toBe(HTML_ZOOM_MAX)
+  })
+
   it('HTML iframe 外壳使用内联限高与缩放标记', async () => {
+    // 旧实现会把 780px 壳宽自动换算成 200%；默认值必须与容器宽度解耦。
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(780)
     vi.stubGlobal('IntersectionObserver', class {
       constructor(private cb: IntersectionObserverCallback) {}
       observe(el: Element) {
@@ -569,5 +583,170 @@ describe('InlinePreview lifecycle', () => {
     expect(shell.className).toMatch(/overflow-y-auto/)
     expect(Number.parseInt(shell.style.maxHeight || '0', 10)).toBe(PREVIEW_LIMITS.htmlInlineMaxHeight)
     expect(host.querySelector('iframe')).toBeTruthy()
+    expect(host.querySelector('[data-html-zoom-controls] [aria-live="polite"]')?.textContent?.trim()).toBe('100%')
+  })
+
+  it('脚本生成正文使用独立沙箱，不再把有标题的残缺静态壳当成完整页面', async () => {
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(private cb: IntersectionObserverCallback) {}
+      observe(el: Element) { this.cb([{ isIntersecting: true, target: el } as IntersectionObserverEntry], this as unknown as IntersectionObserver) }
+      unobserve() {}
+      disconnect() {}
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html', source: '<h1>极简点餐</h1><main id="menu"></main><footer>购物车为空</footer><script>document.querySelector("#menu").innerHTML="招牌牛肉面"</script>',
+          defaultNode: createElement('code', null, 'SOURCE'),
+        }),
+      ))
+    })
+    const frame = host.querySelector('iframe')!
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts')
+    expect(frame.srcdoc).toContain('招牌牛肉面')
+    expect(frame.srcdoc).toContain('document.querySelector')
+    expect(frame.srcdoc).not.toContain('allow-same-origin')
+    expect((frame.parentElement as HTMLElement).className).toContain('mx-auto')
+  })
+
+  it('只接受当前脚本 iframe 的测高消息，并显示脚本错误', async () => {
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(private cb: IntersectionObserverCallback) {}
+      observe(el: Element) { this.cb([{ isIntersecting: true, target: el } as IntersectionObserverEntry], this as unknown as IntersectionObserver) }
+      unobserve() {}
+      disconnect() {}
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html', source: '<p>页面</p><script>document.body.append("动态正文")</script>',
+          defaultNode: createElement('code', null, 'SOURCE'),
+        }),
+      ))
+    })
+    const frame = host.querySelector('iframe')!
+    const channel = frame.dataset.htmlChannel!
+    const send = (source: MessageEventSource | null, origin: string, fields: object) => window.dispatchEvent(new MessageEvent('message', {
+      source, origin, data: { type: 'inline-html-preview', channel, ...fields },
+    }))
+    const initial = frame.style.height
+    await act(async () => { send(window, 'null', { height: 1100 }) })
+    expect(frame.style.height).toBe(initial)
+    await act(async () => { send(frame.contentWindow, 'https://other.invalid', { height: 1100 }) })
+    expect(frame.style.height).toBe(initial)
+    await act(async () => { send(frame.contentWindow, 'null', { channel: 'old-channel', height: 1100 }) })
+    expect(frame.style.height).toBe(initial)
+    await act(async () => { send(frame.contentWindow, 'null', { height: 1100 }) })
+    expect(frame.style.height).toBe('1100px')
+    await act(async () => { send(frame.contentWindow, 'null', { error: 'ReferenceError: missing' }) })
+    expect(host.textContent).toContain('页面脚本执行失败')
+    await act(async () => {
+      send(frame.contentWindow, 'null', { zoom: 1 })
+      send(frame.contentWindow, 'null', { zoom: 1 })
+    })
+    expect(host.textContent).toContain('120%')
+
+    const oldWindow = frame.contentWindow
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html', source: '<p>新一页</p><script>document.body.append("新正文")</script>',
+          defaultNode: createElement('code', null, 'NEW SOURCE'),
+        }),
+      ))
+    })
+    const nextFrame = host.querySelector('iframe')!
+    expect(nextFrame).not.toBe(frame)
+    expect(nextFrame.dataset.htmlChannel).not.toBe(channel)
+    await act(async () => { send(oldWindow, 'null', { height: 1800 }) })
+    expect(nextFrame.style.height).toBe(`${PREVIEW_LIMITS.htmlScriptViewportHeight}px`)
+    expect(host.textContent).not.toContain('页面脚本执行失败')
+  })
+
+  it('HTML 预览态显示缩放控件，源码态隐藏；按钮步进并夹紧', async () => {
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(private cb: IntersectionObserverCallback) {}
+      observe(el: Element) {
+        this.cb([{ isIntersecting: true, target: el } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+      }
+      unobserve() {}
+      disconnect() {}
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html',
+          source: '<!doctype html><html><body><p>页面</p></body></html>',
+          defaultNode: createElement('code', null, 'SOURCE'),
+        }),
+      ))
+    })
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    const controls = host.querySelector('[data-html-zoom-controls]') as HTMLElement
+    expect(controls).toBeTruthy()
+    const plus = controls.querySelector('button[aria-label="放大"]') as HTMLButtonElement
+    const minus = controls.querySelector('button[aria-label="缩小"]') as HTMLButtonElement
+    expect(plus).toBeTruthy()
+    expect(minus).toBeTruthy()
+    const label = () => (controls.querySelector('[aria-live="polite"]')?.textContent ?? '').trim()
+    const before = label()
+    expect(before).toBe('100%')
+    await act(async () => { plus.click() })
+    const afterPlus = Number.parseInt(label(), 10)
+    expect(afterPlus).toBe(Number.parseInt(before, 10) + 10)
+    // 逐次 act，确保函数式 setState 递进到上限（同步连点在测试里不模拟真实帧间渲染）。
+    for (let i = 0; i < 30; i++) {
+      await act(async () => { plus.click() })
+    }
+    expect(label()).toBe(`${HTML_ZOOM_MAX}%`)
+    expect((controls.querySelector('button[aria-label="放大"]') as HTMLButtonElement).disabled).toBe(true)
+    for (let i = 0; i < 30; i++) {
+      await act(async () => { minus.click() })
+    }
+    expect(label()).toBe(`${HTML_ZOOM_MIN}%`)
+    expect((controls.querySelector('button[aria-label="缩小"]') as HTMLButtonElement).disabled).toBe(true)
+
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '视图') as HTMLButtonElement).click())
+    await act(async () => (Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '仅显示代码') as HTMLButtonElement).click())
+    expect(host.querySelector('[data-html-zoom-controls]')).toBeNull()
+  })
+
+  it('框内 Ctrl+滚轮缩放，无 Ctrl 不改比例', async () => {
+    vi.stubGlobal('IntersectionObserver', class {
+      constructor(private cb: IntersectionObserverCallback) {}
+      observe(el: Element) {
+        this.cb([{ isIntersecting: true, target: el } as IntersectionObserverEntry], this as unknown as IntersectionObserver)
+      }
+      unobserve() {}
+      disconnect() {}
+    })
+    await act(async () => {
+      root.render(createElement(InlinePreviewBudgetProvider, null,
+        createElement(InlinePreview, {
+          kind: 'html',
+          source: '<!doctype html><html><body><p>页面</p></body></html>',
+          defaultNode: createElement('code', null, 'SOURCE'),
+        }),
+      ))
+    })
+    await act(async () => { await Promise.resolve() })
+    await act(async () => { await Promise.resolve() })
+    const shell = host.querySelector('[data-html-inline-shell]') as HTMLElement
+    const controls = host.querySelector('[data-html-zoom-controls]') as HTMLElement
+    const label = () => (controls.querySelector('[aria-live="polite"]')?.textContent ?? '').trim()
+    const start = Number.parseInt(label(), 10)
+    await act(async () => {
+      shell.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, bubbles: true, cancelable: true }))
+    })
+    expect(Number.parseInt(label(), 10)).toBe(start)
+    await act(async () => {
+      shell.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    expect(Number.parseInt(label(), 10)).toBe(start + 10)
+    await act(async () => {
+      shell.dispatchEvent(new WheelEvent('wheel', { deltaY: 100, ctrlKey: true, bubbles: true, cancelable: true }))
+    })
+    expect(Number.parseInt(label(), 10)).toBe(start)
   })
 })
