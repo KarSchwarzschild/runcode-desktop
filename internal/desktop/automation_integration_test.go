@@ -114,7 +114,7 @@ func TestAutomationIntegrationScheduleReceiptLinkAndRestart(t *testing.T) {
 	if focused != "" {
 		t.Fatalf("automation run stole focus: %q", focused)
 	}
-	if built1.count() != 1 || run.SessionID == "" || run.QuestionID == "" {
+	if built1.count() != 1 || run.SessionID == "" {
 		t.Fatalf("run=%+v builds=%d", run, built1.count())
 	}
 
@@ -133,6 +133,9 @@ func TestAutomationIntegrationScheduleReceiptLinkAndRestart(t *testing.T) {
 		run = waitAutomationRun(t, store1, task.ID, func(r automation.Run) bool {
 			return r.ID == run.ID && r.Status == automation.RunSucceeded && r.QuestionID != ""
 		})
+	}
+	if run.QuestionID == "" {
+		t.Fatalf("run succeeded without a question receipt: %+v", run)
 	}
 	done := waitAutomationRun(t, store1, task.ID, func(r automation.Run) bool {
 		return r.ID == run.ID && r.Status == automation.RunSucceeded

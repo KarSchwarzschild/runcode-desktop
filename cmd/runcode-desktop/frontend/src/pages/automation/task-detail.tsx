@@ -185,7 +185,7 @@ export function TaskDetail({
                 disabled={pending || !!action}
                 onClick={() => setMoreOpen((open) => !open)}
               >
-                <Icon name="more-grid" size={16} />
+                <Icon name="more" size={16} />
               </button>
               {moreOpen && (
                 <>

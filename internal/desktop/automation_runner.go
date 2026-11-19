@@ -284,8 +284,21 @@ func (a *App) automationSessionConfig(b automation.Binding, dir string) (cfg eng
 		if err != nil {
 			return engine.Config{}, false, "", modelReference{}, "", err
 		}
+		bridge := strings.TrimRight(strings.TrimSpace(b.Bridge), "/")
+		if bridge == "" {
+			bridge = strings.TrimRight(passportConfig().BridgeBaseURL, "/")
+		}
+		// 平台任务和普通 Passport 会话必须走同一套引擎配置：固定使用
+		// OpenAI-compatible provider，并把所选租户拼进 Bridge 路径。只设置
+		// Model/TokenSource 会留下空 Provider，引擎会在启动会话前直接拒绝。
+		cfg.Provider = "openai"
+		cfg.BaseURL = bridge + tenantPathPrefix(b.TenantID) + "/v1"
+		cfg.APIKey = ""
+		cfg.AuthToken = ""
 		cfg.Model = b.ModelName
 		cfg.TokenSource = automationTokenSource{m: a.tokens, issuer: iss, subject: sub}.Token
+		cfg.OnUnauthorized = a.tokens.ForceRefresh
+		cfg = usePlatformCaptureProvider(cfg, true)
 		ref = modelReference{Kind: "platform", Name: b.ModelName, Bridge: b.Bridge, TenantID: b.TenantID}
 		return cfg, true, b.TenantID, ref, "", nil
 	case automationKindCustom, automationKindCodex:

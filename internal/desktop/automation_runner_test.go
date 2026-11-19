@@ -134,6 +134,43 @@ func staticBinding(t *testing.T, app *App) automation.Binding {
 	return b
 }
 
+func TestAutomationPlatformConfigWiresRegisteredProviderAndBridge(t *testing.T) {
+	app := newIdentityApp(t)
+	t.Setenv("RUNCODE_BRIDGE_BASE_URL", "https://bridge.example")
+	app.tokens.setInMemory(tokenSet{
+		AccessToken:  testJWT("https://passport.example", "platform-user", "1"),
+		RefreshToken: "refresh",
+		Expiry:       time.Now().Add(time.Hour),
+	})
+	app.mu.Lock()
+	app.passportTenant = "tenant-a"
+	app.mu.Unlock()
+
+	binding, err := app.freezeAutomationBinding(automationKindPlatform, "platform-model", "safe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, passport, tenant, _, _, err := app.automationSessionConfig(binding, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Provider != "openai" || !llm.IsRegistered(cfg.Provider) {
+		t.Fatalf("provider = %q, registered=%v", cfg.Provider, llm.IsRegistered(cfg.Provider))
+	}
+	if cfg.BaseURL != "https://bridge.example/t/tenant-a/v1" {
+		t.Fatalf("base URL = %q", cfg.BaseURL)
+	}
+	if cfg.Model != "platform-model" || !passport || tenant != "tenant-a" {
+		t.Fatalf("config=%+v passport=%v tenant=%q", cfg, passport, tenant)
+	}
+	if cfg.TokenSource == nil || cfg.OnUnauthorized == nil {
+		t.Fatal("platform automation config must wire token refresh")
+	}
+	if token, err := cfg.TokenSource(); err != nil || token == "" {
+		t.Fatalf("TokenSource = %q, %v", token, err)
+	}
+}
+
 func primeForeground(t *testing.T, app *App, dir, model string) string {
 	t.Helper()
 	app.mu.Lock()

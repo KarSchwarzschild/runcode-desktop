@@ -195,6 +195,8 @@ describe('automation task detail', () => {
     expect(([...host.querySelectorAll('button')].find((button) => button.textContent === '保存修改') as HTMLButtonElement).disabled).toBe(true)
 
     const more = host.querySelector('button[aria-label="更多操作"]') as HTMLButtonElement
+    expect(more.querySelectorAll('circle')).toHaveLength(3)
+    expect(more.querySelector('rect')).toBeNull()
     await act(async () => more.click())
     expect([...host.querySelectorAll('button')].some((button) => button.textContent === '立即执行')).toBe(true)
     expect([...host.querySelectorAll('button')].some((button) => button.textContent === '删除任务')).toBe(true)
