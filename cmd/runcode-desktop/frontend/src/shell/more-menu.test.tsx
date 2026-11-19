@@ -86,7 +86,7 @@ function Harness() {
         onOpenAutomation={() => setOpen(true)}
       />
       <div data-testid="view">{view}</div>
-      <AutomationWorkspaceDialog open={open} onClose={() => setOpen(false)} />
+      <AutomationWorkspaceDialog open={open} onClose={() => setOpen(false)} onOpenRun={async () => {}} />
     </>
   )
 }

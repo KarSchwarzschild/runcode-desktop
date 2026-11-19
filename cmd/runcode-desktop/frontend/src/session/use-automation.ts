@@ -8,9 +8,13 @@ import {
   getAutomationDefaults,
   listAutomationTasks,
   onEnvelope,
+  setAutomationTaskPaused,
+  updateAutomationTask,
+  type AutomationContext,
   type AutomationDefaults,
   type AutomationTask,
   type AutomationTaskDraft,
+  type AutomationTaskResult,
 } from '@/core/bridge'
 import {
   emptyAutomationState,
@@ -27,7 +31,9 @@ const PAGE_LIMIT = 50
 export interface AutomationController {
   context: AutomationState['context']
   tasks: AutomationTask[]
+  selectedTask: AutomationTask | null
   selectedTaskId: string
+  pendingTaskId: string
   loading: boolean
   error: string
   unavailable: string
@@ -39,6 +45,8 @@ export interface AutomationController {
   openCreate: () => void
   closeCreate: () => void
   saveCreate: (draft: AutomationTaskDraft) => Promise<void>
+  updateTask: (taskId: string, expectedRevision: number, draft: AutomationTaskDraft) => Promise<AutomationTask>
+  setPaused: (task: AutomationTask, paused: boolean) => Promise<AutomationTask>
   notice: string
   selectTask: (id: string) => void
   setFilter: (filter: AutomationFilter) => void
@@ -52,6 +60,7 @@ export function useAutomation(enabled: boolean): AutomationController {
   const [defaults, setDefaults] = useState<AutomationDefaults | null>(null)
   const [createOpen, setCreateOpen] = useState(false)
   const [notice, setNotice] = useState('')
+  const [pendingTaskId, setPendingTaskId] = useState('')
   const [reload, setReload] = useState(0)
   const stateRef = useRef(state)
   const defaultsRef = useRef(defaults)
@@ -166,6 +175,47 @@ export function useAutomation(enabled: boolean): AutomationController {
     setCreateOpen(false)
     setReload((n) => n + 1)
   }, [])
+
+  const acceptTask = useCallback((result: AutomationTaskResult, started: AutomationContext) => {
+    if (!sameAutomationContext(started, stateRef.current.context) || !sameAutomationContext(result.context, stateRef.current.context)) {
+      throw new Error('身份已变化，请刷新后重试')
+    }
+    dispatch({ type: 'event', context: result.context, task: result.task })
+    return result.task
+  }, [])
+
+  const updateTask = useCallback(async (taskId: string, expectedRevision: number, draft: AutomationTaskDraft) => {
+    const started = stateRef.current.context
+    if (!started) throw new Error('自动化上下文还没有准备好')
+    try {
+      const result = await updateAutomationTask({ context: started, taskId, expectedRevision, draft })
+      return acceptTask(result, started)
+    } catch (e) {
+      if (e instanceof Error && e.message === '身份已变化，请刷新后重试') throw e
+      throw new Error(errText(e))
+    }
+  }, [acceptTask])
+
+  const setPaused = useCallback(async (task: AutomationTask, paused: boolean) => {
+    const started = stateRef.current.context
+    if (!started) throw new Error('自动化上下文还没有准备好')
+    setPendingTaskId(task.id)
+    try {
+      const result = await setAutomationTaskPaused({
+        context: started,
+        taskId: task.id,
+        expectedRevision: task.revision,
+        paused,
+      })
+      return acceptTask(result, started)
+    } catch (e) {
+      if (e instanceof Error && e.message === '身份已变化，请刷新后重试') throw e
+      throw new Error(errText(e))
+    } finally {
+      setPendingTaskId('')
+    }
+  }, [acceptTask])
+
   const refresh = useCallback(() => setReload((n) => n + 1), [])
 
   const loadMore = useCallback(() => {
@@ -195,11 +245,14 @@ export function useAutomation(enabled: boolean): AutomationController {
   }, [])
 
   const tasks = state.list.ids.map((id) => state.tasks[id]).filter((item): item is AutomationTask => !!item)
+  const selectedTask = state.selectedTaskId ? state.tasks[state.selectedTaskId] ?? null : null
 
   return {
     context: state.context,
     tasks,
+    selectedTask,
     selectedTaskId: state.selectedTaskId,
+    pendingTaskId,
     loading: state.list.loading,
     error: state.list.error,
     unavailable: state.unavailable,
@@ -211,6 +264,8 @@ export function useAutomation(enabled: boolean): AutomationController {
     openCreate,
     closeCreate,
     saveCreate,
+    updateTask,
+    setPaused,
     notice,
     selectTask,
     setFilter,

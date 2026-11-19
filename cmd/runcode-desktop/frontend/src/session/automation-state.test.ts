@@ -102,4 +102,19 @@ describe('automation state', () => {
     expect(state.tasks.a?.revision).toBe(2)
     expect(state.list.nextCursor).toBe('cursor-2')
   })
+
+  it('moves a task between enabled and paused tabs on the authoritative event', () => {
+    let state = reduceAutomation(emptyAutomationState(), { type: 'bind', context: ctx(1) })
+    state = snap(state, ctx(1), 0, [task('a', 1)])
+    state = reduceAutomation(state, { type: 'event', context: ctx(1), task: task('a', 2, { state: 'paused' }) })
+    expect(state.list.ids).toEqual([])
+    expect(state.tasks.a?.state).toBe('paused')
+
+    state = reduceAutomation(state, { type: 'query', query: { filter: 'paused', text: '' } })
+    state = snap(state, ctx(1), 1, [task('a', 2, { state: 'paused' })])
+    expect(state.list.ids).toEqual(['a'])
+
+    state = reduceAutomation(state, { type: 'event', context: ctx(1), task: task('a', 3, { state: 'enabled' }) })
+    expect(state.list.ids).toEqual([])
+  })
 })

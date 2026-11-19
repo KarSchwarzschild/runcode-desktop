@@ -473,6 +473,7 @@ export default function App() {
         open={automationOpen}
         onClose={() => setAutomationOpen(false)}
         onOpenSettings={() => { setAutomationOpen(false); openSettings() }}
+        onOpenRun={session.openAutomationSession}
       />
       {installing && <InstallOverlay state={installing} />}
       {askpass.current && (

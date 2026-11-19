@@ -137,12 +137,13 @@ Notes:
 - `OpenSessionInfo`, `SessionSummary`, and `ConversationInfo.automation` come from `session_link`, joined to the current task name. `Kind` stays `agent`. The lookup runs after `App.mu` is released. `OpenSessions.Running` is the live turn or the lease. The sidebar also ORs the focused busy flag and the `run_changed` flag, so a background run shows a clock and a running dot before that session is opened.
 - `run_changed` refreshes the open list and the recent list even when the run's session is not focused. History paging walks every cursor. `historyPending` keeps the blocks already on screen. A terminal refresh merges by `questionId` / `toolUseID` and does not call `applyResumed` over a live stream. Async loads are dropped when either the session generation or the automation context moves.
 - `TestAutomationReplayLinkAndWorkspace` uses two workspaces with the same title. Opening the run resumes the linked directory. A missing transcript returns “会话历史不存在” and does not build an empty conversation. After restart and a rename, the clock still resolves to the same task id and the new name.
+- Manual browser check completed on 2026-11-19 through `?preview=tools`: the automation card is collapsed by default; expanding it shows task, scheduled time, workspace, execution mode, prompt and output. Evidence: `docs/automation/validation/step6-execution-card.jpg`.
 
 Deferred:
 
 - Step 7 owns the more menu and the task manager. Step 8 owns the form. Step 9 owns detail and pause. Step 10 owns the tray, `WindowController`, and real exit. `BackgroundSupported` stays false.
 - No real Passport, Codex, or OA round trip. No race-detector PASS.
-- `?preview=tools` now includes an automation summary fixture. This session did not open that page in a browser.
+- `?preview=tools` now includes an automation summary fixture.
 
 Next: Step 7 task list and the more-menu entry.
 
@@ -159,11 +160,12 @@ Notes:
 - The manager is a modal on the app root, not a view and not a preview tab. It can open with no live session. Esc closes the create drawer first, then the window. Tab stays inside the dialog. Closing returns focus to the control that opened it and does not touch the composer draft.
 - List state is a reducer. An event that arrives before the snapshot is kept when its revision is higher. The same context ignores an older revision. A new context drops the cache and late responses. A slow page for the previous search does not replace the current query. Pages append without duplicating ids.
 - Tabs are 已开启 / 已暂停 / 已结束 / 全部. Search matches the current result set’s name and prompt only through the backend query. Empty search and a filter miss use different copy. The create control is centered when the list is empty and sits on the search row when it is not. The create drawer is a placeholder until Step 8 and does not save or run anything. The list formats `nextRunAt` for display and does not schedule work itself.
+- The production manager components were rendered at 1024×680 and 150% scale. Title, close control, tabs, search, task rows and the create action remain readable; content scrolls inside the window. Evidence: `docs/automation/validation/step7-manager-1024x680.jpg` and `step7-manager-150pct.jpg`.
 
 Deferred:
 
 - Step 8 replaces the create placeholder with the seven schedule modes and the native workspace picker. Step 9 owns detail, pause/resume, and run history. Step 10 owns the tray, `WindowController`, and real exit. `BackgroundSupported` stays false.
-- No real Passport, Codex, or OA round trip. No race-detector PASS. This session did not open the manager in a browser; 1024×680 and 150% scaling remain a manual check.
+- No real Passport, Codex, or OA round trip. No race-detector PASS.
 
 Next: Step 8 create form and native workspace picker.
 
@@ -181,10 +183,36 @@ Notes:
 - The workspace picker searches the backend recent list and ends with “浏览其他目录...”. `pickWorkspaceFolder` is the only directory call. An empty cancel keeps the previous path. A new path only updates the draft. It does not call `openSession` or `resumeSession`, and it does not write localStorage.
 - Save sends `createAutomationTask` with the current context, `expectedBindingVersion`, and one `clientRequestId`. A failed attempt keeps the text and the same id. Success or an explicit cancel is what retires the id. The button ignores a second click while the request is in flight. Success does not call send or run. The model name and permission mode are read-only. A missing savable connection disables save and offers settings. An unrecognized browser zone is shown as Asia/Shanghai. A backend “expired once” error keeps the draft.
 - Closing a dirty drawer asks with ConfirmDialog before discarding. Enter is not treated as save while an IME composition is in progress.
+- The seven schedule options and the full create drawer were rendered at 1024×680 and 150%; the bottom 取消／保存 actions are reachable in the internal scroll region. Evidence: `docs/automation/validation/step8-form-1024x680.jpg`, `step8-form-150pct.jpg`, and `step8-form-150pct-bottom.jpg`.
+- `TestAutomationWorkspacePickerContract` verifies a selected path, an empty cancellation, and the unsupported-dialog error. The existing native Wails directory picker remains the production implementation.
 
 Deferred:
 
 - Step 9 owns detail, pause/resume, and run history. Step 10 owns the tray and real exit. `BackgroundSupported` stays false.
-- No real Passport, Codex, or OA round trip. No race-detector PASS. This session did not open the Windows folder dialog, so paths with Chinese characters, spaces, a drive root, and cancel were not checked on a real picker.
+- No real Passport, Codex, or OA round trip. No race-detector PASS.
 
 Next: Step 9 task detail, pause/resume, and run history.
+
+## Step 9 — task details, pause/resume, and run history
+
+| Field | Value |
+| --- | --- |
+| Commit | `feat(automation): add task details pause resume and run history` |
+| Frontend | `npm.cmd test -- src/pages/automation/task-detail.test.tsx src/pages/automation/run-list.test.tsx src/pages/automation/task-form.test.tsx src/pages/automation/workspace-dialog.test.tsx src/shell/more-menu.test.tsx` → PASS (5 files, 10 tests). Full Vitest → 938 pass / 1 known baseline failure. |
+| Checks | `npm.cmd run typecheck`, `npm.cmd run lint`, `npm.cmd run build` → PASS. |
+| Go | `go test ./internal/desktop -run Automation -count=1`, `go test ./internal/automation -count=1`, and `go run ./tools/protogen --check` → PASS. |
+| Files | Adds `pages/automation/{task-detail,run-list}.tsx` and their tests; extends the manager/dialog controller, task filtering and Step 8 field enablement. |
+
+Notes:
+
+- The detail drawer has rule/run-record tabs, revision-conflict refresh without discarding the draft, active-run rule locking, paused-with-active-run messaging, and pending pause/resume labels.
+- Run history is newest first, paginated by cursor, de-duplicates ids, preserves row order when a run event updates an older row, copies failure reasons, and shows a green check only for `succeeded`.
+- Clicking linked history calls the existing `useSession.openAutomationSession`, which performs the real cross-workspace switch, history merge/focus behavior and context checks. The manager closes only after that callback succeeds; failures remain visible in the run list.
+- Enabled/paused/ended filter movement is driven by authoritative task events. Existing service tests continue to cover pause/resume scheduling and expired one-shot behavior.
+
+Deferred:
+
+- Step 10 owns tray background residency, branded tray menu, close-to-stay and confirmed exit. `BackgroundSupported` stays false.
+- No real Passport, Codex, or OA round trip. No race-detector PASS.
+
+Next: Step 10 Windows background residency and confirmed exit.

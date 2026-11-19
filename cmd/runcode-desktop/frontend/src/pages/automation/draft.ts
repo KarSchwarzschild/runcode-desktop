@@ -185,6 +185,19 @@ export function validateAutomationDraft(draft: AutomationTaskDraft): Record<stri
   return errors
 }
 
+export function draftFromTask(task: { name: string; prompt: string; workspace: string; executionMode: string; schedule: AutomationSchedule }): AutomationTaskDraft {
+  return {
+    name: task.name,
+    prompt: task.prompt,
+    workspace: task.workspace,
+    executionMode: task.executionMode,
+    schedule: {
+      ...task.schedule,
+      weekdays: task.schedule.weekdays ? [...task.schedule.weekdays] : undefined,
+    },
+  }
+}
+
 export function applySaveError(draft: AutomationTaskDraft, message: string): { draft: AutomationTaskDraft; errors: Record<string, string> } {
   return { draft, errors: { schedule: message } }
 }

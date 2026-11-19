@@ -3,14 +3,16 @@ import { MODE_LABEL } from '@/core/permission-modes'
 import { Banner } from '@/ui/feedback'
 import type { AutomationController } from '@/session/use-automation'
 import { browserTimeZone, defaultAutomationDraft } from './draft'
+import { TaskDetail } from './task-detail'
 import { TaskForm } from './task-form'
 import { TaskList } from './task-list'
 
-export function AutomationManager({ auto, onDirty, onCancelCreate, onOpenSettings }: {
+export function AutomationManager({ auto, onDirty, onCancelCreate, onOpenSettings, onOpenRun }: {
   auto: AutomationController
   onDirty?: (dirty: boolean) => void
   onCancelCreate?: () => void
   onOpenSettings?: () => void
+  onOpenRun: (req: { context: NonNullable<AutomationController['context']>; taskId: string; runId: string }) => Promise<void>
 }) {
   const [initial, setInitial] = useState<ReturnType<typeof defaultAutomationDraft> | null>(null)
   const markDirty = useCallback((dirty: boolean) => onDirty?.(dirty), [onDirty])
@@ -47,6 +49,25 @@ export function AutomationManager({ auto, onDirty, onCancelCreate, onOpenSetting
             onCancel={onCancelCreate ?? auto.closeCreate}
             onDirty={markDirty}
             onOpenSettings={onOpenSettings}
+          />
+        </aside>
+      )}
+      {auto.selectedTask && auto.context && !auto.createOpen && (
+        <aside className="automation-drawer absolute inset-y-0 right-0 z-10 bg-surface border-l border-line2 shadow-card overflow-hidden" aria-label="任务详情">
+          <TaskDetail
+            task={auto.selectedTask}
+            context={auto.context}
+            recent={auto.defaults?.recentWorkspaces ?? []}
+            pending={auto.pendingTaskId === auto.selectedTask.id}
+            onSave={(draft, expectedRevision) => auto.updateTask(auto.selectedTask!.id, expectedRevision, draft)}
+            onSetPaused={(paused) => auto.setPaused(auto.selectedTask!, paused).then(() => undefined)}
+            onClose={onCancelCreate ?? (() => auto.selectTask(''))}
+            onDirty={markDirty}
+            onOpenRun={(taskId, runId) => onOpenRun({
+              context: auto.context!,
+              taskId,
+              runId,
+            })}
           />
         </aside>
       )}

@@ -12,9 +12,10 @@ const WEEKDAYS = [
   { day: 7, label: '日' },
 ]
 
-export function ScheduleFields({ value, onChange }: {
+export function ScheduleFields({ value, onChange, disabled = false }: {
   value: AutomationSchedule
   onChange: (next: AutomationSchedule) => void
+  disabled?: boolean
 }) {
   const mode = SCHEDULE_MODES.find((item) => item.value === value.mode)
   const zones = TIME_ZONES.includes(value.timeZone as (typeof TIME_ZONES)[number]) || !value.timeZone
@@ -36,7 +37,7 @@ export function ScheduleFields({ value, onChange }: {
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <fieldset disabled={disabled} className="flex flex-col gap-3 border-0 m-0 p-0 min-w-0">
       <label className={LABEL_CLS}>
         重复
         <SelectField aria-label="重复" value={value.mode} onChange={setMode}>
@@ -122,6 +123,6 @@ export function ScheduleFields({ value, onChange }: {
           {zones.map((zone) => <option key={zone} value={zone}>{zone}</option>)}
         </SelectField>
       </label>
-    </div>
+    </fieldset>
   )
 }

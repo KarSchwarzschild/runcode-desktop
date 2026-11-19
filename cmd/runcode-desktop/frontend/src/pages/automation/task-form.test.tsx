@@ -117,7 +117,9 @@ describe('task form fields', () => {
 
 describe('task form save', () => {
   async function openCreate() {
-    await act(async () => { root.render(<AutomationWorkspaceDialog open onClose={() => {}} />) })
+    await act(async () => {
+      root.render(<AutomationWorkspaceDialog open onClose={() => {}} onOpenRun={async () => {}} />)
+    })
     const create = [...host.querySelectorAll('button')].find((b) => b.textContent === '新建自动化任务')
     await act(async () => { create!.click() })
     const name = host.querySelector('input[aria-label="任务名称"]') as HTMLInputElement
@@ -134,7 +136,13 @@ describe('task form save', () => {
     bridge.createAutomationTask.mockImplementationOnce(() => first)
     bridge.createAutomationTask.mockResolvedValue({
       context: { viewId: 'view', epoch: 1 },
-      task: { id: 't1', revision: 1, name: '整理记录', state: 'enabled', nextRunAtUTC: '2026-11-19T01:00:00Z' },
+      task: {
+        id: 't1', revision: 1, name: '整理记录', prompt: '只回复时间', workspace: 'D:\\资料',
+        executionMode: 'reuse_session',
+        schedule: { mode: 'daily', timeZone: 'Asia/Shanghai', startDate: '2026-11-19', timeOfDay: '09:00:00', interval: 1 },
+        state: 'enabled', nextRunAtUTC: '2026-11-19T01:00:00Z',
+        binding: { modelKind: 'passport', modelName: 'model-a', bindingVersion: 1 },
+      },
       warning: '',
     })
 

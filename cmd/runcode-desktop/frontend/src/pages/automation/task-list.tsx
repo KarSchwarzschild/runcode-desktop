@@ -17,6 +17,10 @@ const TABS: { id: AutomationController['filter']; label: string }[] = [
 const WEEKDAY = ['', '周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const ACTIVE_RUN = new Set(['queued', 'submitting', 'running', 'waiting_permission'])
 
+export function runIsActive(status?: string): boolean {
+  return !!status && ACTIVE_RUN.has(status)
+}
+
 export function scheduleSummary(schedule?: AutomationSchedule): string {
   if (!schedule?.mode) return '时间规则不可用'
   const n = schedule.interval && schedule.interval > 0 ? schedule.interval : 1
@@ -67,10 +71,10 @@ export function formatNextRun(iso: string | undefined, timeZone: string): string
 
 export function taskStatusLine(task: AutomationTask): string {
   const run = task.lastRun
-  if (task.state === 'paused' && run && ACTIVE_RUN.has(run.status)) return '已暂停 · 本次执行继续完成'
+  if (task.state === 'paused' && run && runIsActive(run.status)) return '已暂停 · 本次执行继续完成'
   if (task.blockedReason) return task.blockedReason
   if (run?.status === 'waiting_permission') return '等待授权'
-  if (run && ACTIVE_RUN.has(run.status)) return '执行中'
+  if (run && runIsActive(run.status) && run.status !== 'waiting_permission') return '执行中'
   if (task.state === 'enabled') return '已开启'
   if (task.state === 'paused') return '已暂停'
   if (task.state === 'ended') return run?.reason || '已结束'

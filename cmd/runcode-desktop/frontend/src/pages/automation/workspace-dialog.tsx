@@ -2,13 +2,15 @@ import { useCallback, useEffect, useRef, useState, type KeyboardEvent as ReactKe
 import { ConfirmDialog } from '@/ui/confirm-dialog'
 import { Icon } from '@/ui/icons'
 import { isComposingKey } from '@/ui/keys'
+import type { AutomationContext } from '@/core/bridge'
 import { useAutomation } from '@/session/use-automation'
 import { AutomationManager } from './index'
 
-export function AutomationWorkspaceDialog({ open, onClose, onOpenSettings }: {
+export function AutomationWorkspaceDialog({ open, onClose, onOpenSettings, onOpenRun }: {
   open: boolean
   onClose: () => void
   onOpenSettings?: () => void
+  onOpenRun: (req: { context: AutomationContext; taskId: string; runId: string }) => Promise<void>
 }) {
   const panelRef = useRef<HTMLDivElement>(null)
   const auto = useAutomation(open)
@@ -27,8 +29,8 @@ export function AutomationWorkspaceDialog({ open, onClose, onOpenSettings }: {
   }, [open])
 
   useEffect(() => {
-    if (!auto.createOpen) setDirty(false)
-  }, [auto.createOpen])
+    if (!auto.createOpen && !auto.selectedTaskId) setDirty(false)
+  }, [auto.createOpen, auto.selectedTaskId])
 
   if (!open) return null
 
@@ -45,7 +47,22 @@ export function AutomationWorkspaceDialog({ open, onClose, onOpenSettings }: {
       auto.closeCreate()
       return
     }
+    if (auto.selectedTaskId) {
+      if (dirty) {
+        setAskDiscard(true)
+        return
+      }
+      auto.selectTask('')
+      return
+    }
     onClose()
+  }
+
+  function discardAndClose() {
+    setAskDiscard(false)
+    setDirty(false)
+    if (auto.createOpen) auto.closeCreate()
+    else if (auto.selectedTaskId) auto.selectTask('')
   }
 
   function onKeyDown(e: ReactKeyboardEvent) {
@@ -81,14 +98,23 @@ export function AutomationWorkspaceDialog({ open, onClose, onOpenSettings }: {
             <Icon name="close" size={16} />
           </button>
         </header>
-        <AutomationManager auto={auto} onDirty={markDirty} onCancelCreate={closeTop} onOpenSettings={onOpenSettings} />
+        <AutomationManager
+          auto={auto}
+          onDirty={markDirty}
+          onCancelCreate={closeTop}
+          onOpenSettings={onOpenSettings}
+          onOpenRun={async (req) => {
+            await onOpenRun(req)
+            onClose()
+          }}
+        />
       </div>
       {askDiscard && (
         <ConfirmDialog
           title="放弃未保存的修改？"
           message="关闭后这次填写的内容不会保存。"
           confirmLabel="放弃"
-          onConfirm={() => { setAskDiscard(false); setDirty(false); auto.closeCreate() }}
+          onConfirm={discardAndClose}
           onCancel={() => setAskDiscard(false)}
         />
       )}
