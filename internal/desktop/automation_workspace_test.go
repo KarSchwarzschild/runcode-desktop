@@ -1,6 +1,9 @@
 package desktop
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestAutomationWorkspacePickerContract(t *testing.T) {
 	path := t.TempDir() + "/中文 目录"
@@ -21,6 +24,17 @@ func TestAutomationWorkspacePickerContract(t *testing.T) {
 	}
 	if cancelled != "" {
 		t.Fatalf("cancelled picker returned %q, want empty", cancelled)
+	}
+
+	app.dialog = fakeDialoger{err: errors.New("cancelled by user")}
+	cancelled, err = app.PickWorkspaceFolder()
+	if err != nil || cancelled != "" {
+		t.Fatalf("native cancellation = %q, %v; want empty without an error", cancelled, err)
+	}
+
+	app.dialog = fakeDialoger{err: errors.New("无法打开目录选择器")}
+	if _, err := app.PickWorkspaceFolder(); err == nil {
+		t.Fatal("real picker failures must remain visible")
 	}
 
 	app.dialog = nil

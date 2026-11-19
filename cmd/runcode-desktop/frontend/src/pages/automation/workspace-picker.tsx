@@ -71,6 +71,7 @@ export function WorkspacePicker({ value, current = '', recent, onChange, disable
       onChange(path)
       setOpen(false)
     } catch (e) {
+      if (isPickerCancellation(e)) return
       setError(errText(e))
     }
   }
@@ -155,4 +156,9 @@ export function WorkspacePicker({ value, current = '', recent, onChange, disable
 
 function normalizeWorkspace(path: string): string {
   return path.trim().replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+function isPickerCancellation(error: unknown): boolean {
+  const message = errText(error).trim().toLowerCase()
+  return message === 'cancelled by user' || message === 'canceled by user'
 }

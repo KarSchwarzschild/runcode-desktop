@@ -189,4 +189,21 @@ describe('mergeResumedBlocks', () => {
     expect(merged.some((b) => b.kind === 'assistant' && b.text === '开始整理')).toBe(true)
     expect(merged.filter((b) => b.kind === 'assistant')).toHaveLength(1)
   })
+
+  it('keeps each live answer in its original question position', () => {
+    const live = [
+      assistant('live-a1', '第一答'),
+      assistant('live-a2', '第二答'),
+    ]
+    const resumed = [
+      user('u1', 'q1', '第一问'),
+      assistant('a1', '第一答'),
+      user('u2', 'q2', '第二问'),
+      assistant('a2', '第二答'),
+    ]
+    const merged = mergeResumedBlocks(live, resumed)
+    expect(merged.map((b) => b.kind === 'user' ? b.questionId : b.kind === 'assistant' ? b.text : b.kind)).toEqual([
+      'q1', '第一答', 'q2', '第二答',
+    ])
+  })
 })

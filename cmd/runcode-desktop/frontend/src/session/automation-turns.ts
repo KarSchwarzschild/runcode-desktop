@@ -258,34 +258,48 @@ export function mergeResumedBlocks(live: Block[], resumed: Block[]): Block[] {
     if (b.kind === 'assistant' && b.text) return 'a:' + b.text
     return null
   }
-  const liveKeys = new Set(live.map(keyOf).filter((k): k is string => !!k))
-  const used = new Set<string>()
+  const relatedAssistant = (a: Extract<Block, { kind: 'assistant' }>, b: Extract<Block, { kind: 'assistant' }>): boolean =>
+    !!a.text && !!b.text && (a.text === b.text || a.text.startsWith(b.text) || b.text.startsWith(a.text))
+  const used = new Set<number>()
   const out: Block[] = []
   for (const b of resumed) {
     if (b.kind === 'assistant') {
-      const covered = live.some((l) => l.kind === 'assistant' && !!l.text && (l.text === b.text || l.text.startsWith(b.text) || b.text.startsWith(l.text)))
-      if (covered) continue
-    }
-    const key = keyOf(b)
-    if (key && liveKeys.has(key)) {
-      const found = live.find((l) => keyOf(l) === key)
-      if (found && !used.has(key)) {
-        out.push(found)
-        used.add(key)
+      const idx = live.findIndex((item, index) =>
+        !used.has(index) && item.kind === 'assistant' && relatedAssistant(item, b))
+      if (idx >= 0) {
+        const streamed = live[idx] as Extract<Block, { kind: 'assistant' }>
+        used.add(idx)
+        const streamedTextIsRicher = streamed.text.length >= b.text.length
+        const streamedThinkingIsRicher = (streamed.thinking?.length ?? 0) >= (b.thinking?.length ?? 0)
+        out.push({
+          ...b,
+          ...streamed,
+          id: streamed.id || b.id,
+          text: streamedTextIsRicher ? streamed.text : b.text,
+          thinking: streamedThinkingIsRicher ? streamed.thinking : b.thinking,
+          streaming: false,
+        })
+      } else {
+        out.push(b)
       }
       continue
     }
-    out.push(b)
-  }
-  for (const b of live) {
     const key = keyOf(b)
-    if (key && used.has(key)) continue
-    if (b.kind === 'assistant' && b.text && resumed.some((r) => r.kind === 'assistant' && r.text && (r.text === b.text || r.text.startsWith(b.text) || b.text.startsWith(r.text)))) {
-      if (!out.includes(b)) out.push(b)
-      continue
+    if (key) {
+      const idx = live.findIndex((item, index) => !used.has(index) && keyOf(item) === key)
+      if (idx >= 0) {
+        out.push(live[idx])
+        used.add(idx)
+        continue
+      }
     }
     out.push(b)
-    if (key) used.add(key)
+  }
+  for (let i = 0; i < live.length; i++) {
+    if (used.has(i)) continue
+    const b = live[i]
+    if (b.kind === 'assistant' && resumed.some((r) => r.kind === 'assistant' && relatedAssistant(b, r))) continue
+    out.push(b)
   }
   return out
 }

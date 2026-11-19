@@ -111,4 +111,13 @@ describe('workspace picker', () => {
     expect(document.querySelector('[role="listbox"]')?.textContent).toContain('无法打开目录选择器')
     expect(host.querySelector('[data-value]')?.getAttribute('data-value')).toBe('C:\\Users\\yyzxc\\Desktop\\Test-guokai-client')
   })
+
+  it('treats the native cancelled-by-user error as a silent cancellation', async () => {
+    await act(async () => { root.render(<Harness />) })
+    await act(async () => (host.querySelector('button[aria-haspopup="listbox"]') as HTMLButtonElement).click())
+    bridge.pickWorkspaceFolder.mockRejectedValueOnce(new Error('cancelled by user'))
+    await act(async () => clickBrowse())
+    expect(document.querySelector('[role="listbox"]')?.textContent).not.toContain('cancelled by user')
+    expect(host.querySelector('[data-value]')?.getAttribute('data-value')).toBe('C:\\Users\\yyzxc\\Desktop\\Test-guokai-client')
+  })
 })

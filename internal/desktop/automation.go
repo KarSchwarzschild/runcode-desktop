@@ -1208,20 +1208,37 @@ func (a *App) wireTask(ctx context.Context, task automation.Task, owners []strin
 		if wired.ActiveRunID == "" && isAutomationActiveStatus(run.Status) {
 			wired.ActiveRunID = run.ID
 		}
-		if run.SessionID != "" && (wired.LastLinkedRunID == "" || run.ID == wired.ActiveRunID) {
-			wired.LastLinkedRunID = run.ID
-			title, titleErr := sessions.LoadTitle(run.Workspace, run.SessionID)
-			if titleErr != nil {
-				debugLog("automation session title: %v", titleErr)
-			}
-			wired.LinkedSessionTitle = firstNonEmpty(
-				strings.TrimSpace(title),
-				strings.TrimSpace(run.Prompt),
-				task.Name,
-			)
+	}
+	if run, ok := latestLinkedAutomationRun(page.Items); ok {
+		wired.LastLinkedRunID = run.ID
+		title, titleErr := sessions.LoadTitle(run.Workspace, run.SessionID)
+		if titleErr != nil {
+			debugLog("automation session title: %v", titleErr)
 		}
+		wired.LinkedSessionTitle = firstNonEmpty(
+			strings.TrimSpace(title),
+			strings.TrimSpace(run.Prompt),
+			task.Name,
+		)
 	}
 	return wired, nil
+}
+
+func latestLinkedAutomationRun(runs []automation.Run) (automation.Run, bool) {
+	var latest automation.Run
+	found := false
+	for _, run := range runs {
+		if strings.TrimSpace(run.SessionID) == "" {
+			continue
+		}
+		if !found ||
+			run.ScheduledAtUTC.After(latest.ScheduledAtUTC) ||
+			(run.ScheduledAtUTC.Equal(latest.ScheduledAtUTC) && run.ID > latest.ID) {
+			latest = run
+			found = true
+		}
+	}
+	return latest, found
 }
 
 func wireRun(run automation.Run) AutomationRun {

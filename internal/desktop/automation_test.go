@@ -1001,6 +1001,22 @@ func TestAutomationManualRunIdempotencyAndSoftDelete(t *testing.T) {
 	}
 }
 
+func TestLatestLinkedAutomationRunUsesNewestGeneratedSession(t *testing.T) {
+	older := time.Date(2026, 11, 19, 1, 0, 0, 0, time.UTC)
+	newer := older.Add(time.Minute)
+	runs := []automation.Run{
+		{ID: "run-old", SessionID: "session-old", ScheduledAtUTC: older},
+		{ID: "run-new", SessionID: "session-new", ScheduledAtUTC: newer},
+	}
+	latest, ok := latestLinkedAutomationRun(runs)
+	if !ok || latest.ID != "run-new" || latest.SessionID != "session-new" {
+		t.Fatalf("latest linked run = %+v ok=%v", latest, ok)
+	}
+	if _, ok := latestLinkedAutomationRun([]automation.Run{{ID: "queued-without-session", ScheduledAtUTC: newer}}); ok {
+		t.Fatal("a run without a session must not become the linked conversation")
+	}
+}
+
 func TestAutomationDefaultsUsesSettingsWorkspace(t *testing.T) {
 	app, _ := newAutomationCommandApp(t)
 	current := filepath.Join(t.TempDir(), "Test-guokai-client")

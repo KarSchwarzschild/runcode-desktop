@@ -243,7 +243,15 @@ func (a *App) PickWorkspaceFolder() (string, error) {
 		return "", wireError(errors.New("当前环境不支持目录选择"))
 	}
 	dir, err := dialog.PickFolder("选择工作区目录", "")
+	if err != nil && isFolderPickerCancellation(err) {
+		return "", nil
+	}
 	return dir, wireError(err)
+}
+
+func isFolderPickerCancellation(err error) bool {
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return message == "cancelled by user" || message == "canceled by user"
 }
 
 // resolveWorkspaceDir 把用户选的目录归一成绝对路径并确认它真的是个目录。
