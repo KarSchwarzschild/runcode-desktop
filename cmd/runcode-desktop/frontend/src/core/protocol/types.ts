@@ -74,6 +74,7 @@ export const ErrCodes = {
   NoSession: 'no_session',
   NotFound: 'not_found',
   NotLoggedIn: 'not_logged_in',
+  SettingsApplyFailed: 'settings_apply_failed',
   Unavailable: 'unavailable',
   UsageForbidden: 'usage_forbidden',
   UsageIdentityChanged: 'usage_identity_changed',
@@ -783,6 +784,19 @@ export interface RecorderSettings {
   version: number;
 }
 
+// Mirrors protocol.RecorderSettingsPatch. RecorderSettingsPatch 只携带本次用户编辑的字段。nil 表示保持原值；空串与 false 都是真实修改。Version、Root、SummaryModel 不接受来自设置表单的 patch。
+export interface RecorderSettingsPatch {
+  gatewayUrl?: string;
+  gatewayToken?: string;
+  speakerName?: string;
+  lang?: string;
+  micDeviceId?: string;
+  sysDeviceId?: string;
+  micDiarize?: boolean;
+  keepAudio?: boolean;
+  autoFullMinutes?: boolean;
+}
+
 // Mirrors protocol.RecorderState. RecorderState 是录音状态的变化。
 export interface RecorderState {
   id: string;
@@ -979,6 +993,7 @@ export interface SaveModelContextSettingsRequest {
 
 // Mirrors protocol.SaveSettingsRequest. SaveSettingsRequest 只包含设置页拥有的字段，连接与租户由专用命令管理。
 export interface SaveSettingsRequest {
+  sessionId?: string;
   permissionMode: string;
   harmJudgeModel: string;
   harmJudgeVotes: number;

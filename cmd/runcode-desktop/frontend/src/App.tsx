@@ -44,6 +44,7 @@ import { MarketPage } from '@/pages/market'
 import { PermissionsPage } from '@/pages/permissions'
 import { MemoryPage } from '@/pages/memory'
 import { SettingsPage } from '@/pages/settings'
+import { SettingsSaveProvider, useSettingsSaveRegistry } from '@/pages/settings/settings-save-provider'
 import type { SettingsSectionId } from '@/pages/settings/navigation-model'
 import { StartForm } from '@/pages/start'
 import { UsagePage } from '@/pages/usage'
@@ -54,7 +55,21 @@ import type { ImageGenerationArtifact } from '@/core/bridge'
 export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
 
 export default function App() {
+  return (
+    <SettingsSaveProvider>
+      <AppShell />
+    </SettingsSaveProvider>
+  )
+}
+
+function AppShell() {
   const [view, setView] = useState<View>('chat')
+  const settingsSaves = useSettingsSaveRegistry()
+  const previousView = useRef<View>(view)
+  useEffect(() => {
+    if (previousView.current === 'settings' && view !== 'settings') void settingsSaves.flushAll()
+    previousView.current = view
+  }, [settingsSaves, view])
   // 打开设置时可直达某一节（如生图菜单「修改生图设置」→ 图片生成）；侧栏普通入口保持空。
   const [settingsSection, setSettingsSection] = useState<SettingsSectionId | undefined>()
   const openSettings = (section?: SettingsSectionId) => {

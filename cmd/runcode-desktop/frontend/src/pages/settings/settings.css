@@ -4,34 +4,120 @@
  * 的 clientWidth 算出 narrow，写到 data-narrow 上，组件与样式读同一个结论。两处各算
  * 一遍的话，863/864 这种边界上会出现"样式已是单列、组件还是左侧目录"的错配。 */
 
-.settings-shell {
-  container: settings-shell / inline-size;
-}
-
-/* 不加边框和内边距：它的 clientWidth 就是断点的唯一尺寸来源。 */
 .settings-layout {
   display: grid;
-  grid-template-columns: 200px minmax(0, 1fr);
-  column-gap: 24px;
-  align-items: start;
+  grid-template-columns: 220px minmax(0, 1fr);
+  height: 100%;
+  flex: 1;
+  min-height: 0;
   min-width: 0;
+  background: var(--color-surface);
 }
 
-/* 窄布局改成普通块：网格项的 sticky 只能在自己的网格区域里移动，顶部目录放在第一行
- * 就根本吸不住。 */
 .settings-layout[data-narrow='true'] {
   display: block;
 }
 
-/* 宽目录在滚动根里吸顶；比视口高时自己滚动，max-height 取滚动根高度减去上下各 12px。
- * overscroll-behavior 阻止滚到头时把滚动传给正文。 */
+.settings-nav-column {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-surface2);
+}
+
 .settings-nav {
-  position: sticky;
-  top: 12px;
-  max-height: calc(var(--settings-root-h, 100vh) - 24px);
+  --settings-nav-active: #e5e8f7;
+  flex: 1;
+  height: auto;
+  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   min-width: 0;
+  padding: 28px 12px 24px;
+  border-right: 1px solid var(--color-line2);
+  background: var(--color-surface2);
+}
+
+.settings-nav-title {
+  margin: 0 0 24px 20px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 28px;
+  color: var(--color-ink);
+}
+
+.settings-nav-groups,
+.settings-nav-subitems {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-nav-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-nav-group {
+  min-width: 0;
+}
+
+.settings-nav-category {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: calc(100% - 16px);
+  min-height: 34px;
+  margin-left: 16px;
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.settings-nav-category:hover {
+  background: var(--color-surface);
+}
+
+.settings-nav-category[aria-expanded='true'],
+.settings-nav-category-active {
+  background: var(--settings-nav-active);
+}
+
+.settings-nav-chevron {
+  flex: none;
+  width: 0;
+  height: 0;
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  border-left: 5px solid currentColor;
+  transform-origin: 2px 50%;
+  transition: transform 140ms ease;
+}
+
+.settings-nav-category[aria-expanded='true'] .settings-nav-chevron {
+  transform: rotate(90deg);
+}
+
+.settings-nav-subitems {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 2px;
+}
+
+.settings-nav-subitems[hidden] {
+  display: none;
 }
 
 .settings-compact-nav {
@@ -39,25 +125,93 @@
   top: 0;
   z-index: 2;
   margin-bottom: 12px;
-  padding: 8px 0 10px;
-  background: var(--color-bg);
+  padding: 12px 16px;
+  background: var(--color-surface);
   border-bottom: 1px solid var(--color-line2);
 }
 
 .settings-nav-item {
+  width: calc(100% - 36px);
+  min-height: 32px;
+  margin-left: 36px;
+  padding: 6px 10px 6px 16px;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-ink2);
+  font: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
   overflow-wrap: anywhere;
 }
 
+.settings-nav-item:hover {
+  background: var(--color-surface);
+}
+
+.settings-nav-item-active {
+  border-left-color: var(--color-primary);
+  background: var(--settings-nav-active);
+  color: var(--color-primaryink);
+  font-weight: 500;
+}
+
+.settings-nav-category:focus-visible,
 .settings-nav-item:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: -2px;
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .settings-nav-category,
+  .settings-nav-chevron,
+  .settings-nav-item {
+    transition: none;
+  }
+}
+
 .settings-content {
   display: flex;
   flex-direction: column;
-  gap: 32px;
+  gap: 16px;
   min-width: 0;
+  width: 100%;
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 28px 32px 32px;
+}
+
+.settings-content-scroll {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--color-surface);
+}
+
+.settings-page-heading {
+  margin-bottom: 8px;
+}
+
+.settings-page-heading h1 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 32px;
+  color: var(--color-ink);
+  letter-spacing: 0;
+}
+
+.settings-page-heading p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-muted);
 }
 
 .settings-group {
@@ -65,6 +219,18 @@
   flex-direction: column;
   gap: 16px;
   min-width: 0;
+}
+
+.settings-group[hidden] {
+  display: none;
+}
+
+.settings-section-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
 }
 
 /* 不给 .settings-section 设 display：作者样式里任何 display 都会盖掉 [hidden]。 */
@@ -84,4 +250,13 @@
 .settings-section:focus-visible {
   outline: 2px solid var(--color-primary);
   outline-offset: 3px;
+}
+
+.settings-layout[data-narrow='true'] .settings-content {
+  padding: 20px 16px 28px;
+}
+
+.settings-layout[data-narrow='true'] .settings-nav {
+  height: auto;
+  border-right: 0;
 }

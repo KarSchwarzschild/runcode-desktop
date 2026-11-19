@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, useLayoutEffect, useMemo, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PageShell } from '@/ui/layout'
 import {
   SETTINGS_CATEGORIES,
   buildSettingsNavigation,
+  categoryForSection,
+  sectionsInCategory,
   visibleSectionIds,
+  type SettingsCategoryId,
   type SettingsCapabilities,
   type SettingsSectionId,
 } from './navigation-model'
@@ -95,20 +98,33 @@ const FULL: SettingsCapabilities = { recorderEnabled: true, auditSupported: true
 function Harness({ caps }: { caps: SettingsCapabilities }) {
   const categories = buildSettingsNavigation(caps)
   const visible = visibleSectionIds(categories)
-  const nav = useSettingsNavigation({ visibleIds: visible })
+  const [selected, setSelected] = useState<SettingsCategoryId>('account')
+  const [pending, setPending] = useState<SettingsSectionId | null>(null)
+  const displayed = useMemo(() => sectionsInCategory(categories, selected), [categories, selected])
+  const nav = useSettingsNavigation({ availableIds: visible, displayedIds: displayed })
+  const navigateTo = nav.navigateTo
+  useLayoutEffect(() => {
+    if (!pending || !displayed.includes(pending)) return
+    navigateTo(pending)
+    setPending(null)
+  }, [displayed, navigateTo, pending])
+  const navigate = (id: SettingsSectionId) => {
+    setSelected(categoryForSection(id).id)
+    setPending(id)
+  }
   return (
     <PageShell title="设置" width={864} scrollRef={nav.scrollRef} contentClassName="settings-shell">
       <div ref={nav.layoutRef} className="settings-layout" data-narrow={nav.narrow ? 'true' : 'false'}>
         <SettingsNavigation
           categories={categories}
           activeId={nav.activeId}
-          onNavigate={nav.navigateTo}
+          onNavigate={navigate}
           narrow={nav.narrow}
           compactNavRef={nav.compactNavRef}
         />
         <div ref={nav.contentRef} className="settings-content">
           {SETTINGS_CATEGORIES.map((c) => (
-            <SettingsGroup key={c.id} category={c}>
+            <SettingsGroup key={c.id} category={c} hidden={c.id !== selected}>
               {/* Mirrors the page: a brand without the recorder never mounts it, while
                   the audit wrapper stays mounted and is only hidden. */}
               {c.sections.filter((s) => s.id !== 'recorder' || caps.recorderEnabled).map((s) => (
@@ -187,6 +203,32 @@ async function deliverScrollEvent(m: Mounted) {
 }
 
 describe('SettingsNavigation (wide)', () => {
+  it('rendersCategoryHeadingsAsExpandableButtons', async () => {
+    const onToggleCategory = vi.fn()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => root.render(
+      <SettingsNavigation
+        categories={buildSettingsNavigation(FULL)}
+        activeId="passport"
+        expandedCategoryId="account"
+        onNavigate={() => {}}
+        onToggleCategory={onToggleCategory}
+        narrow={false}
+        compactNavRef={{ current: null }}
+      />,
+    ))
+    const nav = host.querySelector('nav[aria-label="设置目录"]')!
+    const category = button(host, '账号与登录')
+    expect(category.getAttribute('aria-expanded')).toBe('true')
+    expect(nav.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(false)
+    expect(nav.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(true)
+    await click(button(host, '模型与对话'))
+    expect(onToggleCategory).toHaveBeenCalledWith('models')
+    await act(async () => root.unmount())
+  })
+
   it('rendersFiveCategoriesAndOnlyVisibleSections', async () => {
     const m = await mount({ recorderEnabled: false, auditSupported: false })
     try {
@@ -199,6 +241,9 @@ describe('SettingsNavigation (wide)', () => {
         '网络与运行环境', '出网代理', '运行时环境',
         '关于与诊断', '关于与更新', '工作区',
       ])
+      expect(nav.querySelectorAll('ul[id^="settings-category-"]:not([hidden])')).toHaveLength(1)
+      expect(nav.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(false)
+      expect(nav.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(true)
       expect(current(m.host)).toBe('账号（通行证）')
       expect(nav.querySelectorAll('[aria-current]')).toHaveLength(1)
       expect(m.host.querySelector('#settings-recorder')).toBeNull()
@@ -217,7 +262,7 @@ describe('SettingsNavigation (wide)', () => {
       <SettingsNavigation categories={buildSettingsNavigation(FULL)} activeId="passport" onNavigate={onNavigate} narrow={false} compactNavRef={{ current: null }} />,
     ))
     await click(button(host, '图片生成'))
-    await click(button(host, '关于与诊断'))
+    await click(button(host, '上下文审核'))
     expect(onNavigate.mock.calls).toEqual([['image-generation'], ['context-audit']])
     await act(async () => root.unmount())
   })
@@ -267,10 +312,10 @@ describe('useSettingsNavigation', () => {
     }
   })
 
-  it('navigatesACategoryToItsFirstVisibleSection', async () => {
+  it('navigatesASectionInAnotherCategory', async () => {
     const m = await mount({ recorderEnabled: false, auditSupported: false })
     try {
-      await click(button(m.host, '关于与诊断'))
+      await click(button(m.host, '关于与更新'))
       expect(m.scrollTo.mock.calls[0][0]).toMatchObject({ top: Math.min(OFFSETS.updates - 24, CONTENT_H - VIEW_H) })
       expect(current(m.host)).toBe('关于与更新')
     } finally {
@@ -287,8 +332,8 @@ describe('useSettingsNavigation', () => {
       expect(current(m.host)).toBe('关于与更新')
       await resize()
       expect(current(m.host)).toBe('关于与更新')
-      await userScroll(m, 1300)
-      expect(current(m.host)).toBe('出网代理')
+      await userScroll(m, OFFSETS.updates)
+      expect(current(m.host)).toBe('工作区')
       await userScroll(m, CONTENT_H - VIEW_H)
       expect(current(m.host)).toBe('工作区')
     } finally {
@@ -305,8 +350,8 @@ describe('useSettingsNavigation', () => {
       expect(m.scrollTo).toHaveBeenCalledTimes(1)
       expect(current(m.host)).toBe('关于与更新')
       // No scroll event is coming for the second click, so the very next scroll is the user's.
-      await userScroll(m, 1300)
-      expect(current(m.host)).toBe('出网代理')
+      await userScroll(m, 0)
+      expect(current(m.host)).toBe('上下文审核')
     } finally {
       await m.unmount()
     }
@@ -320,7 +365,7 @@ describe('useSettingsNavigation', () => {
       await deliverScrollEvent(m)
       expect(current(m.host)).toBe('工作区')
       await userScroll(m, 0)
-      expect(current(m.host)).toBe('账号（通行证）')
+      expect(current(m.host)).toBe('上下文审核')
     } finally {
       await m.unmount()
     }
@@ -329,6 +374,8 @@ describe('useSettingsNavigation', () => {
   it('followsUserScrollingWithOneMeasurementPerFrame', async () => {
     const m = await mount()
     try {
+      await click(button(m.host, '自定义模型'))
+      m.scrollTo.mockClear()
       m.scroller.scrollTop = OFFSETS['custom-models'] - 10
       await act(async () => {
         m.scroller.dispatchEvent(new Event('scroll'))
@@ -339,7 +386,7 @@ describe('useSettingsNavigation', () => {
       await flushFrames()
       expect(current(m.host)).toBe('自定义模型')
       await userScroll(m, 0)
-      expect(current(m.host)).toBe('账号（通行证）')
+      expect(current(m.host)).toBe('会话')
       expect(m.scrollTo).not.toHaveBeenCalled()
     } finally {
       await m.unmount()
@@ -349,10 +396,11 @@ describe('useSettingsNavigation', () => {
   it('activatesTheLastSectionWithinTwoPixelsOfTheBottom', async () => {
     const m = await mount()
     try {
+      await click(button(m.host, '出网代理'))
       await userScroll(m, CONTENT_H - VIEW_H - 3)
       expect(current(m.host)).toBe('出网代理')
       await userScroll(m, CONTENT_H - VIEW_H - 2)
-      expect(current(m.host)).toBe('工作区')
+      expect(current(m.host)).toBe('运行时环境')
     } finally {
       await m.unmount()
     }
@@ -361,13 +409,15 @@ describe('useSettingsNavigation', () => {
   it('recomputesOnResizeWithoutScrollingOrStealingFocus', async () => {
     const m = await mount()
     try {
-      const draft = m.host.querySelector<HTMLInputElement>('[aria-label="草稿-proxy"]')!
-      draft.focus()
+      await click(button(m.host, '图片识别'))
+      m.scrollTo.mockClear()
+      const visionDraft = m.host.querySelector<HTMLInputElement>('[aria-label="草稿-vision"]')!
+      visionDraft.focus()
       m.scroller.scrollTop = OFFSETS.vision
       await resize()
       expect(current(m.host)).toBe('图片识别')
       expect(m.scrollTo).not.toHaveBeenCalled()
-      expect(document.activeElement).toBe(draft)
+      expect(document.activeElement).toBe(visionDraft)
       expect(m.layout().style.getPropertyValue('--settings-root-h')).toBe(`${VIEW_H}px`)
       const targets = observers.flatMap((o) => o.targets)
       expect(targets).toContain(m.scroller)
@@ -381,12 +431,12 @@ describe('useSettingsNavigation', () => {
   it('fallsBackWhenTheActiveSectionIsHidden', async () => {
     const m = await mount()
     try {
-      const draft = m.host.querySelector<HTMLInputElement>('[aria-label="草稿-login"]')!
+      const draft = m.host.querySelector<HTMLInputElement>('[aria-label="草稿-context-audit"]')!
       await click(button(m.host, '上下文审核'))
       draft.focus()
       await m.rerender({ recorderEnabled: true, auditSupported: false })
       expect(current(m.host)).toBe('关于与更新')
-      expect(document.activeElement).toBe(draft)
+      expect(document.activeElement).not.toBe(m.host.querySelector('#settings-updates'))
       expect(m.host.querySelector<HTMLElement>('#settings-context-audit')!.hidden).toBe(true)
     } finally {
       await m.unmount()
@@ -409,9 +459,9 @@ describe('useSettingsNavigation', () => {
       const draft = m.host.querySelector<HTMLInputElement>('[aria-label="草稿-proxy"]')!
       draft.value = '未保存的代理'
       for (let i = 0; i < 3; i++) {
-        await click(button(m.host, '账号与登录'))
-        await click(button(m.host, '网络与运行环境'))
-        await click(button(m.host, '关于与诊断'))
+        await click(button(m.host, '登录'))
+        await click(button(m.host, '出网代理'))
+        await click(button(m.host, '关于与更新'))
       }
       const after = m.host.querySelector<HTMLInputElement>('[aria-label="草稿-proxy"]')!
       expect(after).toBe(draft)
@@ -455,19 +505,19 @@ describe('narrow layout', () => {
     return m
   }
 
-  it('switchesAt864CssPixelsOfLayoutWidth', async () => {
-    const m = await mountNarrow(863)
+  it('switchesAt880CssPixelsOfLayoutWidth', async () => {
+    const m = await mountNarrow(879)
     try {
       expect(m.layout().dataset.narrow).toBe('true')
       expect(m.host.querySelector('select')).not.toBeNull()
-      setLayoutWidth(m, 864)
+      setLayoutWidth(m, 880)
       await resize()
       expect(m.layout().dataset.narrow).toBe('false')
       expect(m.host.querySelector('select')).toBeNull()
-      setLayoutWidth(m, 865)
+      setLayoutWidth(m, 881)
       await resize()
       expect(m.layout().dataset.narrow).toBe('false')
-      setLayoutWidth(m, 863)
+      setLayoutWidth(m, 879)
       await resize()
       expect(m.layout().dataset.narrow).toBe('true')
     } finally {
@@ -522,20 +572,20 @@ describe('narrow layout', () => {
     try {
       const select = m.host.querySelector('select')!
       expect(select.value).toBe('passport')
-      await userScroll(m, OFFSETS.vision)
-      expect(select.value).toBe('vision')
-      expect(m.host.textContent).toContain('当前：图片识别')
+      await userScroll(m, OFFSETS.login)
+      expect(select.value).toBe('login')
+      expect(m.host.textContent).toContain('当前：登录')
       await act(async () => {
-        select.value = 'login'
+        select.value = 'vision'
         select.dispatchEvent(new Event('change', { bubbles: true }))
       })
-      await userScroll(m, OFFSETS.proxy)
-      expect(select.value).toBe('login')
-      expect(m.host.textContent).toContain('当前：出网代理')
+      await userScroll(m, OFFSETS.login)
+      expect(select.value).toBe('vision')
+      expect(m.host.textContent).toContain('当前：登录')
       await click(button(m.host, '前往'))
       await deliverScrollEvent(m)
-      await userScroll(m, OFFSETS.session)
-      expect(select.value).toBe('session')
+      await userScroll(m, OFFSETS.vision)
+      expect(select.value).toBe('vision')
     } finally {
       await m.unmount()
     }

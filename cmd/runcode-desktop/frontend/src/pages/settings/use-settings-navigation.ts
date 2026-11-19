@@ -22,24 +22,36 @@ const LINE_TOLERANCE = 1
 // 认领程序滚动事件、判断"已在目标偏移"时的容差，理由同上。
 const OFFSET_TOLERANCE = 1
 
-export function useSettingsNavigation({ visibleIds }: { visibleIds: readonly SettingsSectionId[] }) {
+export function useSettingsNavigation({
+  availableIds,
+  displayedIds,
+}: {
+  availableIds: readonly SettingsSectionId[]
+  displayedIds: readonly SettingsSectionId[]
+}) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const layoutRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const compactNavRef = useRef<HTMLDivElement>(null)
   const sections = useRef(new Map<SettingsSectionId, HTMLElement>())
 
-  // 调用方每次渲染都会给一个新数组；按内容收敛成稳定引用，免得每次渲染都重跑回落。
-  const visibleKey = visibleIds.join('|')
-  const visible = useMemo(
-    () => (visibleKey ? (visibleKey.split('|') as SettingsSectionId[]) : []),
-    [visibleKey],
+  // 可用项决定准入与能力回落；显示项只决定几何测量，二者不能混用。
+  const availableKey = availableIds.join('|')
+  const displayedKey = displayedIds.join('|')
+  const available = useMemo(
+    () => (availableKey ? (availableKey.split('|') as SettingsSectionId[]) : []),
+    [availableKey],
   )
-  const visibleRef = useRef(visible)
+  const displayed = useMemo(
+    () => (displayedKey ? (displayedKey.split('|') as SettingsSectionId[]) : []),
+    [displayedKey],
+  )
+  const availableRef = useRef(available)
+  const displayedRef = useRef(displayed)
 
   const [narrow, setNarrow] = useState(false)
   const narrowRef = useRef(false)
-  const [activeId, setActiveId] = useState<SettingsSectionId | null>(() => visible[0] ?? null)
+  const [activeId, setActiveId] = useState<SettingsSectionId | null>(() => available[0] ?? null)
 
   // 点击目录后高亮钉在点击目标上，直到下一次用户滚动。页尾目标会被滚动上限截住、
   // 标题到不了定位线，按几何算会立刻变成别的节——用户刚点的那项不能被这样改掉。
@@ -75,7 +87,7 @@ export function useSettingsNavigation({ visibleIds }: { visibleIds: readonly Set
     if (pinned.current) return
     const rootTop = root.getBoundingClientRect().top
     const positions: SectionPosition[] = []
-    for (const id of visibleRef.current) {
+    for (const id of displayedRef.current) {
       const el = sections.current.get(id)
       if (el) positions.push({ id, top: el.getBoundingClientRect().top - rootTop })
     }
@@ -126,11 +138,16 @@ export function useSettingsNavigation({ visibleIds }: { visibleIds: readonly Set
     return () => ro.disconnect()
   }, [schedule, narrow])
 
-  // 当前项被隐藏（审核能力读取失败/不支持）时按清单顺序回落，只改目录状态。
+  // 能力变化按完整可用清单回落；切组时高亮先落到新组首项，随后由待定位目标覆盖。
   useEffect(() => {
-    visibleRef.current = visible
-    setActiveId((prev) => (prev ? resolveVisibleSection(prev, visible) : visible[0] ?? null))
-  }, [visible])
+    availableRef.current = available
+    displayedRef.current = displayed
+    setActiveId((prev) => {
+      if (prev && available.includes(prev) && displayed.includes(prev)) return prev
+      if (displayed.length > 0) return displayed[0]
+      return prev ? resolveVisibleSection(prev, available) : available[0] ?? null
+    })
+  }, [available, displayed])
 
   const registerSection = useCallback((id: SettingsSectionId, node: HTMLElement | null) => {
     if (node) sections.current.set(id, node)
@@ -140,7 +157,7 @@ export function useSettingsNavigation({ visibleIds }: { visibleIds: readonly Set
   const navigateTo = useCallback((id: SettingsSectionId) => {
     const root = scrollRef.current
     const target = sections.current.get(id)
-    if (!root || !target || !visibleRef.current.includes(id)) return
+    if (!root || !target || !availableRef.current.includes(id)) return
     const max = Math.max(0, root.scrollHeight - root.clientHeight)
     const wanted = root.scrollTop + target.getBoundingClientRect().top - root.getBoundingClientRect().top - topInset()
     const top = Math.min(max, Math.max(0, wanted))

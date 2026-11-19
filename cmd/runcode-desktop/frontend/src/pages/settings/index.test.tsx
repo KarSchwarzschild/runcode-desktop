@@ -58,6 +58,7 @@ vi.mock('@/core/bridge', async (importOriginal) => {
 })
 
 import { SettingsPage } from './index'
+import { SettingsSaveProvider } from './settings-save-provider'
 
 const custom = { name: 'local-llm', provider: 'openai-compatible', model: 'qwen', baseURL: 'http://127.0.0.1:11434', hasAPIKey: false }
 const contextView = {
@@ -148,15 +149,17 @@ async function mount(page: ReactElement) {
 
 function page(opts: { busy?: boolean; session?: SessionInfo; initial?: Record<string, unknown>; initialSection?: 'image-generation' | 'passport' } = {}) {
   return (
-    <SettingsPage
-      initial={{ permissionMode: 'interactive', skipLogin: false, harmJudgeModel: '', harmJudgeVotes: 1, ...(opts.initial ?? {}) }}
-      info={opts.session ?? info()}
-      busy={opts.busy ?? false}
-      update={update}
-      initialSection={opts.initialSection}
-      onSaved={onSaved}
-      onSwitchModel={onSwitchModel}
-    />
+    <SettingsSaveProvider>
+      <SettingsPage
+        initial={{ permissionMode: 'interactive', skipLogin: false, harmJudgeModel: '', harmJudgeVotes: 1, ...(opts.initial ?? {}) }}
+        info={opts.session ?? info()}
+        busy={opts.busy ?? false}
+        update={update}
+        initialSection={opts.initialSection}
+        onSaved={onSaved}
+        onSwitchModel={onSwitchModel}
+      />
+    </SettingsSaveProvider>
   )
 }
 
@@ -169,12 +172,6 @@ function navButton(text: string) {
 async function go(text: string) {
   await act(async () => { navButton(text).click() })
   await flush()
-}
-
-function saveButton() {
-  const found = Array.from(host.querySelectorAll('button')).find((b) => b.textContent === '保存设置' || b.textContent === '保存中…' || b.textContent === '正在同步租户…')
-  if (!found) throw new Error('save button missing')
-  return found as HTMLButtonElement
 }
 
 function skipToggle() {
@@ -216,6 +213,53 @@ async function typeInto(el: HTMLInputElement, value: string) {
 }
 
 describe('SettingsPage navigation shell', () => {
+  it('showsOnlyTheSelectedCategoryAndExpandsItsCategoryHeading', async () => {
+    await mount(page())
+    expect(navButton('账号与登录').getAttribute('aria-expanded')).toBe('true')
+    expect(navButton('模型与对话').getAttribute('aria-expanded')).toBe('false')
+    expect(host.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(false)
+    expect(host.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(true)
+    expect(host.querySelector('.settings-page-heading')?.textContent).toContain('账号与登录')
+    expect(host.querySelector<HTMLElement>('#settings-passport')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(false)
+    expect(host.querySelector<HTMLElement>('#settings-login')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(false)
+    expect(host.querySelector<HTMLElement>('#settings-session')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(true)
+  })
+
+  it('switchesTheExpandedCategoryAndCollapsesThePreviousOne', async () => {
+    await mount(page())
+    await go('模型与对话')
+    expect(navButton('账号与登录').getAttribute('aria-expanded')).toBe('false')
+    expect(navButton('模型与对话').getAttribute('aria-expanded')).toBe('true')
+    expect(host.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(true)
+    expect(host.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(false)
+    expect(host.querySelector('.settings-page-heading')?.textContent).toContain('模型与对话')
+    expect(host.querySelector('nav [aria-current="location"]')?.textContent).toBe('会话')
+    const modelGroup = host.querySelector<HTMLElement>('#settings-session')!.closest<HTMLElement>('.settings-group')!
+    expect(modelGroup.hidden).toBe(false)
+    expect(modelGroup.querySelectorAll('section[id^="settings-"]')).toHaveLength(3)
+  })
+
+  it('collapsesTheCurrentCategoryWithoutChangingTheRightPane', async () => {
+    await mount(page())
+    await go('模型与对话')
+    await go('模型与对话')
+    expect(navButton('模型与对话').getAttribute('aria-expanded')).toBe('false')
+    expect(navButton('模型与对话').classList.contains('settings-nav-category-active')).toBe(true)
+    expect(host.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(true)
+    expect(host.querySelector('.settings-page-heading')?.textContent).toContain('模型与对话')
+    expect(host.querySelector<HTMLElement>('#settings-session')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(false)
+  })
+
+  it('keepsBothAccountCardsVisibleWhenLoginIsSelected', async () => {
+    await mount(page())
+    await go('登录')
+    const accountGroup = host.querySelector<HTMLElement>('#settings-passport')!.closest<HTMLElement>('.settings-group')!
+    expect(accountGroup.hidden).toBe(false)
+    expect(accountGroup.contains(host.querySelector('#settings-login'))).toBe(true)
+    expect(host.querySelector<HTMLElement>('#settings-session')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(true)
+    expect(host.querySelector('nav [aria-current="location"]')?.textContent).toBe('登录')
+  })
+
   it('rendersDirectoryAndAnchorsInCatalogOrderIncludingImageGeneration', async () => {
     await mount(page())
     const labels = Array.from(host.querySelectorAll('nav[aria-label="设置目录"] button')).map((b) => b.textContent)
@@ -224,9 +268,9 @@ describe('SettingsPage navigation shell', () => {
     expect(labels.indexOf('图片生成')).toBeLessThan(labels.indexOf('录音纪要'))
     expect(host.querySelector('#settings-image-generation')).not.toBeNull()
     expect(host.querySelector('#settings-image-generation')!.textContent).toContain('图片生成')
-    expect(host.querySelector('.settings-shell')!.getAttribute('style')).toContain('864px')
-    expect(host.textContent).toContain('按目录定位设置')
-    expect(host.textContent).toContain('仅保存免登录、权限模式与判定设置')
+    expect(host.querySelector('.settings-layout')).not.toBeNull()
+    expect(host.querySelector('.settings-page-heading')?.textContent).toContain('账号与登录')
+    expect(host.textContent).not.toContain('保存设置')
     const anchors = Array.from(host.querySelectorAll('section[id^="settings-"]')).map((el) => el.id)
     expect(anchors).toEqual([
       'settings-passport', 'settings-login',
@@ -243,6 +287,8 @@ describe('SettingsPage navigation shell', () => {
     await mount(page({ initialSection: 'image-generation' }))
     const active = host.querySelector('nav[aria-label="设置目录"] button[aria-current="location"]')
     expect(active?.textContent).toBe('图片生成')
+    expect(navButton('图片与录音').getAttribute('aria-expanded')).toBe('true')
+    expect(host.querySelector('#settings-category-media-sections')?.hasAttribute('hidden')).toBe(false)
     expect(document.activeElement?.closest('#settings-image-generation')).not.toBeNull()
   })
 
@@ -281,7 +327,7 @@ describe('SettingsPage navigation shell', () => {
 })
 
 describe('SettingsPage draft and save contracts', () => {
-  it('keepsDraftsAcrossCategoryTripsWithoutSaving', async () => {
+  it('autosavesTheLatestFourFieldsAcrossCategoryTrips', async () => {
     await mount(page())
     await act(async () => { skipToggle().click() })
     await act(async () => {
@@ -301,10 +347,10 @@ describe('SettingsPage draft and save contracts', () => {
     expect(contextInputs[0].value).toBe('4096')
 
     for (let i = 0; i < 3; i++) {
-      await go('账号与登录')
-      await go('图片与录音')
-      await go('网络与运行环境')
-      await go('模型与对话')
+      await go('登录')
+      await go('图片识别')
+      await go('出网代理')
+      await go('会话')
     }
 
     expect(skipToggle().getAttribute('aria-checked')).toBe('true')
@@ -313,26 +359,33 @@ describe('SettingsPage draft and save contracts', () => {
     expect(customNameInput().value).toBe('草稿模型')
     expect(proxyInput().value).toBe('127.0.0.1:7890')
     expect(host.querySelectorAll<HTMLInputElement>('#settings-model-context input')[0].value).toBe('4096')
-    expect(api.saveSettings).not.toHaveBeenCalled()
+    expect(api.saveSettings).toHaveBeenCalled()
+    expect(api.saveSettings.mock.calls[api.saveSettings.mock.calls.length - 1]?.[0]).toMatchObject({
+      sessionId: 'A',
+      permissionMode: 'judge',
+      harmJudgeVotes: 3,
+      skipLogin: true,
+    })
     expect(api.setWebProxy).not.toHaveBeenCalled()
     expect(api.saveModelContextSettings).not.toHaveBeenCalled()
     expect(onSwitchModel).not.toHaveBeenCalled()
     // Same DOM nodes for the drafts we care about most for mount stability.
     const proxyNode = proxyInput()
-    await go('关于与诊断')
-    await go('网络与运行环境')
+    await go('关于与更新')
+    await go('出网代理')
     expect(proxyInput()).toBe(proxyNode)
   })
 
-  it('savesOnlyTheFourBottomFields', async () => {
-    await mount(page({ initial: { skipLogin: true, harmJudgeModel: 'judge-x', harmJudgeVotes: 5 }, session: info({ permissionMode: 'judge' }) }))
-    await act(async () => { saveButton().click() })
+  it('autosavesFourFieldsWithTheCapturedSessionId', async () => {
+    await mount(page({ initial: { skipLogin: false, harmJudgeModel: 'judge-x', harmJudgeVotes: 1 }, session: info({ permissionMode: 'judge' }) }))
+    await act(async () => { skipToggle().click() })
+    await act(async () => {
+      votesSelect().value = '5'
+      votesSelect().dispatchEvent(new Event('change', { bubbles: true }))
+    })
     await flush()
-    expect(api.saveSettings).toHaveBeenCalledTimes(1)
-    expect(Object.keys(api.saveSettings.mock.calls[0][0]).sort()).toEqual([
-      'harmJudgeModel', 'harmJudgeVotes', 'permissionMode', 'skipLogin',
-    ])
-    expect(api.saveSettings.mock.calls[0][0]).toEqual({
+    expect(api.saveSettings.mock.calls[api.saveSettings.mock.calls.length - 1]?.[0]).toEqual({
+      sessionId: 'A',
       permissionMode: 'judge', harmJudgeModel: 'judge-x', harmJudgeVotes: 5, skipLogin: true,
     })
     expect(api.setWebProxy).not.toHaveBeenCalled()
@@ -343,24 +396,43 @@ describe('SettingsPage draft and save contracts', () => {
     expect(api.saveRecorderSettings).not.toHaveBeenCalled()
   })
 
+  it('rebasesAChangedChatPermissionBeforeSavingAnotherField', async () => {
+    await mount(page({ session: info({ permissionMode: 'interactive' }) }))
+    await act(async () => root.render(page({ session: info({ permissionMode: 'judge' }) })))
+    await flush()
+
+    await act(async () => { skipToggle().click() })
+    await flush()
+
+    expect(api.saveSettings.mock.calls[api.saveSettings.mock.calls.length - 1]?.[0]).toMatchObject({
+      sessionId: 'A',
+      permissionMode: 'judge',
+      skipLogin: true,
+    })
+  })
+
   it('keepsSaveFailureVisibleAfterNavigation', async () => {
     api.saveSettings.mockRejectedValueOnce(new Error('保存失败：磁盘已满'))
     await mount(page())
-    await act(async () => { saveButton().click() })
+    await act(async () => { skipToggle().click() })
     await flush()
     expect(host.textContent).toContain('保存失败：磁盘已满')
     expect(host.textContent).not.toContain('✓ 已保存')
     await go('图片识别')
-    await go('账号与登录')
+    await go('登录')
     expect(host.textContent).toContain('保存失败：磁盘已满')
   })
 
-  it('savesProxyIndependentlyFromBottomSave', async () => {
+  it('autosavesProxyWithoutTheRemovedBottomButton', async () => {
     await mount(page())
+    await go('出网代理')
     await typeInto(proxyInput(), 'socks5://127.0.0.1:1080')
-    const proxySave = Array.from(host.querySelectorAll('#settings-proxy button')).find((b) => b.textContent === '保存')
-    if (!proxySave) throw new Error('proxy save missing')
-    await act(async () => { (proxySave as HTMLButtonElement).click() })
+    await act(async () => {
+      proxyInput().focus()
+      proxyInput().blur()
+      await Promise.resolve()
+      await Promise.resolve()
+    })
     await flush()
     expect(api.setWebProxy).toHaveBeenCalledWith('socks5://127.0.0.1:1080')
     expect(api.saveSettings).not.toHaveBeenCalled()
@@ -373,7 +445,7 @@ describe('SettingsPage disable matrix', () => {
     let releaseStatus!: (v: { loggedIn: boolean }) => void
     api.passportStatus.mockReturnValue(new Promise((r) => { releaseStatus = r }))
     await mount(page({ busy: true, session: info({ readOnlyReason: '只读历史会话' }) }))
-    expect(saveButton().disabled).toBe(true)
+    expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent === '保存设置')).toBe(false)
     expect(host.textContent).toContain('只读历史会话')
     expect(host.textContent).toContain('对话进行中，暂不能切换模型')
     expect(navButton('图片生成')).not.toBeNull()
@@ -394,7 +466,7 @@ describe('SettingsPage disable matrix', () => {
     // Keep models resolving so ready stays false after tenant is known.
     api.passportModels.mockReturnValue(new Promise(() => {}))
     await mount(page())
-    expect(saveButton().disabled).toBe(true)
+    expect(Array.from(host.querySelectorAll('button')).some((button) => button.textContent === '保存设置')).toBe(false)
     expect(navButton('会话')).not.toBeNull()
     await go('工作区')
     expect(host.querySelector('#settings-workspace')!.textContent).toContain('C:\\ws')
