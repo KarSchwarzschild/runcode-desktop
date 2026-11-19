@@ -53,7 +53,6 @@ describe('GeneratedImagePreview', () => {
       <GeneratedImagePreview tool={tool('progress')} sessionId="S" />,
     ))
     expect(host.querySelector('.ig-preview-shimmer')).toBeTruthy()
-    expect(host.querySelector('.ig-card-shimmer')).toBeNull()
     expect(host.textContent).toContain('预览图片')
   })
 

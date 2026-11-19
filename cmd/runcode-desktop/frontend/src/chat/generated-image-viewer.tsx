@@ -1,6 +1,6 @@
 // 栅格生图查看容器（只读大图）。
-// 2026-11-18：永久删除底部紫色「开始标注」及查看器内标注模式／画板挂载；
-// image-edit-* 实现仍保留供日后另开入口，本文件不再引用。
+// 当前只挂载只读大图；查看器的标注模式与脏状态由 context 保留，
+// image-edit-* 也完整保留，重新启用入口时无需重建能力。
 import { BTN } from '@/ui/tokens'
 import { GeneratedImageModalSurface } from './generated-image-modal-surface'
 import { useGeneratedImageViewer } from './generated-image-viewer-context'
