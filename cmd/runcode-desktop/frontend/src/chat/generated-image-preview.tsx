@@ -12,47 +12,14 @@ import { basename } from '@/core/paths'
 import { Icon } from '@/ui/icons'
 import { ArtifactActionsContext } from './artifact-actions'
 import { IMAGE_GENERATION_ANNOTATION_UI } from './image-generation-annotation'
+import {
+  computePreviewDisplaySize, parseSizeHint, resolvePreviewGeometry,
+  type PreviewGeometry,
+} from './generated-image-size'
 import './generated-image-preview.css'
 
 const REVEAL_STRIPS = 8
 const REVEAL_FALLBACK_MS = 700
-
-export type PreviewDisplaySize = { width: number; height: number; provisional: boolean }
-
-/** 等比缩放：Wcap=min(560,C) Hcap=min(560,0.65×vh)，正方形可到对话内常见大图尺寸；不放大小图。 */
-export function computePreviewDisplaySize(
-  naturalW: number,
-  naturalH: number,
-  containerW: number,
-  viewportH: number,
-): PreviewDisplaySize {
-  const w = Math.max(1, naturalW)
-  const h = Math.max(1, naturalH)
-  const C = Math.max(1, containerW)
-  const Wcap = Math.min(560, C)
-  const Hcap = Math.min(560, 0.65 * Math.max(1, viewportH))
-  const s = Math.min(1, Wcap / w, Hcap / h)
-  return { width: Math.max(1, Math.round(w * s)), height: Math.max(1, Math.round(h * s)), provisional: false }
-}
-
-function parseSizeHint(tool: ToolEvent): { w: number; h: number } | null {
-  const raw = (() => {
-    const input = tool.input
-    if (input && typeof input === 'object' && typeof (input as { size?: unknown }).size === 'string') {
-      return (input as { size: string }).size
-    }
-    const data = tool.data
-    if (data && typeof data === 'object' && typeof (data as { size?: unknown }).size === 'string') {
-      return (data as { size: string }).size
-    }
-    return ''
-  })()
-  const m = /^(\d+)\s*[x×]\s*(\d+)$/i.exec((raw || '').trim())
-  if (!m) return null
-  const w = Number(m[1]), h = Number(m[2])
-  if (!Number.isFinite(w) || !Number.isFinite(h) || w <= 0 || h <= 0) return null
-  return { w, h }
-}
 
 function useVisible(ref: RefObject<HTMLElement | null>): boolean {
   const [visible, setVisible] = useState(false)
@@ -180,17 +147,14 @@ export function GeneratedImagePreview({
   const naturalH = image?.height || hint?.h || 1024
   const vh = typeof window !== 'undefined' ? window.innerHeight : 800
   const layoutKey = `${sessionId}|${tool.toolUseID ?? path}`
-  const layoutRef = useRef<{ key: string; width: number; height: number; locked: boolean } | null>(null)
-  if (!layoutRef.current || layoutRef.current.key !== layoutKey) {
-    // 首次出现时确定舞台几何。running 期间允许提示尺寸补进来一次；
-    // 完成瞬间锁定，避免真实图片宽高把整段对话向上推。
-    layoutRef.current = { key: layoutKey, width: naturalW, height: naturalH, locked: !running }
-  } else if (running && !layoutRef.current.locked && hint) {
-    layoutRef.current.width = hint.w
-    layoutRef.current.height = hint.h
-  } else if (!running && !layoutRef.current.locked) {
-    layoutRef.current.locked = true
-  }
+  const layoutRef = useRef<PreviewGeometry | null>(null)
+  layoutRef.current = resolvePreviewGeometry(layoutRef.current, {
+    key: layoutKey,
+    width: naturalW,
+    height: naturalH,
+    running,
+    hint,
+  })
   const display = computePreviewDisplaySize(
     layoutRef.current.width,
     layoutRef.current.height,

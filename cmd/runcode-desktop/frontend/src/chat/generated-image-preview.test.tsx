@@ -15,7 +15,7 @@ vi.mock('@/core/bridge', async () => {
   }
 })
 
-import { computePreviewDisplaySize, GeneratedImagePreview } from './generated-image-preview'
+import { GeneratedImagePreview } from './generated-image-preview'
 
 const image: ImageGenerationArtifact = {
   path: '生成图片/gen_1/image.png', mimeType: 'image/png', bytes: 2048, width: 1024, height: 1024,
@@ -45,17 +45,6 @@ afterEach(async () => {
   await act(async () => root.unmount())
   host.remove()
   vi.unstubAllGlobals()
-})
-
-describe('computePreviewDisplaySize', () => {
-  it('三比例在常规上限下等比缩放且不放大', () => {
-    expect(computePreviewDisplaySize(1024, 1024, 800, 900)).toEqual({ width: 560, height: 560, provisional: false })
-    expect(computePreviewDisplaySize(1280, 720, 800, 900)).toEqual({ width: 560, height: 315, provisional: false })
-    const portrait = computePreviewDisplaySize(720, 1280, 800, 900)
-    expect(portrait.height).toBe(560)
-    expect(portrait.width).toBe(Math.round(720 * (560 / 1280)))
-    expect(computePreviewDisplaySize(200, 100, 800, 900)).toEqual({ width: 200, height: 100, provisional: false })
-  })
 })
 
 describe('GeneratedImagePreview', () => {
