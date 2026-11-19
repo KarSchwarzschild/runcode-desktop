@@ -9,6 +9,7 @@ import {
   ensureSubmittingNote,
   mergeAutomationRun,
   projectAutomationRuns,
+  projectSessionAutomationRuns,
 } from './automation-run'
 
 const ctx = { viewId: 'view-1', epoch: 1 }
@@ -58,6 +59,23 @@ describe('projectAutomationRuns', () => {
       'q1', 'automation:r1', 'assistant', 'q2', 'automation:r2', 'assistant',
     ])
     expect(cards(out)).toHaveLength(2)
+  })
+
+  it('pairs repeated session prompts in order when question ids differ', () => {
+    const blocks = [
+      user('u1', 'history-q1', 'say hello'),
+      assistant('a1', '第一答'),
+      user('u2', 'history-q2', 'say hello'),
+      assistant('a2', '第二答'),
+    ]
+    const out = projectSessionAutomationRuns(blocks, [
+      run({ id: 'r1', questionId: 'old-q1', prompt: 'say hello', scheduledAtUTC: '2026-11-18T01:00:00Z' }),
+      run({ id: 'r2', questionId: 'old-q2', prompt: 'say hello', scheduledAtUTC: '2026-11-18T02:00:00Z' }),
+    ])
+    expect(out.map((b) => b.kind === 'tool' ? b.tool.toolUseID : b.kind === 'user' ? b.questionId : b.kind)).toEqual([
+      'history-q1', 'automation:r1', 'assistant', 'history-q2', 'automation:r2', 'assistant',
+    ])
+    expect(users(out).map((b) => b.id)).toEqual(['u1', 'u2'])
   })
 
   it('does not duplicate a card when a lookup follows the event', () => {

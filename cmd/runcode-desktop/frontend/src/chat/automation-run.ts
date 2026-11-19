@@ -155,7 +155,13 @@ function ordered(runs: AutomationRun[]): AutomationRun[] {
   return [...runs].sort((a, b) => (a.scheduledAtUTC || '').localeCompare(b.scheduledAtUTC || '') || a.id.localeCompare(b.id))
 }
 
-function placeAutomationRun(blocks: Block[], run: AutomationRun, owned: boolean): Block[] {
+function placeAutomationRun(
+  blocks: Block[],
+  run: AutomationRun,
+  owned: boolean,
+  claimedUsers?: Set<string>,
+  matchPrompt = false,
+): Block[] {
   const toolId = automationToolUseId(run.id)
   const noteId = automationNoteId(run.id)
   const userId = automationUserId(run.id)
@@ -184,10 +190,22 @@ function placeAutomationRun(blocks: Block[], run: AutomationRun, owned: boolean)
   }
   const stripped = blocks.filter((b) => !(b.kind === 'tool' && b.tool.toolUseID === toolId) && !(b.kind === 'notice' && b.id === failId))
   const user: Block = { kind: 'user', id: userId, questionId: run.questionId, text: run.prompt ?? '', ts: '' }
-  const userIdx = stripped.findIndex((b) => b.kind === 'user' && (b.questionId === run.questionId || b.id === userId))
-  if (userIdx >= 0) {
-    const withoutNote = stripped.filter((b) => !(b.kind === 'notice' && b.id === noteId))
-    const idx = withoutNote.findIndex((b) => b.kind === 'user' && (b.questionId === run.questionId || b.id === userId))
+  const withoutNote = stripped.filter((b) => !(b.kind === 'notice' && b.id === noteId))
+  let idx = withoutNote.findIndex((b) =>
+    b.kind === 'user'
+    && (b.questionId === run.questionId || b.id === userId)
+    && (!claimedUsers || !claimedUsers.has(b.id)),
+  )
+  if (idx < 0 && matchPrompt && !!run.prompt) {
+    idx = withoutNote.findIndex((b) =>
+      b.kind === 'user'
+      && b.text === run.prompt
+      && (!claimedUsers || !claimedUsers.has(b.id)),
+    )
+  }
+  if (idx >= 0) {
+    const matched = withoutNote[idx]
+    if (matched.kind === 'user') claimedUsers?.add(matched.id)
     const copy = withoutNote.slice()
     copy.splice(idx + 1, 0, card)
     return copy
@@ -199,6 +217,7 @@ function placeAutomationRun(blocks: Block[], run: AutomationRun, owned: boolean)
     return copy
   }
   if (!owned) return blocks
+  claimedUsers?.add(userId)
   return [...stripped, user, card]
 }
 
@@ -214,7 +233,8 @@ export function projectAutomationRuns(blocks: Block[], runs: AutomationRun[]): B
 // belong to this session. A receipt that arrives before any stream is appended
 // once; it is not matched to an unrelated earlier question.
 export function projectSessionAutomationRuns(blocks: Block[], runs: AutomationRun[]): Block[] {
-  return ordered(runs).reduce((acc, run) => placeAutomationRun(acc, run, true), blocks)
+  const claimedUsers = new Set<string>()
+  return ordered(runs).reduce((acc, run) => placeAutomationRun(acc, run, true, claimedUsers, true), blocks)
 }
 
 export function clearAutomationProjection(blocks: Block[]): Block[] {
