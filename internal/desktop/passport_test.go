@@ -3,6 +3,7 @@ package desktop
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -102,6 +103,35 @@ func TestPassportModels(t *testing.T) {
 	}
 	if len(models) != 2 || models[0].ID != "qwen-max" || models[1].OwnedBy != "zhipu" {
 		t.Fatalf("models = %+v", models)
+	}
+}
+
+func TestPassportModelsExcludeImageGenerationOnlyModels(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":[` +
+			`{"id":"legacy","owned_by":"old"},` +
+			`{"id":"chat","owned_by":"text","capabilities":["chat"]},` +
+			`{"id":"image-only","owned_by":"image","capabilities":["image_generation"]},` +
+			`{"id":"dual","owned_by":"multi","capabilities":["chat","image_generation"]}` +
+			`]}`))
+	}))
+	defer srv.Close()
+	t.Setenv("RUNCODE_BRIDGE_BASE_URL", srv.URL)
+	isolateConfigDir(t)
+
+	app := New(&recordingSink{})
+	app.tokens.setInMemory(tokenSet{AccessToken: "AT", Expiry: time.Now().Add(time.Hour)})
+	models, err := app.PassportModels("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(models))
+	for _, model := range models {
+		got = append(got, model.ID)
+	}
+	if strings.Join(got, ",") != "legacy,chat,dual" {
+		t.Fatalf("chat models = %v", got)
 	}
 }
 

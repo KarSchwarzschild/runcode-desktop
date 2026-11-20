@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -306,15 +307,16 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 	// "没有本地模型"——于是 OA 工具不注册，而不是错把云端模型当成本地的。
 	var payload struct {
 		Data []struct {
-			ID                 string `json:"id"`
-			OwnedBy            string `json:"owned_by"`
-			SupportsImages     *bool  `json:"supports_images"`
-			VisionDefault      bool   `json:"vision_default"`
-			Local              bool   `json:"local"`
-			LocalDefault       bool   `json:"local_default"`
-			ContextTokens      *int   `json:"context_tokens"`
-			MaxOutputTokens    *int   `json:"max_output_tokens"`
-			MaxHistoryMessages *int   `json:"max_history_messages"`
+			ID                 string   `json:"id"`
+			OwnedBy            string   `json:"owned_by"`
+			Capabilities       []string `json:"capabilities"`
+			SupportsImages     *bool    `json:"supports_images"`
+			VisionDefault      bool     `json:"vision_default"`
+			Local              bool     `json:"local"`
+			LocalDefault       bool     `json:"local_default"`
+			ContextTokens      *int     `json:"context_tokens"`
+			MaxOutputTokens    *int     `json:"max_output_tokens"`
+			MaxHistoryMessages *int     `json:"max_history_messages"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(body, &payload); err != nil {
@@ -322,6 +324,9 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 	}
 	models := make([]PassportModel, 0, len(payload.Data))
 	for _, m := range payload.Data {
+		if !passportCapabilitiesAllowChat(m.Capabilities) {
+			continue
+		}
 		contextTokens := 0
 		if m.ContextTokens != nil {
 			contextTokens = *m.ContextTokens
@@ -356,6 +361,13 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 	}
 	a.rememberLocalModel(tenantID, models)
 	return models, nil
+}
+
+func passportCapabilitiesAllowChat(capabilities []string) bool {
+	if len(capabilities) == 0 {
+		return true
+	}
+	return slices.Contains(capabilities, "chat") || !slices.Contains(capabilities, "image_generation")
 }
 
 // PassportValidate confirms the persisted token still works by calling the
