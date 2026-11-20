@@ -554,23 +554,33 @@ func (a *App) OpenAutomationSession(req OpenAutomationSessionRequest) (Automatio
 	if err != nil {
 		return AutomationSessionResult{}, automationWire(err)
 	}
+	// 用户已经明确打开这条关联会话。先固定它，后台终态清理不得在
+	// FocusSession 与历史加载之间把窗口关掉。
+	a.keepAutomationSessionOpen(link.SessionID)
+	a.startMu.Lock()
 	a.mu.Lock()
 	entry := a.sessions[link.SessionID]
 	live := entry != nil && !entry.closed
 	a.mu.Unlock()
 	if live {
 		info, ferr := a.FocusSession(link.SessionID)
+		a.startMu.Unlock()
 		if ferr != nil {
 			return AutomationSessionResult{}, ferr
+		}
+		blocks, pending, herr := a.loadAutomationHistory(context.Background(), link.Workspace, link.SessionID)
+		if herr != nil {
+			return AutomationSessionResult{}, automationWire(herr)
 		}
 		if err := a.finishAutomation(started); err != nil {
 			return AutomationSessionResult{}, automationWire(err)
 		}
 		return AutomationSessionResult{
-			Context: started, HistoryPending: true,
-			Session: ResumedSession{Info: info, Blocks: []ResumedBlock{}},
+			Context: started, HistoryPending: pending,
+			Session: ResumedSession{Info: info, Blocks: blocks},
 		}, nil
 	}
+	a.startMu.Unlock()
 	if _, err := os.Stat(automationHistoryPath(link.Workspace, link.SessionID)); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return AutomationSessionResult{}, automationWire(errAutomationHistoryMissing)

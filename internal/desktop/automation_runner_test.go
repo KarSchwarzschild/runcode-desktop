@@ -480,6 +480,20 @@ func TestAutomationRunnerFastTerminal(t *testing.T) {
 	}
 }
 
+func TestPinnedAutomationSessionIsNotQueuedForBackgroundClose(t *testing.T) {
+	app, _ := newAutomationApp(t)
+	const id = "sess_explicitly_opened"
+	app.keepAutomationSessionOpen(id)
+	app.queueAutomationClose(id)
+	app.auto.mu.Lock()
+	queued := len(app.auto.closeQ)
+	pinned := app.auto.keepOpen[id]
+	app.auto.mu.Unlock()
+	if !pinned || queued != 0 {
+		t.Fatalf("pinned=%v queued=%d", pinned, queued)
+	}
+}
+
 func TestAutomationStoppedTurnEndNotSuccess(t *testing.T) {
 	app, _ := newAutomationApp(t)
 	store, err := automation.OpenStore(filepath.Join(t.TempDir(), "auto.sqlite3"))

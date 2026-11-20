@@ -50,6 +50,7 @@ type automationHost struct {
 	closeQ    []string
 	closeOn   bool
 	closeWait chan struct{}
+	keepOpen  map[string]bool
 	codexExp  map[string]codexIdentityExpect
 }
 
@@ -73,6 +74,9 @@ func (h *automationHost) initLocked() {
 	}
 	if h.codexExp == nil {
 		h.codexExp = map[string]codexIdentityExpect{}
+	}
+	if h.keepOpen == nil {
+		h.keepOpen = map[string]bool{}
 	}
 }
 
@@ -256,12 +260,40 @@ func (a *App) setAutomationCloseBlock(ch chan struct{}) {
 	a.auto.mu.Unlock()
 }
 
+func (a *App) keepAutomationSessionOpen(sessionID string) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return
+	}
+	a.auto.mu.Lock()
+	a.auto.initLocked()
+	a.auto.keepOpen[sessionID] = true
+	kept := a.auto.closeQ[:0]
+	for _, id := range a.auto.closeQ {
+		if id != sessionID {
+			kept = append(kept, id)
+		}
+	}
+	a.auto.closeQ = kept
+	a.auto.mu.Unlock()
+}
+
+func (a *App) automationSessionKeptOpen(sessionID string) bool {
+	a.auto.mu.Lock()
+	defer a.auto.mu.Unlock()
+	return a.auto.keepOpen[strings.TrimSpace(sessionID)]
+}
+
 func (a *App) queueAutomationClose(sessionID string) {
 	a.auto.mu.Lock()
-	a.auto.closeQ = append(a.auto.closeQ, sessionID)
-	start := !a.auto.closeOn
-	if start {
-		a.auto.closeOn = true
+	a.auto.initLocked()
+	start := false
+	if !a.auto.keepOpen[sessionID] {
+		a.auto.closeQ = append(a.auto.closeQ, sessionID)
+		start = !a.auto.closeOn
+		if start {
+			a.auto.closeOn = true
+		}
 	}
 	a.auto.mu.Unlock()
 	if start {
@@ -284,6 +316,12 @@ func (a *App) automationCloseWorker() {
 		if block != nil {
 			<-block
 		}
+		a.auto.mu.Lock()
+		pinned := a.auto.keepOpen[id]
+		a.auto.mu.Unlock()
+		if pinned {
+			continue
+		}
 		a.mu.Lock()
 		e := a.sessions[id]
 		focused := a.focused == id
@@ -298,7 +336,10 @@ func (a *App) automationCloseWorker() {
 		focused = a.focused == id
 		closed = e == nil || e.closed
 		a.mu.Unlock()
-		if !closed && !focused && !a.sessionLeased(id) {
+		a.auto.mu.Lock()
+		pinned = a.auto.keepOpen[id]
+		a.auto.mu.Unlock()
+		if !closed && !focused && !pinned && !a.sessionLeased(id) {
 			ctx, cancel := context.WithTimeout(context.Background(), sessionCloseTimeout)
 			_ = a.closeEntryHeld(ctx, e, true)
 			cancel()

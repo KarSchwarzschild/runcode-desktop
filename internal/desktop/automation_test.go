@@ -661,7 +661,7 @@ func TestAutomationHistoryPending(t *testing.T) {
 	opened, err := app.OpenAutomationSession(OpenAutomationSessionRequest{
 		Context: defaults.Context, TaskID: created.Task.ID, RunID: run.ID,
 	})
-	if err != nil || !opened.HistoryPending || len(opened.Session.Blocks) != 0 || opened.Session.Info.SessionID != id {
+	if err != nil || opened.HistoryPending || !historyHas(opened.Session.Blocks, "hello history") || opened.Session.Info.SessionID != id {
 		t.Fatalf("open live = %+v err=%v", opened, err)
 	}
 	app.mu.Lock()
@@ -669,6 +669,9 @@ func TestAutomationHistoryPending(t *testing.T) {
 	app.mu.Unlock()
 	if builds != 1 || sessionsAfter != sessionsBefore {
 		t.Fatalf("open rebuilt the session: builds=%d sessions %d -> %d", builds, sessionsBefore, sessionsAfter)
+	}
+	if !app.automationSessionKeptOpen(id) {
+		t.Fatal("an explicitly opened automation session was not pinned against background close")
 	}
 	assertFocus(t, app, focus, workspace)
 
@@ -1060,18 +1063,18 @@ func attachAutomationRun(t *testing.T, app *App, task AutomationTask, sessionID,
 	if err != nil {
 		t.Fatal(err)
 	}
-	past := time.Now().UTC().Add(-time.Minute)
-	got.NextRunAtUTC = &past
-	updated, err := store.UpdateTask(context.Background(), got, got.Revision)
-	if err != nil {
-		t.Fatal(err)
+	now := time.Now().UTC()
+	queued := now
+	started := now
+	run := automation.Run{
+		ID: "run_attachment_" + task.ID, TaskID: got.ID, TaskRevision: got.Revision,
+		RunRevision: 1, ScheduledAtUTC: now, Status: automation.RunRunning,
+		SessionID: sessionID, QuestionID: "question_attachment_" + task.ID,
+		QueuedAtUTC: &queued, StartedAtUTC: &started,
+		TaskName: got.Name, Prompt: got.Prompt, Workspace: workspace,
+		ExecutionMode: got.ExecutionMode, Schedule: got.Schedule, Binding: got.Binding,
 	}
-	run, err := store.ClaimDue(context.Background(), updated.ID, updated.Revision, time.Now().UTC())
-	if err != nil || run == nil {
-		t.Fatalf("claim = %v err=%v", run, err)
-	}
-	run.SessionID = sessionID
-	saved, err := store.SaveRun(context.Background(), *run, run.RunRevision)
+	saved, err := store.InsertRun(context.Background(), run)
 	if err != nil {
 		t.Fatal(err)
 	}
