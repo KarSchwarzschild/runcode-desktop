@@ -1,4 +1,4 @@
-﻿// 文生图界面预览页：由 main.tsx 按 ?preview=imagegen 挂载，正常流程不会用到。
+// 文生图界面预览页：由 main.tsx 按 ?preview=imagegen 挂载，正常流程不会用到。
 // 不连宿主：执行卡行下预览会落到「暂时无法预览／文件不存在」；用来验收统一工具行 + 舞台。
 import type { ImageGenerationResult, SessionInfo, ToolEvent } from '@/core/bridge'
 import { ComposerToolbar } from '@/composer/toolbar'

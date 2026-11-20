@@ -58,7 +58,8 @@ func TestLocalUsageCloseStopsPumpWhenInnerEventsRemainOpen(t *testing.T) {
 	base := fakeProvider{name: "openai", stream: func(context.Context, llm.Request) (llm.Stream, error) {
 		return inner, nil
 	}}
-	p := WrapPlatformProvider(base, func(context.Context) (Scope, error) { return scope, nil }, store)
+	tracker := NewRequestPurposeTracker()
+	p := WrapPlatformProviderObserved(base, func(context.Context) (Scope, error) { return scope, nil }, store, tracker, CallKindLLM)
 	st, err := p.Stream(context.Background(), llm.Request{Model: "m"})
 	if err != nil {
 		t.Fatal(err)
@@ -416,7 +417,8 @@ func TestLocalUsageSkipsAuxiliaryTitleStream(t *testing.T) {
 		}()
 		return s, nil
 	}}
-	p := WrapPlatformProvider(base, func(context.Context) (Scope, error) { return scope, nil }, store)
+	tracker := NewRequestPurposeTracker()
+	p := WrapPlatformProviderObserved(base, func(context.Context) (Scope, error) { return scope, nil }, store, tracker, CallKindLLM)
 	titleReq := llm.Request{
 		Model: "qwen3.6-27b",
 		System: []llm.ContentBlock{{
@@ -429,6 +431,7 @@ func TestLocalUsageSkipsAuxiliaryTitleStream(t *testing.T) {
 		}},
 		MaxTokens: 2048,
 	}
+	tracker.Observe("session_title", titleReq)
 	st, err := p.Stream(context.Background(), titleReq)
 	if err != nil {
 		t.Fatal(err)
@@ -450,6 +453,7 @@ func TestLocalUsageSkipsAuxiliaryTitleStream(t *testing.T) {
 		}},
 		Tools: []llm.ToolSpec{{Name: "Bash", Description: "run"}},
 	}
+	tracker.Observe("assistant", mainReq)
 	st, err = p.Stream(context.Background(), mainReq)
 	if err != nil {
 		t.Fatal(err)
@@ -465,30 +469,59 @@ func TestLocalUsageSkipsAuxiliaryTitleStream(t *testing.T) {
 	}
 }
 
-func TestIsAuxiliaryLLMRequest(t *testing.T) {
-	if !isAuxiliaryLLMRequest(llm.Request{
-		Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: "Title this request:\n\nhi"}}}},
-	}) {
-		t.Fatal("title user marker should match")
+func TestLocalUsageUsesObservedPurpose(t *testing.T) {
+	store := openTemp(t, nil)
+	scope := sampleScope("purpose")
+	base := fakeProvider{name: "openai", stream: func(context.Context, llm.Request) (llm.Stream, error) {
+		ch := make(chan llm.StreamEvent, 1)
+		stream := &memStream{ch: ch}
+		ch <- llm.StreamEvent{Type: llm.StreamEventTypeMessageStop, Usage: &llm.Usage{InputTokens: 10, OutputTokens: 2}}
+		_ = stream.Close()
+		return stream, nil
+	}}
+	tracker := NewRequestPurposeTracker()
+	provider := WrapPlatformProviderObserved(base, func(context.Context) (Scope, error) { return scope, nil }, store, tracker, CallKindLLM)
+
+	title := llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: "unmatched wording"}}}}}
+	tracker.Observe("session_title", title)
+	stream, err := provider.Stream(context.Background(), title)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if isAuxiliaryLLMRequest(llm.Request{
-		Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: "Title this request:\n\nhi"}}}},
-		Tools:    []llm.ToolSpec{{Name: "Bash"}},
-	}) {
-		t.Fatal("tool-bearing request must not be treated as auxiliary")
+	for range stream.Events() {
+		continue
+	}
+	_ = stream.Close()
+
+	compaction := llm.Request{Model: "m", Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: "also unmatched"}}}}}
+	tracker.Observe("compaction_summary", compaction)
+	stream, err = provider.Stream(context.Background(), compaction)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range stream.Events() {
+		continue
+	}
+	_ = stream.Close()
+
+	page, err := store.QueryPage(context.Background(), QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Hour), EndAt: time.Now().Add(time.Hour)}, "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.TotalCount != 1 || page.Calls[0].Model != "m" {
+		t.Fatalf("purpose-filtered calls = %+v", page)
 	}
 }
 
 func TestLocalUsageAuxiliaryFilteringAppliesOnlyToLLM(t *testing.T) {
 	for _, tc := range []struct {
-		name, kind, system, question string
-		want                         int
+		name, kind, purpose, system, question string
+		want                                  int
 	}{
-		{"ordinary_tool_free_chat", CallKindLLM, "You are a helpful assistant.", "What is this?", 1},
-		{"title", CallKindLLM, "You name a coding-assistant conversation.", "Title this request: question", 0},
-		{"summary", CallKindLLM, "You are condensing a coding-assistant conversation to save context.", "Conversation to summarize: question", 0},
-		{"vision_quotes_title", CallKindVision, "Analyze the image.", "Title this request: question", 1},
-		{"vision_quotes_summary", CallKindVision, "Analyze the image.", "Conversation to summarize: question", 1},
+		{"ordinary_tool_free_chat", CallKindLLM, "assistant", "You are a helpful assistant.", "What is this?", 1},
+		{"title", CallKindLLM, "session_title", "unmatched", "unmatched", 0},
+		{"compaction", CallKindLLM, "compaction_summary", "unmatched", "unmatched", 1},
+		{"vision", CallKindVision, "image_analysis", "Analyze the image.", "question", 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := openTemp(t, nil)
@@ -499,12 +532,16 @@ func TestLocalUsageAuxiliaryFilteringAppliesOnlyToLLM(t *testing.T) {
 				_ = stream.Close()
 				return stream, nil
 			}}
-			provider := WrapPlatformProviderKind(base, func(context.Context) (Scope, error) { return scope, nil }, store, tc.kind)
-			stream, err := provider.Stream(context.Background(), llm.Request{Model: "m", System: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: tc.system}}, Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: tc.question}}}}})
+			tracker := NewRequestPurposeTracker()
+			provider := WrapPlatformProviderObserved(base, func(context.Context) (Scope, error) { return scope, nil }, store, tracker, tc.kind)
+			req := llm.Request{Model: "m", System: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: tc.system}}, Messages: []llm.Message{{Role: llm.RoleUser, Content: []llm.ContentBlock{{Type: llm.ContentBlockTypeText, Text: tc.question}}}}}
+			tracker.Observe(tc.purpose, req)
+			stream, err := provider.Stream(context.Background(), req)
 			if err != nil {
 				t.Fatal(err)
 			}
 			for range stream.Events() {
+				continue
 			}
 			_ = stream.Close()
 			page, err := store.QueryPage(context.Background(), QueryFilter{ScopeID: scope.ScopeID, StartAt: time.Now().Add(-time.Hour), EndAt: time.Now().Add(time.Hour)}, "", 20)

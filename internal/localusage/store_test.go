@@ -3,6 +3,7 @@ package localusage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -261,6 +262,34 @@ func TestLocalUsageSchemaVersion(t *testing.T) {
 	_ = s.Close()
 	if _, err := Open(path, now); err == nil {
 		t.Fatal("expected schema too new")
+	}
+}
+
+func TestLocalUsageRejectsUnreleasedV1AndCorruptVersion(t *testing.T) {
+	base := time.Date(2026, 11, 13, 5, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, version string
+		want          error
+	}{
+		{"v1 never released", "1", ErrSchemaUnsupported},
+		{"malformed", "not-a-number", ErrSchemaCorrupt},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "usage.sqlite3")
+			s, err := Open(path, testClock(t, base))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s.db.Exec(`UPDATE meta SET value=? WHERE key='schema_version'`, tc.version); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Open(path, testClock(t, base)); !errors.Is(err, tc.want) {
+				t.Fatalf("Open error = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 

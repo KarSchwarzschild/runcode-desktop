@@ -58,7 +58,7 @@ func imageGenClientApp(t *testing.T, srv *httptest.Server) (*App, *atomic.Int32)
 func clientSnapshot(app *App) imageGenerationSnapshot {
 	account, epoch, _ := app.imageGenerationAccount()
 	return imageGenerationSnapshot{
-		Enabled: true, Available: true, SessionID: "sess", TurnID: "turn_1",
+		Available: true, SessionID: "sess", TurnID: "turn_1",
 		Account: account, Epoch: epoch, Bridge: imageGenerationBridge(), Tenant: "tenant-a",
 		Model: "image-only-url", Size: "2048x2048", SupportedSizes: []string{"2048x2048"}, ResponseFormat: "url",
 	}

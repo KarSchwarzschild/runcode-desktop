@@ -162,12 +162,11 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"GetImageGenerationSettings":  hostproto.CommandQuery,
 	"SaveImageGenerationSettings": hostproto.CommandIdempotentSet,
 	"SaveImageGenerationEdit":     hostproto.CommandTrigger,
-	"GetSessionImageGeneration":   hostproto.CommandQuery,
-	"SetSessionImageGeneration":   hostproto.CommandIdempotentSet,
 
 	// 用量统计（USAGE-001）：只读本机平台调用记录；不提供重算、导出或读取日志正文。
 	"GetUsageOverview":     hostproto.CommandQuery,
 	"GetUsageRequests":     hostproto.CommandQuery,
 	"GetUsageDimensions":   hostproto.CommandQuery,
 	"GetLocalUsageTenants": hostproto.CommandQuery,
+	"ResetLocalUsageStore": hostproto.CommandTrigger,
 }

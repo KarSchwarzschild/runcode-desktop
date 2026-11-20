@@ -80,6 +80,7 @@ export const ErrCodes = {
   UsageInvalidCursor: 'usage_invalid_cursor',
   UsageInvalidRange: 'usage_invalid_range',
   UsageInvalidResponse: 'usage_invalid_response',
+  UsageStorage: 'usage_storage',
   UsageTimeout: 'usage_timeout',
   UsageUnavailable: 'usage_unavailable',
   UsageUnsupported: 'usage_unsupported',
@@ -980,17 +981,6 @@ export interface SecretStorage {
   fix?: string;
 }
 
-// Mirrors protocol.SessionImageGenerationView. SessionImageGenerationView 是单会话开关视图。Enabled 是用户选择；Available 表示下一回合能否真正生成，不能时带 Reason。
-export interface SessionImageGenerationView {
-  sessionId: string;
-  enabled: boolean;
-  revision: number;
-  available: boolean;
-  reason?: string;
-  model?: ModelReference;
-  size?: string;
-}
-
 // Mirrors protocol.SessionInfo. SessionInfo is the display state returned when a session starts and by Status.
 export interface SessionInfo {
   sessionId: string;
@@ -1026,13 +1016,6 @@ export interface SessionSummary {
 export interface SetPlatformImageCapabilityRequest {
   model: ModelReference;
   supportsImages?: boolean;
-}
-
-// Mirrors protocol.SetSessionImageGenerationRequest. SetSessionImageGenerationRequest 带修订号检查地改写单会话开关。
-export interface SetSessionImageGenerationRequest {
-  sessionId: string;
-  enabled: boolean;
-  expectedRevision: number;
 }
 
 // Mirrors protocol.SettingsView. SettingsView 是脱敏只读视图，不包含凭据或存储记录。

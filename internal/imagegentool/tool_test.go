@@ -37,7 +37,7 @@ func (h *fakeHost) Generate(_ context.Context, in Input, meta CallMeta) (protoco
 
 func readySnapshot() Snapshot {
 	return Snapshot{
-		Enabled: true, Available: true, SessionID: "sess", TurnID: "turn_1", Model: "image-model",
+		Available: true, SessionID: "sess", TurnID: "turn_1", Model: "image-model",
 		Size: "1024x1024", SupportedSizes: []string{"1024x1024", "2048x2048"},
 		BindingIdentity: "binding-a", Endpoint: "https://bridge.example/t/t1/v1/Images/Generations",
 	}
@@ -78,7 +78,7 @@ func TestToolRejectsDisabledAndUnknownFields(t *testing.T) {
 		tc    *tool.Context
 		code  string
 	}{
-		{"unavailable", func(s *Snapshot) { s.Enabled, s.Available = false, false }, `{"prompt":"海报"}`, callCtx("u1"), "not_configured"},
+		{"unavailable", func(s *Snapshot) { s.Available = false }, `{"prompt":"海报"}`, callCtx("u1"), "not_configured"},
 		{"not configured", func(s *Snapshot) { s.Available, s.Reason = false, "尚未选择生图模型" }, `{"prompt":"海报"}`, callCtx("u1"), "not_configured"},
 		{"empty prompt", nil, `{"prompt":"   "}`, callCtx("u1"), "invalid_input"},
 		{"long prompt", nil, `{"prompt":"` + long + `"}`, callCtx("u1"), "invalid_input"},
@@ -411,7 +411,7 @@ func TestDescriptionStatesWhenToCallAndAvailability(t *testing.T) {
 	if strings.Contains(desc, "「+」") || strings.Contains(desc, "开启「生成图片」") {
 		t.Fatalf("description still mentions composer toggle: %s", desc)
 	}
-	snap.Enabled, snap.Available, snap.Reason = false, false, "尚未选择生图模型"
+	snap.Available, snap.Reason = false, "尚未选择生图模型"
 	if d := tl.Description(); !strings.Contains(d, "请勿调用") || !strings.Contains(d, "修改生图设置") || strings.Contains(d, "image-model") {
 		t.Fatalf("unavailable description: %s", d)
 	}
@@ -427,7 +427,7 @@ func TestDescriptionDefersFormatRoutingToSystemPrompt(t *testing.T) {
 			t.Fatalf("description duplicates system-prompt route %q: %s", duplicate, desc)
 		}
 	}
-	snap.Enabled, snap.Available, snap.Reason = false, false, "尚未选择生图模型"
+	snap.Available, snap.Reason = false, "尚未选择生图模型"
 	d := tl.Description()
 	if !strings.Contains(d, "请勿调用") || !strings.Contains(d, "尚未选择生图模型") {
 		t.Fatalf("unavailable description must keep early exit: %s", d)

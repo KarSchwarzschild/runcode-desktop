@@ -6,7 +6,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
-	"strings"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -14,21 +14,81 @@ import (
 	"gitlab.ouc-online.com.cn/aibase/agentloop/llm"
 )
 
-// 桌面辅助 LLM（自动标题／安全裁判／压缩摘要／授权评估）会再走一次 Provider.Stream，
-// 但不该算作用户可见的「一次请求」。引擎把 purpose 只写进遥测，不改 Core 时只能
-// 用请求正文里的稳定锚点识别；匹配到的调用跳过 Begin／Finish。
-var auxiliaryLLMMarkers = []string{
-	"Title this request:",                                                 // session_title 用户句
-	"You name a coding-assistant conversation.",                           // session_title 系统句
-	"You are condensing a coding-assistant conversation to save context.", // compaction
-	"Conversation to summarize:",                                          // compaction 用户句
-	"You are a safety gate for a coding agent.",                           // harm_check
-	"You are an authorization gate, not the executing agent.",             // action_assessment
-}
-
 // PlatformProviderName 是桌面注册的固定平台适配器名；用户设置里仍写 openai／passport 语义，
 // 不把此内部名写入模型列表。
 const PlatformProviderName = "desktop-platform-openai"
+
+// RequestPurposeTracker bridges the engine's LLMRequestObserver (which knows the
+// purpose but not the provider call) to the provider wrapper (which sees the
+// call but not the purpose). The engine invokes observer and Stream back-to-back
+// with the same request slices, so their backing-array identity is stable.
+type RequestPurposeTracker struct {
+	mu      sync.Mutex
+	pending map[requestPurposeKey][]string
+}
+
+type requestPurposeKey struct {
+	model            string
+	messages, system uintptr
+	tools            uintptr
+	messageCount     int
+	systemCount      int
+	toolCount        int
+	maxTokens        int
+	outputTokenLimit int
+}
+
+// NewRequestPurposeTracker creates the observer-to-provider purpose bridge.
+func NewRequestPurposeTracker() *RequestPurposeTracker {
+	return &RequestPurposeTracker{pending: map[requestPurposeKey][]string{}}
+}
+
+// Observe records the purpose supplied by the engine immediately before Stream.
+func (t *RequestPurposeTracker) Observe(purpose string, req llm.Request) {
+	if t == nil || purpose == "" {
+		return
+	}
+	key := purposeRequestKey(req)
+	t.mu.Lock()
+	t.pending[key] = append(t.pending[key], purpose)
+	t.mu.Unlock()
+}
+
+func (t *RequestPurposeTracker) take(req llm.Request) string {
+	if t == nil {
+		return ""
+	}
+	key := purposeRequestKey(req)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	queue := t.pending[key]
+	if len(queue) == 0 {
+		return ""
+	}
+	purpose := queue[0]
+	if len(queue) == 1 {
+		delete(t.pending, key)
+	} else {
+		t.pending[key] = queue[1:]
+	}
+	return purpose
+}
+
+func purposeRequestKey(req llm.Request) requestPurposeKey {
+	return requestPurposeKey{
+		model:    req.Model,
+		messages: slicePointer(req.Messages), system: slicePointer(req.System), tools: slicePointer(req.Tools),
+		messageCount: len(req.Messages), systemCount: len(req.System), toolCount: len(req.Tools),
+		maxTokens: req.MaxTokens, outputTokenLimit: req.OutputTokenLimit,
+	}
+}
+
+func slicePointer[T any](s []T) uintptr {
+	if len(s) == 0 {
+		return 0
+	}
+	return reflect.ValueOf(s).Pointer()
+}
 
 // 调用计数定义：一次对底层 Provider.Stream 的发起计为一次客户端模型调用；
 // SDK 内部不可见的 HTTP 重试不拆分；外层重新 Stream 为新调用。
@@ -42,6 +102,13 @@ func WrapPlatformProvider(base llm.Provider, freeze func(context.Context) (Scope
 
 // WrapPlatformProviderKind 同 WrapPlatformProvider，可指定 callKind（如 vision）。
 func WrapPlatformProviderKind(base llm.Provider, freeze func(context.Context) (Scope, error), recorder Recorder, kind string) llm.Provider {
+	return WrapPlatformProviderObserved(base, freeze, recorder, nil, kind)
+}
+
+// WrapPlatformProviderObserved is WrapPlatformProviderKind with the observer
+// bridge that lets local usage classify calls by engine purpose rather than by
+// matching prompt text.
+func WrapPlatformProviderObserved(base llm.Provider, freeze func(context.Context) (Scope, error), recorder Recorder, purposes *RequestPurposeTracker, kind string) llm.Provider {
 	if base == nil {
 		return nil
 	}
@@ -54,14 +121,15 @@ func WrapPlatformProviderKind(base llm.Provider, freeze func(context.Context) (S
 	if kind == "" {
 		kind = CallKindLLM
 	}
-	return &platformProvider{base: base, freeze: freeze, rec: recorder, kind: kind}
+	return &platformProvider{base: base, freeze: freeze, rec: recorder, kind: kind, purposes: purposes}
 }
 
 type platformProvider struct {
-	base   llm.Provider
-	freeze func(context.Context) (Scope, error)
-	rec    Recorder
-	kind   string
+	base     llm.Provider
+	freeze   func(context.Context) (Scope, error)
+	rec      Recorder
+	kind     string
+	purposes *RequestPurposeTracker
 }
 
 func (p *platformProvider) Name() string { return p.base.Name() }
@@ -69,9 +137,8 @@ func (p *platformProvider) Name() string { return p.base.Name() }
 func (p *platformProvider) Capabilities() llm.Capabilities { return p.base.Capabilities() }
 
 func (p *platformProvider) Stream(ctx context.Context, req llm.Request) (llm.Stream, error) {
-	// Vision's tool-free question is user content and may quote an auxiliary
-	// prompt. Only the LLM path can originate the engine's auxiliary requests.
-	if (p.kind == "" || p.kind == CallKindLLM) && isAuxiliaryLLMRequest(req) {
+	purpose := p.purposes.take(req)
+	if !recordPurpose(purpose) {
 		return p.base.Stream(ctx, req)
 	}
 	scope, scopeErr := p.freeze(ctx)
@@ -120,6 +187,17 @@ func (p *platformProvider) Stream(ctx context.Context, req llm.Request) (llm.Str
 		monoStart: monoStart,
 		done:      make(chan struct{}),
 	}, nil
+}
+
+// recordPurpose keeps request-count semantics stable for engine-internal helper
+// calls while counting paid context compaction, whose token cost is real.
+func recordPurpose(purpose string) bool {
+	switch purpose {
+	case "session_title", "harm_check", "action_assessment", "reasoning_classification", "reasoning_analysis":
+		return false
+	default:
+		return true
+	}
 }
 
 type countingStream struct {
@@ -247,35 +325,6 @@ func (s *countingStream) finish(status, code string) {
 		// 明确 known-zero：测试可通过 Metadata 注入；生产 OpenAI 路径无 presence 时不把 0 当已知。
 	}
 	_ = s.rec.Finish(context.Background(), fin)
-}
-
-// isAuxiliaryLLMRequest 识别引擎侧辅助调用：无工具、正文命中桌面已知锚点。
-// 有 Tools 的主回合／子代理请求一律不当辅助，避免误伤。
-func isAuxiliaryLLMRequest(req llm.Request) bool {
-	if len(req.Tools) > 0 {
-		return false
-	}
-	var b strings.Builder
-	for _, block := range req.System {
-		if block.Type == llm.ContentBlockTypeText {
-			b.WriteString(block.Text)
-			b.WriteByte('\n')
-		}
-	}
-	for _, msg := range req.Messages {
-		b.WriteString(llm.TextContent(msg))
-		b.WriteByte('\n')
-	}
-	body := b.String()
-	if body == "" {
-		return false
-	}
-	for _, marker := range auxiliaryLLMMarkers {
-		if strings.Contains(body, marker) {
-			return true
-		}
-	}
-	return false
 }
 
 // NewCallID 生成全局唯一调用 ID（生图应改用既有 generationID，勿用本函数）。

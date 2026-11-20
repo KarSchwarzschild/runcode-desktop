@@ -57,10 +57,10 @@ func imageGenerationEndpoint(snap imageGenerationSnapshot) string {
 func (a *App) imageGenerationToolSnapshot(state *imageGenerationTurnState) imagegentool.Snapshot {
 	s := state.snapshot()
 	out := imagegentool.Snapshot{
-		Enabled: s.Enabled, Available: s.Available, Reason: s.Reason,
+		Available: s.Available, Reason: s.Reason,
 		SessionID: s.SessionID, TurnID: s.TurnID, Model: s.Model, Size: s.Size, SupportedSizes: s.SupportedSizes,
 		BindingIdentity: tool.BindingFingerprint(imageGenerationScopeVersion, s.ScopeID, s.Bridge, s.Tenant, s.Model, s.TurnID,
-			itoa64(s.SwitchRevision), itoa64(s.SettingsRevision), s.Generation),
+			itoa64(s.SettingsRevision), s.Generation),
 		Endpoint: imageGenerationEndpoint(s),
 	}
 	if out.Available && a.oaLockedModel(s.SessionID) != "" {

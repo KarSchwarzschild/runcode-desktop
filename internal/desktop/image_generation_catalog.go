@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/wt68/runcode/internal/imagegentool"
 	appwire "github.com/wt68/runcode/internal/protocol"
 )
 
@@ -51,19 +51,6 @@ func isImageGenerationModel(m PassportModel) bool {
 	return slices.Contains(m.Capabilities, capabilityImageGeneration)
 }
 
-func parseImageSize(size string) (int, int, bool) {
-	w, h, ok := strings.Cut(strings.TrimSpace(size), "x")
-	if !ok {
-		return 0, 0, false
-	}
-	width, err1 := strconv.Atoi(w)
-	height, err2 := strconv.Atoi(h)
-	if err1 != nil || err2 != nil || width <= 0 || height <= 0 || width > 16384 || height > 16384 {
-		return 0, 0, false
-	}
-	return width, height, width*height <= imageGenerationMaxPixels
-}
-
 // normalizeImageGenerationProfile 复制声明档案；无法安全使用时标为不可选：
 // 可选档案必须列出尺寸、其中的默认值，且响应格式只能是本客户端能落盘的那些。
 func normalizeImageGenerationProfile(p *ImageGenerationProfile) ImageGenerationProfile {
@@ -73,20 +60,24 @@ func normalizeImageGenerationProfile(p *ImageGenerationProfile) ImageGenerationP
 	out := ImageGenerationProfile{
 		Available:         p.Available,
 		SupportedSizes:    []string{},
-		DefaultSize:       strings.TrimSpace(p.DefaultSize),
 		ResponseFormats:   []string{},
 		UnavailableReason: strings.TrimSpace(p.UnavailableReason),
 	}
 	invalid := false
 	for _, size := range p.SupportedSizes {
-		size = strings.TrimSpace(size)
-		if _, _, ok := parseImageSize(size); !ok {
+		width, height, canonical, ok := imagegentool.ParseSize(size)
+		if !ok || width > 16384 || height > 16384 || width*height > imageGenerationMaxPixels {
 			invalid = true
 			continue
 		}
-		if !slices.Contains(out.SupportedSizes, size) {
-			out.SupportedSizes = append(out.SupportedSizes, size)
+		if !slices.Contains(out.SupportedSizes, canonical) {
+			out.SupportedSizes = append(out.SupportedSizes, canonical)
 		}
+	}
+	if _, _, canonical, ok := imagegentool.ParseSize(p.DefaultSize); ok {
+		out.DefaultSize = canonical
+	} else {
+		out.DefaultSize = strings.TrimSpace(p.DefaultSize)
 	}
 	for _, format := range p.ResponseFormats {
 		format = strings.TrimSpace(format)
@@ -147,11 +138,11 @@ func (a *App) imageGenerationAccount() (account, epoch string, err error) {
 	a.tokens.mu.Lock()
 	token, epoch := a.tokens.ts.AccessToken, a.tokens.identity
 	a.tokens.mu.Unlock()
-	account = tokenIdentity(token)
-	if account == "" {
+	identity := accountIdentityForToken(token, "")
+	if !identity.Stable {
 		return "", epoch, errImageGenerationIdentity
 	}
-	return account, epoch, nil
+	return identity.Digest, epoch, nil
 }
 
 func imageGenerationBridge() string {
@@ -166,20 +157,14 @@ func imageGenerationScope(account, bridge, tenantID string) string {
 
 // freshImageGenerationCatalog 始终向 Bridge 取目录，手动刷新与提交前复核都不读缓存条目。
 func (a *App) freshImageGenerationCatalog(ctx context.Context, tenantID, actor string) (modelCatalog, error) {
-	scope := platformModelRef(tenantID, "")
-	if _, err := a.passportModelsContext(ctx, tenantID); err != nil {
+	models, err := a.fetchPassportModelsContext(ctx, tenantID)
+	if err != nil {
 		return modelCatalog{}, err
 	}
 	if a.visionAccountIdentity() != actor {
 		return modelCatalog{}, errors.New("加载模型目录期间账号已变化，请重试")
 	}
-	a.mu.Lock()
-	entry, ok := a.modelCatalogs[modelCatalogKey(scope, actor)]
-	a.mu.Unlock()
-	if !ok {
-		return modelCatalog{}, errors.New("平台模型目录已变化，请重试")
-	}
-	return entry, nil
+	return modelCatalogFromModels(models), nil
 }
 
 // ListImageGenerationModels 列出当前账号在 tenantID 下可见的生图模型。

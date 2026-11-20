@@ -129,6 +129,7 @@ describe('口径与失败', () => {
     ['usage_unsupported', 'unsupported'],
     ['usage_timeout', 'timeout'],
     ['usage_unavailable', 'unavailable'],
+    ['usage_storage', 'storage'],
     ['usage_invalid_cursor', 'invalidCursor'],
     ['usage_invalid_response', 'invalidResponse'],
     ['usage_identity_changed', 'identityChanged'],

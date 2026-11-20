@@ -1,4 +1,4 @@
-﻿import { forwardRef, useImperativeHandle, useLayoutEffect, useMemo, useRef, type ClipboardEventHandler, type CSSProperties, type KeyboardEventHandler, type MouseEventHandler, type RefObject } from 'react'
+import { forwardRef, useImperativeHandle, useLayoutEffect, useMemo, useRef, type ClipboardEventHandler, type CSSProperties, type KeyboardEventHandler, type MouseEventHandler, type RefObject } from 'react'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'

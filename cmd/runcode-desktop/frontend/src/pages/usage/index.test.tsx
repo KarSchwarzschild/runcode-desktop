@@ -14,6 +14,7 @@ const native = vi.hoisted(() => ({
   tenants: vi.fn(),
   active: vi.fn(),
   setActive: vi.fn(),
+  reset: vi.fn(),
 }))
 vi.mock('@/core/bridge', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/core/bridge')>()),
@@ -24,6 +25,7 @@ vi.mock('@/core/bridge', async (importOriginal) => ({
   passportTenants: native.tenants,
   activeTenant: native.active,
   setActiveTenant: native.setActive,
+  resetLocalUsageStore: native.reset,
 }))
 
 let host: HTMLDivElement
@@ -43,6 +45,7 @@ beforeEach(() => {
   native.dimensions.mockResolvedValue({ items: [], groupBy: 'model', page: 1, pageSize: 50, totalCount: '0', hasMore: false, effectiveRange: fixtureOverview().effectiveRange, queryKey: 'qk' })
   native.tenants.mockResolvedValue([{ id: 'tenant-a', name: '租户甲' }])
   native.active.mockResolvedValue('tenant-a')
+  native.reset.mockResolvedValue(undefined)
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)
@@ -142,6 +145,18 @@ describe('UsagePage', () => {
     expect(t).toContain('req-9')
     expect(t).not.toContain('暂无记录')
     expect([...host.querySelectorAll('button')].some((b) => b.textContent === '重试')).toBe(true)
+  })
+
+  it('本机库损坏时提供重建入口，并保留重试', async () => {
+    native.overview.mockRejectedValue(new Error(JSON.stringify({
+      code: 'usage_storage', message: '本机用量库已损坏；可重建本地统计（原文件会保留备份）',
+    })))
+    await render(user)
+    expect(host.textContent).toContain('本机用量库需要修复')
+    const reset = [...host.querySelectorAll('button')].find((b) => b.textContent === '重建本机用量库')!
+    await act(async () => reset.click())
+    expect(native.reset).toHaveBeenCalledTimes(1)
+    expect(native.overview.mock.calls.length).toBeGreaterThanOrEqual(2)
   })
 
   it.each([

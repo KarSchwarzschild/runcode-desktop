@@ -1,4 +1,4 @@
-﻿// bridge is the frontend's single facade over the generated protocol layer
+// bridge is the frontend's single facade over the generated protocol layer
 // (src/protocol/*, protogen output — regenerate with `go generate ./pkg/protocol`).
 // It re-exports the wire types, the typed event helpers, and the typed command
 // functions, and keeps only the frontend-specific pieces: UI-side data shapes
@@ -360,13 +360,12 @@ function base64(bytes: Uint8Array): string {
 // ---- 文生图（IMG-GEN-001）---------------------------------------------------------
 export type {
   ImageGenerationProfile, ImageGenerationModel, ImageGenerationCatalog, ImageGenerationSettings,
-  SaveImageGenerationSettingsRequest, SaveImageGenerationEditRequest, SessionImageGenerationView, SetSessionImageGenerationRequest,
+  SaveImageGenerationSettingsRequest, SaveImageGenerationEditRequest,
   ImageGenerationArtifact, ImageGenerationResult,
 } from './protocol/types'
 export {
   listImageGenerationModels, getImageGenerationSettings, saveImageGenerationSettings,
   saveImageGenerationEdit,
-  getSessionImageGeneration, setSessionImageGeneration,
 } from './protocol/commands'
 
 // ---- 用量统计（USAGE-001）：只读查询，类型与命令都来自生成协议 ------------------
@@ -375,4 +374,4 @@ export type {
   UsageQuality, UsageTotals, UsageBucket, UsageCapabilities, UsageCoverageGap, UsageOverview,
   UsageRowQuality, UsageRequestRow, UsageRequestsPage, UsageDimensionRow, UsageDimensionsPage,
 } from './protocol/types'
-export { getUsageOverview, getUsageRequests, getUsageDimensions } from './protocol/commands'
+export { getUsageOverview, getUsageRequests, getUsageDimensions, resetLocalUsageStore } from './protocol/commands'

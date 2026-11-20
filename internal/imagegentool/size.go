@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// canonicalizeSize 把上游常见的 1024*1024 写成内部统一的 1024x1024。
-func canonicalizeSize(size string) string {
+// CanonicalizeSize 把上游常见的 1024*1024、1024×1024 写成内部统一的 1024x1024。
+func CanonicalizeSize(size string) string {
 	size = strings.TrimSpace(strings.ToLower(size))
 	size = strings.ReplaceAll(size, "*", "x")
 	size = strings.ReplaceAll(size, "×", "x")
@@ -16,18 +16,24 @@ func canonicalizeSize(size string) string {
 	return size
 }
 
-func parseWH(size string) (int, int, bool) {
-	size = canonicalizeSize(size)
+// ParseSize 是生图尺寸的唯一解析入口；返回规范化后的宽高与字符串。
+func ParseSize(size string) (width, height int, canonical string, ok bool) {
+	size = CanonicalizeSize(size)
 	w, h, ok := strings.Cut(size, "x")
 	if !ok {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
 	width, err1 := strconv.Atoi(w)
 	height, err2 := strconv.Atoi(h)
 	if err1 != nil || err2 != nil || width <= 0 || height <= 0 {
-		return 0, 0, false
+		return 0, 0, "", false
 	}
-	return width, height, true
+	return width, height, size, true
+}
+
+func parseWH(size string) (int, int, bool) {
+	width, height, _, ok := ParseSize(size)
+	return width, height, ok
 }
 
 // DefaultOutboundSize 在「不固定且未传 size」时的出站兜底：优先最小正方形，
@@ -42,7 +48,7 @@ func DefaultOutboundSize(supported []string) string {
 		if !ok {
 			continue
 		}
-		size := canonicalizeSize(candidate)
+		size := CanonicalizeSize(candidate)
 		area := w * h
 		if bestAny == "" || area < bestAnyArea || (area == bestAnyArea && size < bestAny) {
 			bestAny, bestAnyArea = size, area
@@ -82,7 +88,7 @@ func closestSupportedSize(want string, supported []string) string {
 		score := aspectDiff*10 + pixelDiff
 		if score < bestScore {
 			bestScore = score
-			best = canonicalizeSize(candidate)
+			best = CanonicalizeSize(candidate)
 		}
 	}
 	return best
@@ -105,8 +111,8 @@ func formatSupportedSizesNote(supported []string) string {
 }
 
 func sizeRemapNote(requested, chosen string, supported []string) string {
-	req := canonicalizeSize(requested)
-	got := canonicalizeSize(chosen)
+	req := CanonicalizeSize(requested)
+	got := CanonicalizeSize(chosen)
 	if req == "" || req == got {
 		return ""
 	}

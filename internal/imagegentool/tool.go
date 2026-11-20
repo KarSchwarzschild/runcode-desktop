@@ -42,7 +42,6 @@ type CallMeta struct {
 // BindingIdentity 是目的地指纹：账号分区、Bridge、租户、模型、TurnID、修订号与
 // 会话实例；审批绑定钉在这上面，模型改参数不能复用旧授权。
 type Snapshot struct {
-	Enabled         bool
 	Available       bool
 	Reason          string
 	SessionID       string
@@ -425,13 +424,13 @@ func resolveOutboundSize(requested string, snap Snapshot) (string, error) {
 
 // resolveOutboundSizeDetailed：显式／设置默认优先；都不固定时出站兜底最小正方形。
 func resolveOutboundSizeDetailed(requested string, snap Snapshot) (size, note string, err error) {
-	size = canonicalizeSize(requested)
+	size = CanonicalizeSize(requested)
 	if size == "" {
-		size = canonicalizeSize(snap.Size)
+		size = CanonicalizeSize(snap.Size)
 	}
 	// 仅支持一种尺寸时强制该值，不提供「不固定」。
 	if len(snap.SupportedSizes) == 1 {
-		only := canonicalizeSize(snap.SupportedSizes[0])
+		only := CanonicalizeSize(snap.SupportedSizes[0])
 		if size != "" && size != only {
 			return only, sizeRemapNote(size, only, snap.SupportedSizes), nil
 		}

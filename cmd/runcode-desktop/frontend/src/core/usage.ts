@@ -248,7 +248,7 @@ export function requestStatusLabel(status: string | undefined): string {
 
 export type UsageFailureKind =
   | 'notLoggedIn' | 'forbidden' | 'invalidRange' | 'invalidCursor' | 'unsupported' | 'timeout'
-  | 'unavailable' | 'invalidResponse' | 'identityChanged' | 'invalidArgument' | 'unknown'
+  | 'unavailable' | 'storage' | 'invalidResponse' | 'identityChanged' | 'invalidArgument' | 'unknown'
 
 export interface UsageFailure {
   kind: UsageFailureKind
@@ -265,6 +265,7 @@ const FAILURE_KINDS: Record<string, UsageFailureKind> = {
   [ErrCodes.UsageUnsupported]: 'unsupported',
   [ErrCodes.UsageTimeout]: 'timeout',
   [ErrCodes.UsageUnavailable]: 'unavailable',
+  [ErrCodes.UsageStorage]: 'storage',
   [ErrCodes.UsageInvalidResponse]: 'invalidResponse',
   [ErrCodes.UsageIdentityChanged]: 'identityChanged',
 }

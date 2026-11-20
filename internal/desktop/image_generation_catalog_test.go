@@ -136,6 +136,7 @@ func TestImageGenerationCatalogProfileValidation(t *testing.T) {
 		ok      bool
 	}{
 		{"valid", appwire.ImageGenerationProfile{Available: true, SupportedSizes: []string{"1024x1024"}, DefaultSize: "1024x1024", ResponseFormats: []string{"url"}}, true},
+		{"canonical star syntax", appwire.ImageGenerationProfile{Available: true, SupportedSizes: []string{"1024*1024"}, DefaultSize: "1024*1024", ResponseFormats: []string{"url"}}, true},
 		{"default not supported", appwire.ImageGenerationProfile{Available: true, SupportedSizes: []string{"1024x1024"}, DefaultSize: "2048x2048", ResponseFormats: []string{"url"}}, false},
 		{"no formats", appwire.ImageGenerationProfile{Available: true, SupportedSizes: []string{"1024x1024"}, DefaultSize: "1024x1024"}, false},
 		{"unknown format", appwire.ImageGenerationProfile{Available: true, SupportedSizes: []string{"1024x1024"}, DefaultSize: "1024x1024", ResponseFormats: []string{"stream"}}, false},
@@ -149,6 +150,23 @@ func TestImageGenerationCatalogProfileValidation(t *testing.T) {
 				t.Fatalf("available = %v, want %v (%+v)", got.Available, tc.ok, got)
 			}
 		})
+	}
+}
+
+func TestImageGenerationCatalogSnapshotIsIndependentOfCacheEviction(t *testing.T) {
+	models := []PassportModel{{
+		ID:           "image-only",
+		Capabilities: []string{capabilityImageGeneration},
+		ImageGeneration: &ImageGenerationProfile{
+			Available: true, SupportedSizes: []string{"1024*1024"}, DefaultSize: "1024*1024", ResponseFormats: []string{"url"},
+		},
+	}}
+	snapshot := modelCatalogFromModels(models)
+	if _, ok := snapshot.imageGeneration["image-only"]; !ok {
+		t.Fatal("fresh snapshot lost image model")
+	}
+	if got := snapshot.imageGeneration["image-only"].ImageGeneration.SupportedSizes; !slices.Equal(got, []string{"1024*1024"}) {
+		t.Fatalf("snapshot sizes = %v", got)
 	}
 }
 

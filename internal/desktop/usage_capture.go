@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -29,6 +30,7 @@ var (
 	platformCaptureMu   sync.Mutex
 	platformRecorder    localusage.Recorder
 	platformFreeze      func(context.Context) (ScopeFreeze, error)
+	platformPurposes    *localusage.RequestPurposeTracker
 	platformEnabled     atomic.Bool
 )
 
@@ -77,11 +79,12 @@ func ensurePlatformCaptureRegistered() {
 			platformCaptureMu.Lock()
 			rec := platformRecorder
 			freeze := platformFreeze
+			purposes := platformPurposes
 			platformCaptureMu.Unlock()
 			if !platformEnabled.Load() || rec == nil || freeze == nil {
 				return base, nil
 			}
-			return localusage.WrapPlatformProvider(base, platformUsageFreezer(cfg.BaseURL, freeze, rec), rec), nil
+			return localusage.WrapPlatformProviderObserved(base, platformUsageFreezer(cfg.BaseURL, freeze, rec), rec, purposes, localusage.CallKindLLM), nil
 		})
 	})
 }
@@ -99,33 +102,86 @@ func setPlatformCapture(rec localusage.Recorder, freeze func(context.Context) (S
 	ensurePlatformCaptureRegistered()
 	platformCaptureMu.Lock()
 	defer platformCaptureMu.Unlock()
+	if rec == nil || freeze == nil {
+		platformRecorder, platformFreeze, platformPurposes = nil, nil, nil
+		platformEnabled.Store(false)
+		return
+	}
 	platformRecorder = localusage.WithCoverageDiagnostics(rec)
 	platformFreeze = freeze
+	platformPurposes = localusage.NewRequestPurposeTracker()
 	platformEnabled.Store(localUsageEnvEnabled() && rec != nil && freeze != nil)
+}
+
+func localUsagePath() (string, error) {
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "runcode", "usage", "usage.sqlite3"), nil
 }
 
 func (a *App) initLocalUsage() error {
 	ensurePlatformCaptureRegistered()
 	// 关闭开关只停止新采集；仍打开本机库，保留历史查询和缺口说明。
-	dir, err := os.UserConfigDir()
+	path, err := localUsagePath()
 	if err != nil {
+		a.rememberUsageInitError(err)
 		return err
 	}
-	path := filepath.Join(dir, "runcode", "usage", "usage.sqlite3")
 	store, err := localusage.Open(path, nil)
 	if err != nil {
+		a.rememberUsageInitError(err)
 		debugLog("local usage open failed: %v", err)
 		return err
 	}
 	if err := store.SetCaptureEnabled(context.Background(), localUsageEnvEnabled()); err != nil {
 		_ = store.Close()
+		a.rememberUsageInitError(err)
 		debugLog("local usage capture state failed: %v", err)
 		return err
 	}
 	a.usageMu.Lock()
 	a.usageStore = store
+	a.usageInitErr = nil
 	a.usageMu.Unlock()
 	setPlatformCapture(store, a.freezeUsageIdentity)
+	return nil
+}
+
+func (a *App) rememberUsageInitError(err error) {
+	a.usageMu.Lock()
+	a.usageStore = nil
+	a.usageInitErr = err
+	a.usageMu.Unlock()
+}
+
+// ResetLocalUsageStore archives the unreadable database and opens a fresh one.
+// The backup stays beside the original so a future client can still recover it.
+func (a *App) ResetLocalUsageStore() error {
+	setPlatformCapture(nil, nil)
+	a.usageMu.Lock()
+	old := a.usageStore
+	a.usageStore = nil
+	a.usageInitErr = nil
+	a.usageMu.Unlock()
+	if old != nil {
+		_ = old.Close()
+	}
+	path, err := localUsagePath()
+	if err != nil {
+		return wireError(err)
+	}
+	stamp := time.Now().UTC().Format("20060102-150405.000000000")
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		src := path + suffix
+		if err := os.Rename(src, path+".backup-"+stamp+suffix); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return wireError(fmt.Errorf("备份本机用量库失败: %w", err))
+		}
+	}
+	if err := a.initLocalUsage(); err != nil {
+		return wireError(err)
+	}
 	return nil
 }
 
@@ -267,6 +323,15 @@ func currentPlatformRecorder() localusage.Recorder {
 	return platformRecorder
 }
 
+func currentPlatformPurposeTracker() *localusage.RequestPurposeTracker {
+	platformCaptureMu.Lock()
+	defer platformCaptureMu.Unlock()
+	if !platformEnabled.Load() {
+		return nil
+	}
+	return platformPurposes
+}
+
 // usePlatformCaptureProvider 在已确认平台连接时改用采集适配器名。
 func usePlatformCaptureProvider(cfg engine.Config, passport bool) engine.Config {
 	if !passport || !platformEnabled.Load() {
@@ -287,11 +352,12 @@ func wrapVisionForCapture(p llm.Provider, platform bool, baseURL string) llm.Pro
 	platformCaptureMu.Lock()
 	rec := platformRecorder
 	freeze := platformFreeze
+	purposes := platformPurposes
 	platformCaptureMu.Unlock()
 	if rec == nil || freeze == nil {
 		return p
 	}
-	return localusage.WrapPlatformProviderKind(p, platformUsageFreezer(baseURL, freeze, rec), rec, localusage.CallKindVision)
+	return localusage.WrapPlatformProviderObserved(p, platformUsageFreezer(baseURL, freeze, rec), rec, purposes, localusage.CallKindVision)
 }
 
 // beginNonLLMCapture 在平台生图／搜索真正发出前开始记账；失败则跳过，不阻断业务。
@@ -324,7 +390,8 @@ func (m *tokenManager) identityParts() (issuer, sub string) {
 	m.mu.Lock()
 	token := m.ts.AccessToken
 	m.mu.Unlock()
-	return tokenIdentityParts(token)
+	identity := accountIdentityForToken(token, "")
+	return identity.Issuer, identity.Subject
 }
 
 // isInternalUsageProvider 隐藏内部适配器名，不进入自定义模型可选列表。

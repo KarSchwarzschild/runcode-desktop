@@ -2,11 +2,13 @@ package desktop
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/wt68/runcode/internal/localusage"
 	"github.com/wt68/runcode/internal/protocol"
 	hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 )
@@ -44,12 +46,28 @@ func usageUnavailable(_ string) error {
 	return usageError(protocol.ErrCodeUsageUnavailable, "本机用量记录暂不可用，请稍后重试")
 }
 
+func usageUnavailableFor(err error) error {
+	if err == nil {
+		return usageUnavailable("")
+	}
+	reason := "本机用量库无法打开"
+	switch {
+	case errors.Is(err, localusage.ErrSchemaTooNew):
+		reason = "本机用量库由更新版本创建，当前客户端无法安全读取"
+	case errors.Is(err, localusage.ErrSchemaUnsupported):
+		reason = "本机用量库版本不受支持"
+	case errors.Is(err, localusage.ErrSchemaCorrupt):
+		reason = "本机用量库已损坏"
+	}
+	return usageError(protocol.ErrCodeUsageStorage, reason+"；可重建本地统计（原文件会保留备份）")
+}
+
 // GetUsageOverview 返回当前登录账号与租户的本机汇总。
 func (a *App) GetUsageOverview(req protocol.UsageQuery) (protocol.UsageOverview, error) {
 	a.usageMu.RLock()
 	defer a.usageMu.RUnlock()
 	if a.usageStore == nil {
-		return protocol.UsageOverview{}, wireError(usageUnavailable(""))
+		return protocol.UsageOverview{}, wireError(usageUnavailableFor(a.usageInitErr))
 	}
 	out, err := a.localUsageOverview(req)
 	return out, wireError(err)
@@ -60,7 +78,7 @@ func (a *App) GetUsageRequests(req protocol.UsageRequestsQuery) (protocol.UsageR
 	a.usageMu.RLock()
 	defer a.usageMu.RUnlock()
 	if a.usageStore == nil {
-		return protocol.UsageRequestsPage{}, wireError(usageUnavailable(""))
+		return protocol.UsageRequestsPage{}, wireError(usageUnavailableFor(a.usageInitErr))
 	}
 	out, err := a.localUsageRequests(req)
 	return out, wireError(err)
@@ -71,7 +89,7 @@ func (a *App) GetUsageDimensions(req protocol.UsageDimensionsQuery) (protocol.Us
 	a.usageMu.RLock()
 	defer a.usageMu.RUnlock()
 	if a.usageStore == nil {
-		return protocol.UsageDimensionsPage{}, wireError(usageUnavailable(""))
+		return protocol.UsageDimensionsPage{}, wireError(usageUnavailableFor(a.usageInitErr))
 	}
 	out, err := a.localUsageDimensions(req)
 	return out, wireError(err)
@@ -84,7 +102,7 @@ func (a *App) GetLocalUsageTenants() ([]protocol.PassportTenant, error) {
 	a.usageMu.RLock()
 	defer a.usageMu.RUnlock()
 	if a.usageStore == nil {
-		return nil, wireError(usageUnavailable(""))
+		return nil, wireError(usageUnavailableFor(a.usageInitErr))
 	}
 	account, err := a.localUsageIdentity()
 	if err != nil {

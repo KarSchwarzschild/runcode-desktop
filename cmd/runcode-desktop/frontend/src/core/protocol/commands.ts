@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionImageGenerationView, SessionInfo, SessionSummary, SetPlatformImageCapabilityRequest, SetSessionImageGenerationRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionInfo, SessionSummary, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -215,12 +215,6 @@ export function getProtocolInfo(): Promise<Info> {
 // kind: query
 export function getQuestion(ref: QuestionReference): Promise<QuestionDraft> {
   return call<QuestionDraft>('GetQuestion', ref);
-}
-
-// GetSessionImageGeneration 读取会话已确认的开关。记录损坏只禁用生图，普通聊天不受影响。
-// kind: query
-export function getSessionImageGeneration(sessionID: string): Promise<SessionImageGenerationView> {
-  return call<SessionImageGenerationView>('GetSessionImageGeneration', sessionID);
 }
 
 // GetUsageDimensions 返回本机已采集的平台模型维度；供应商维度首期不提供。
@@ -577,6 +571,12 @@ export function reset(sessionID: string): Promise<void> {
   return call<void>('Reset', sessionID);
 }
 
+// ResetLocalUsageStore archives the unreadable database and opens a fresh one.
+// kind: trigger
+export function resetLocalUsageStore(): Promise<void> {
+  return call<void>('ResetLocalUsageStore');
+}
+
 // ResolveArtifactPath returns the authorized source path for the UI copy action.
 // kind: idempotent-set
 export function resolveArtifactPath(reference: string): Promise<string> {
@@ -785,12 +785,6 @@ export function setPlatformImageCapability(req: SetPlatformImageCapabilityReques
 // kind: idempotent-set
 export function setReasoningScenario(sessionID: string, scenario: string): Promise<SessionInfo> {
   return call<SessionInfo>('SetReasoningScenario', sessionID, scenario);
-}
-
-// SetSessionImageGeneration 改写下一回合的会话开关。回合进行中拒绝：当前回合 继续用冻结快照，开关变更本来也只在之后生效。
-// kind: idempotent-set
-export function setSessionImageGeneration(req: SetSessionImageGenerationRequest): Promise<SessionImageGenerationView> {
-  return call<SessionImageGenerationView>('SetSessionImageGeneration', req);
 }
 
 // SetSkillEnabled 在 scope("user"/"project")开关一个技能。下次新建会话生效。

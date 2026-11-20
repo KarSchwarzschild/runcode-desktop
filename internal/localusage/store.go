@@ -25,6 +25,10 @@ const usageRetention = 365 * 24 * time.Hour
 var (
 	// ErrSchemaTooNew 表示库 schema 比本二进制新，拒绝打开，不得删库。
 	ErrSchemaTooNew = errors.New("本地用量库版本过新，当前客户端无法打开")
+	// ErrSchemaUnsupported 表示遇到从未发布或已停止支持的 schema。
+	ErrSchemaUnsupported = errors.New("本地用量库版本不受支持")
+	// ErrSchemaCorrupt 表示 schema 元数据损坏或数据库无法识别。
+	ErrSchemaCorrupt = errors.New("本地用量库 schema 已损坏")
 	// ErrStoreClosed 表示关闭后拒绝写入。
 	ErrStoreClosed = errors.New("本地用量记录器已关闭")
 	// ErrInvalidRecord 表示字段不合法。
@@ -138,55 +142,25 @@ func (s *Store) initSchema() error {
 		return err
 	}
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrSchemaCorrupt, err)
 	}
 	var n int
 	if _, err := fmt.Sscanf(ver, "%d", &n); err != nil {
-		return fmt.Errorf("%w: schema_version=%q", ErrSchemaTooNew, ver)
+		return fmt.Errorf("%w: schema_version=%q", ErrSchemaCorrupt, ver)
 	}
 	if n > SchemaVersion {
 		return fmt.Errorf("%w: 库=%d 客户端=%d", ErrSchemaTooNew, n, SchemaVersion)
 	}
 	if n < SchemaVersion {
-		if n == 1 {
-			if err := migrateV1ToV2(s.db); err != nil {
-				return fmt.Errorf("本地用量库迁移到 v2 失败: %w", err)
-			}
-			n = 2
-		}
 		if n == 2 {
 			if err := migrateV2ToV3(s.db); err != nil {
 				return fmt.Errorf("本地用量库迁移到 v3 失败: %w", err)
 			}
 			return nil
 		}
-		return fmt.Errorf("本地用量库 schema=%d 过旧，需要迁移（当前仅支持 %d）", n, SchemaVersion)
+		return fmt.Errorf("%w: 库=%d 当前=%d", ErrSchemaUnsupported, n, SchemaVersion)
 	}
 	return nil
-}
-
-// migrateV1ToV2 为已存在的本机库补充缓存命中／未命中字段；只追加列，
-// 不删除历史事件，也不把旧记录的未知缓存误写成 0。
-func migrateV1ToV2(db *sql.DB) error {
-	tx, err := db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-	for _, stmt := range []string{
-		`ALTER TABLE events ADD COLUMN cache_hit_tokens INTEGER`,
-		`ALTER TABLE events ADD COLUMN cache_hit_tokens_known INTEGER NOT NULL DEFAULT 0`,
-		`ALTER TABLE events ADD COLUMN cache_miss_tokens INTEGER`,
-		`ALTER TABLE events ADD COLUMN cache_miss_tokens_known INTEGER NOT NULL DEFAULT 0`,
-	} {
-		if _, err := tx.Exec(stmt); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec(`UPDATE meta SET value='2' WHERE key='schema_version'`); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // migrateV2ToV3 增加有效缓存物化表，并用窗口函数一次性回填历史 Token 调用。

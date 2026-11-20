@@ -1,4 +1,4 @@
-﻿import { useRef, useState, type RefObject } from 'react'
+import { useRef, useState, type RefObject } from 'react'
 import { errText, forkQuestion, getQuestion, type QuestionDraft } from '@/core/bridge'
 import { basename } from '@/core/paths'
 import type { ComposerEditorHandle } from '@/composer/inline-editor'

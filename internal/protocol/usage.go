@@ -26,6 +26,8 @@ const (
 	ErrCodeUsageTimeout = "usage_timeout"
 	// ErrCodeUsageUnavailable：功能关闭、并发已满或本机库不可读。
 	ErrCodeUsageUnavailable = "usage_unavailable"
+	// ErrCodeUsageStorage：本机用量库损坏、版本不兼容或无法打开，需要用户确认重建。
+	ErrCodeUsageStorage = "usage_storage"
 	// ErrCodeUsageInvalidResponse：本机记录不符合契约，整份丢弃不展示。
 	ErrCodeUsageInvalidResponse = "usage_invalid_response"
 	// ErrCodeUsageIdentityChanged：请求期间登录账号已变化，旧结果作废。

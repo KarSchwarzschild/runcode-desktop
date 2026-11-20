@@ -358,7 +358,7 @@ func decodePassportModels(body []byte) ([]PassportModel, error) {
 	return models, nil
 }
 
-func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]PassportModel, error) {
+func (a *App) fetchPassportModelsContext(ctx context.Context, tenantID string) ([]PassportModel, error) {
 	actor := a.visionAccountIdentity()
 	scope := platformModelRef(tenantID, "")
 	body, status, err := a.bridgeGetStatusContext(ctx, tenantPathPrefix(tenantID)+"/v1/models")
@@ -385,6 +385,14 @@ func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]Pas
 	// 完整目录先入缓存（含纯生图）；文本返回值再过滤，否则 ListImageGenerationModels
 	// 读不到仅生图条目，而聊天选择器又会混入纯生图。
 	a.rememberModelCatalog(scope, actor, models)
+	return models, nil
+}
+
+func (a *App) passportModelsContext(ctx context.Context, tenantID string) ([]PassportModel, error) {
+	models, err := a.fetchPassportModelsContext(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
 	stored := loadRawConfig()
 	chat := make([]PassportModel, 0, len(models))
 	for _, m := range models {

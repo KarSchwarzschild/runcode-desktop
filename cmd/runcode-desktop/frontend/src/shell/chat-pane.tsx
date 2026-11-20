@@ -1,4 +1,4 @@
-﻿// ChatPane 是对话流本身：顶部的计划进度胶囊、可滚动的消息区（把 groupBlocks 分好
+// ChatPane 是对话流本身：顶部的计划进度胶囊、可滚动的消息区（把 groupBlocks 分好
 // 的组映射成各类卡片）、空态与"思考中"指示。纯展示——所有交互都经 props 回调。
 import { useCallback, useMemo, useRef, type ReactNode } from 'react'
 import { Logo } from '@/ui/icons'

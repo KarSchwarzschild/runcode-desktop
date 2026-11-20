@@ -47,25 +47,6 @@ type SaveImageGenerationSettingsRequest struct {
 	DefaultSize      string          `json:"defaultSize"`
 }
 
-// SessionImageGenerationView 是单会话开关视图。Enabled 是用户选择；Available
-// 表示下一回合能否真正生成，不能时带 Reason。
-type SessionImageGenerationView struct {
-	SessionID string          `json:"sessionId"`
-	Enabled   bool            `json:"enabled"`
-	Revision  int64           `json:"revision"`
-	Available bool            `json:"available"`
-	Reason    string          `json:"reason,omitempty"`
-	Model     *ModelReference `json:"model,omitempty"`
-	Size      string          `json:"size,omitempty"`
-}
-
-// SetSessionImageGenerationRequest 带修订号检查地改写单会话开关。
-type SetSessionImageGenerationRequest struct {
-	SessionID        string `json:"sessionId"`
-	Enabled          bool   `json:"enabled"`
-	ExpectedRevision int64  `json:"expectedRevision"`
-}
-
 // ImageGenerationArtifact 是一张已保存图片，路径相对工作区。
 type ImageGenerationArtifact struct {
 	Path     string `json:"path"`

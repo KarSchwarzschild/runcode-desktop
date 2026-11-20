@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/wt68/runcode/internal/imagegentool"
 	appwire "github.com/wt68/runcode/internal/protocol"
 )
 
@@ -49,8 +50,27 @@ func (p imageGenerationPreference) sameTarget(model *modelReference, size string
 	return model == nil || (*p.DefaultModel == *model && p.DefaultSize == size)
 }
 
-func imageGenerationPreferenceFor(cfg desktopConfig, scope string) imageGenerationPreference {
-	return cfg.ImageGenerationPreferences[scope]
+func cloneImageGenerationPreferences(src map[string]imageGenerationPreference) map[string]imageGenerationPreference {
+	out := make(map[string]imageGenerationPreference, len(src))
+	for scope, pref := range src {
+		out[scope] = pref
+	}
+	return out
+}
+
+func (a *App) imageGenerationPreference(scope string) imageGenerationPreference {
+	a.imageGenerationMu.RLock()
+	defer a.imageGenerationMu.RUnlock()
+	return a.imageGenerationPrefs[scope]
+}
+
+func (a *App) rememberImageGenerationPreference(scope string, pref imageGenerationPreference) {
+	a.imageGenerationMu.Lock()
+	if a.imageGenerationPrefs == nil {
+		a.imageGenerationPrefs = map[string]imageGenerationPreference{}
+	}
+	a.imageGenerationPrefs[scope] = pref
+	a.imageGenerationMu.Unlock()
 }
 
 // GetImageGenerationSettings 返回当前账号在 tenantID 下已保存的默认；从不访问 Bridge。
@@ -61,7 +81,7 @@ func (a *App) GetImageGenerationSettings(tenantID string) (appwire.ImageGenerati
 		return appwire.ImageGenerationSettings{}, wireError(err)
 	}
 	scope := imageGenerationScope(account, imageGenerationBridge(), tenantID)
-	return imageGenerationPreferenceFor(loadRawConfig(), scope).view(scope), nil
+	return a.imageGenerationPreference(scope).view(scope), nil
 }
 
 // SaveImageGenerationSettings 对照活目录校验后替换作用域默认。
@@ -89,7 +109,7 @@ func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSetting
 	} else {
 		size = ""
 	}
-	current := imageGenerationPreferenceFor(loadRawConfig(), scope)
+	current := a.imageGenerationPreference(scope)
 	if current.sameTarget(model, size) {
 		return current.view(scope), nil
 	}
@@ -115,8 +135,12 @@ func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSetting
 			return appwire.ImageGenerationSettings{}, wireError(errors.New("该生图模型当前不可用：" + profile.UnavailableReason))
 		}
 		// 显式尺寸必须落在 Bridge 目录声明的支持列表里；错误值拒绝，不静默改写。
-		if size != "" && !slices.Contains(profile.SupportedSizes, size) {
-			return appwire.ImageGenerationSettings{}, wireError(errors.New("该生图模型不支持所选尺寸"))
+		if size != "" {
+			_, _, canonical, ok := imagegentool.ParseSize(size)
+			if !ok || !slices.Contains(profile.SupportedSizes, canonical) {
+				return appwire.ImageGenerationSettings{}, wireError(errors.New("该生图模型不支持所选尺寸"))
+			}
+			size = canonical
 		}
 		// 仅一种尺寸时没有「不固定」：空值钉成该尺寸。
 		if size == "" && len(profile.SupportedSizes) == 1 {
@@ -146,5 +170,6 @@ func (a *App) SaveImageGenerationSettings(req appwire.SaveImageGenerationSetting
 	if err != nil {
 		return appwire.ImageGenerationSettings{}, wireError(err)
 	}
+	a.rememberImageGenerationPreference(scope, saved)
 	return saved.view(scope), nil
 }

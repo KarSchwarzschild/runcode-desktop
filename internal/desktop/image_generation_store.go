@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -110,25 +109,6 @@ func writeRootedFileAtomic(workspace, rel string, data []byte) error {
 	return nil
 }
 
-// imageGenerationSwitch 是某一身份分区下的会话开关。
-type imageGenerationSwitch struct {
-	Enabled  bool  `json:"enabled"`
-	Revision int64 `json:"revision"`
-}
-
-type imageGenerationSessionDisk struct {
-	Version   int                              `json:"version"`
-	SessionID string                           `json:"sessionId"`
-	Scopes    map[string]imageGenerationSwitch `json:"scopes"`
-}
-
-func imageGenerationSessionPath(id string) (string, error) {
-	if !validImageGenerationID(id) {
-		return "", errImageGenerationStorage
-	}
-	return filepath.Join(".runcode", "image-generation", "sessions", id+".json"), nil
-}
-
 // deleteImageGenerationSessionRecords 只清理随会话派生的三类记录：
 // 会话开关、请求账本与回合标记。生成的图片属于用户产物，刻意不在这里删除。
 //
@@ -155,28 +135,6 @@ func deleteImageGenerationSessionRecords(workspace, id string) error {
 		}
 	}
 	return nil
-}
-
-func readImageGenerationSession(workspace, id string) (imageGenerationSessionDisk, error) {
-	disk := imageGenerationSessionDisk{Version: imageGenerationStoreVersion, SessionID: id, Scopes: map[string]imageGenerationSwitch{}}
-	path, err := imageGenerationSessionPath(id)
-	if err != nil {
-		return disk, err
-	}
-	data, exists, err := readRootedFile(workspace, path, imageGenerationSidecarLimit)
-	if err != nil || !exists {
-		return disk, err
-	}
-	var decoded imageGenerationSessionDisk
-	if json.Unmarshal(data, &decoded) != nil || decoded.Version != imageGenerationStoreVersion || decoded.SessionID != id || decoded.Scopes == nil {
-		return disk, errImageGenerationStorage
-	}
-	for scope, sw := range decoded.Scopes {
-		if _, err := hex.DecodeString(scope); err != nil || len(scope) != 64 || sw.Revision < 0 || sw.Revision == math.MaxInt64 {
-			return disk, errImageGenerationStorage
-		}
-	}
-	return decoded, nil
 }
 
 // createRootedFileExclusive 排他创建 rel 并 sync；已存在则回报 os.ErrExist，绝不覆盖。
@@ -440,17 +398,4 @@ func imageGenerationLedgerIDs(workspace, sessionID string) ([]string, error) {
 		out = append(out, generationID)
 	}
 	return out, nil
-}
-
-func writeImageGenerationSession(workspace, id string, disk imageGenerationSessionDisk) error {
-	path, err := imageGenerationSessionPath(id)
-	if err != nil {
-		return err
-	}
-	disk.Version, disk.SessionID = imageGenerationStoreVersion, id
-	data, err := json.Marshal(disk)
-	if err != nil || len(data) > imageGenerationSidecarLimit {
-		return errImageGenerationStorage
-	}
-	return writeRootedFileAtomic(workspace, path, data)
 }

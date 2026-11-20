@@ -40,8 +40,7 @@ func modelCatalogKey(scope modelReference, actor string) string {
 	return fmt.Sprintf("%q/%q/%q", scope.Bridge, scope.TenantID, actor)
 }
 
-// 目录是不可变快照。按发起请求时的身份发布；迟到响应绝不能挂到「此刻登录」的账号上。
-func (a *App) rememberModelCatalog(scope modelReference, actor string, models []PassportModel) {
+func modelCatalogFromModels(models []PassportModel) modelCatalog {
 	next := modelCatalog{models: make(map[string]PassportModel, len(models)), imageGeneration: map[string]PassportModel{}, at: time.Now()}
 	for _, m := range models {
 		if isImageGenerationModel(m) {
@@ -58,6 +57,12 @@ func (a *App) rememberModelCatalog(scope modelReference, actor string, models []
 			next.visionDefaults = append(next.visionDefaults, m)
 		}
 	}
+	return next
+}
+
+// 目录是不可变快照。按发起请求时的身份发布；迟到响应绝不能挂到「此刻登录」的账号上。
+func (a *App) rememberModelCatalog(scope modelReference, actor string, models []PassportModel) {
+	next := modelCatalogFromModels(models)
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.modelCatalogs == nil || len(a.modelCatalogs) >= 64 {

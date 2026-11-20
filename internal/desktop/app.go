@@ -27,6 +27,7 @@ import (
 	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/imageinput"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/llm"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 )
@@ -240,6 +241,11 @@ type App struct {
 	pendingPlans *planStore
 	// pendingImageGeneration parks image_generate state while Create is in flight.
 	pendingImageGeneration *imageGenerationTurnState
+	// imageGenerationPrefs is the in-memory mirror of the scoped image defaults.
+	// Turn start reads this snapshot; desktop.json is only read by settings commands
+	// and startup, never on the chat hot path.
+	imageGenerationMu    sync.RWMutex
+	imageGenerationPrefs map[string]imageGenerationPreference
 	// tokens holds the Passport OAuth tokens (memory + DPAPI persistence); it is
 	// also the engine's TokenSource. passportUser caches /api/me for PassportStatus.
 	// loginCancel cancels an in-flight browser login wait.
@@ -269,8 +275,9 @@ type App struct {
 	oaBindings map[string]oaBindingEntry
 	// usageStore 是本机平台用量 SQLite（见 usage_capture.go／internal/localusage）。
 	// Startup 打开；Shutdown 在回合收尾后关闭。nil 表示未启用或打开失败。
-	usageMu    sync.RWMutex
-	usageStore *localusage.Store
+	usageMu      sync.RWMutex
+	usageStore   *localusage.Store
+	usageInitErr error
 }
 
 // New returns an App that emits events to sink. Session events are enveloped
@@ -284,14 +291,16 @@ func New(sink EventSink) *App { return newWithBuild(sink, host.DefaultBuild) }
 // **多会话并行**:那需要两条真的引擎会话同时在跑,而真会话要一个连得上的 provider。
 // 引擎的 host.BuildFunc 本来就写着"tests inject a fake",这里只是把它透出来。
 func newWithBuild(sink EventSink, build host.BuildFunc) *App {
+	raw := loadRawConfig()
 	a := &App{
-		out:            sink,
-		sink:           newEnvelopeSink(sink),
-		sessions:       map[string]*sessionEntry{},
-		idleEdits:      newEditStore(),
-		idlePlans:      newPlanStore(),
-		passportTenant: strings.TrimSpace(loadRawConfig().TenantID),
-		audit:          newContextAuditManager(),
+		out:                  sink,
+		sink:                 newEnvelopeSink(sink),
+		sessions:             map[string]*sessionEntry{},
+		idleEdits:            newEditStore(),
+		idlePlans:            newPlanStore(),
+		passportTenant:       strings.TrimSpace(raw.TenantID),
+		imageGenerationPrefs: cloneImageGenerationPreferences(raw.ImageGenerationPreferences),
+		audit:                newContextAuditManager(),
 		// ChatGPT 账号在这里就读回落盘的令牌,所以重启后仍是登录态(见 codex.go)。
 		codex: newCodexAccount(),
 	}
@@ -878,10 +887,20 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 	// 通用格式分工所有会话都需要；带 image_generate 的规则只跟随工具注册。
 	appendRenderRoutePrompts(cfg, hasImageGeneration)
 
-	// 上下文审核观测器只在测试版接线;正式版连回调都不装,功能整体不存在。
-	// 回调内部查原子开关,所以运行中切换立即对当前会话生效,无需重建。
+	// LLMRequestObserver 同时服务本地用量 purpose 归属和测试版上下文审核。
+	// 用量追踪器在生产路径也必须存在，否则 provider 只能看到请求而看不到 purpose。
+	purposes := currentPlatformPurposeTracker()
+	var auditObserver func(purpose, turnID string, req llm.Request)
 	if IsTestBuild() {
-		opts.LLMRequestObserver = a.audit.observer(sctx.ID)
+		auditObserver = a.audit.observer(sctx.ID)
+	}
+	if purposes != nil || auditObserver != nil {
+		opts.LLMRequestObserver = func(purpose, turnID string, req llm.Request) {
+			purposes.Observe(purpose, req)
+			if auditObserver != nil {
+				auditObserver(purpose, turnID, req)
+			}
+		}
 	}
 
 	a.configureImages(sctx, *cfg, opts)

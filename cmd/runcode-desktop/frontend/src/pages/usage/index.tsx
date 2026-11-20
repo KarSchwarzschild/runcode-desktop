@@ -1,7 +1,7 @@
 // 用量统计页：我的平台用量 · 当前租户。身份来自应用登录状态，统计租户只读取得初始值、
 // 页内切换只影响本页；未登录、无权、不支持、超时、暂不可用各自说明，不写成「暂无数据」。
 import { useState, type ReactNode } from 'react'
-import type { PassportStatus, UsageDimensionRow } from '@/core/bridge'
+import { errText, resetLocalUsageStore, type PassportStatus, type UsageDimensionRow } from '@/core/bridge'
 import { passportDisplayName } from '@/core/passport-account'
 import { USAGE_TIMEZONE, formatShanghai, type UsageFailure } from '@/core/usage'
 import { PageShell, Placeholder } from '@/ui/layout'
@@ -83,6 +83,7 @@ const FAILURE_TITLES: Partial<Record<UsageFailure['kind'], string>> = {
   unsupported: '当前数据暂不支持这项统计，未显示的指标不代表零用量',
   timeout: '统计超时：可以缩小时间范围后重试',
   unavailable: '用量服务暂不可用，请稍后重试',
+  storage: '本机用量库需要修复',
   invalidResponse: '用量服务返回的数据不完整，已整份丢弃',
   invalidRange: '时间范围或筛选条件无效',
   invalidCursor: '分页已失效，需要回到第一页',
@@ -122,6 +123,8 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
   const usage = useUsage(identityKey, tenants.selected)
   const [tab, setTab] = useState<Tab>('requests')
   const [trendMode, setTrendMode] = useState<TrendMode>('tokens')
+  const [resetting, setResetting] = useState(false)
+  const [resetError, setResetError] = useState('')
   const overview = usage.overview
   const providerBreakdown = !!overview?.capabilities.providerBreakdown
 
@@ -168,10 +171,30 @@ export function UsagePage({ passport, onOpenSettings }: { passport: PassportStat
   else if (usage.error?.kind === 'notLoggedIn' && !overview) body = <LoginPrompt onOpenSettings={onOpenSettings} title="通行证登录已失效，请重新登录后查看用量" />
   else if (usage.error && !overview) {
     const title = FAILURE_TITLES[usage.error.kind] ?? '读取用量失败'
+    const reset = async () => {
+      setResetting(true)
+      setResetError('')
+      try {
+        await resetLocalUsageStore()
+        await usage.refresh()
+      } catch (e) {
+        setResetError(errText(e))
+      } finally {
+        setResetting(false)
+      }
+    }
     body = (
       <div className={PANEL}>
         <Banner tone="danger" title={title} className="w-full"><FailureBody failure={usage.error} title={title} /></Banner>
-        <button type="button" className={BTN} onClick={usage.refresh}>重试</button>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className={BTN} onClick={usage.refresh}>重试</button>
+          {usage.error.kind === 'storage' && (
+            <button type="button" className={`${BTN} ${BTN_PRIMARY}`} disabled={resetting} onClick={() => void reset()}>
+              {resetting ? '正在重建…' : '重建本机用量库'}
+            </button>
+          )}
+        </div>
+        {resetError && <InlineError variant="text">{resetError}</InlineError>}
       </div>
     )
   } else if (!overview) body = <Placeholder>加载中…</Placeholder>

@@ -93,7 +93,6 @@ func startLongConversationImageSession(t *testing.T, warmup int) (*imageGenHostQ
 	e := app.entryLocked(id)
 	e.passport, e.tenantID, e.imageGeneration = true, "tenant-a", imageState
 	app.mu.Unlock()
-	setImageGen(t, app, id, true)
 	f := &imageGenHostQuestionSession{app: app, sink: sink, bridge: bridge, cwd: cwd, id: id, hostCalls: hostCalls, modelCalls: modelCalls}
 	return f, &textTurnsDone
 }

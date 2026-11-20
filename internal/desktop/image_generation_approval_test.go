@@ -337,7 +337,6 @@ func startImageGenHostQuestionSessionOpts(t *testing.T, captureUsage, holdFirstM
 	if imageState == nil {
 		t.Fatal("manager build did not park image generation state")
 	}
-	setImageGen(t, app, id, true)
 	return &imageGenHostQuestionSession{
 		app: app, sink: sink, bridge: bridge, cwd: cwd, id: id,
 		hostCalls: hostCalls, modelCalls: modelCalls, chatCalls: chatCalls, modelBridge: model.URL, usageStore: usageStore,

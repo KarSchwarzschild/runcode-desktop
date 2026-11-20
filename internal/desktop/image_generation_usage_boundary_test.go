@@ -29,7 +29,11 @@ func TestImageGenerationLocalRejectionsDoNotCreateUsage(t *testing.T) {
 				if reason == "ledger blocked" {
 					dir = "requests"
 				}
-				if err := os.WriteFile(filepath.Join(f.cwd, ".runcode", "image-generation", dir), []byte("blocked"), 0o600); err != nil {
+				path := filepath.Join(f.cwd, ".runcode", "image-generation", dir)
+				if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte("blocked"), 0o600); err != nil {
 					t.Fatal(err)
 				}
 			}

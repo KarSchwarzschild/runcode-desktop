@@ -136,14 +136,11 @@ func (a *App) prepareImageGenerationSend(snap imageGenerationSnapshot) (imageGen
 	a.tokens.mu.Lock()
 	defer a.tokens.mu.Unlock()
 	currentToken, epoch := a.tokens.ts.AccessToken, a.tokens.identity
-	if token == "" || currentToken != token || tokenIdentity(token) != snap.Account || epoch != snap.Epoch {
+	identity := accountIdentityForToken(token, "")
+	if token == "" || currentToken != token || !identity.Stable || identity.Digest != snap.Account || epoch != snap.Epoch {
 		return imageGenerationSendSnapshot{}, notSent("auth", "会话账号已变化，本次未生成图片；请重新打开会话")
 	}
-	issuer, subject := tokenIdentityParts(token)
-	if issuer == "" || subject == "" {
-		return imageGenerationSendSnapshot{}, notSent("auth", "调用身份信息缺失，本次未提交生成请求")
-	}
-	scope := (ScopeFreeze{AccountIssuer: issuer, AccountSub: subject, BridgeBase: snap.Bridge, TenantID: snap.Tenant}).toScope()
+	scope := (ScopeFreeze{AccountIssuer: identity.Issuer, AccountSub: identity.Subject, BridgeBase: snap.Bridge, TenantID: snap.Tenant}).toScope()
 	return imageGenerationSendSnapshot{Token: token, Epoch: epoch, Scope: scope}, nil
 }
 

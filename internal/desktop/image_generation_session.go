@@ -1,11 +1,8 @@
 package desktop
 
 import (
-	"errors"
 	"strings"
 	"sync"
-
-	appwire "github.com/wt68/runcode/internal/protocol"
 )
 
 // 会话级生图状态与每个独立回合的冻结快照。
@@ -53,7 +50,6 @@ type imageGenerationBinding struct {
 
 // imageGenerationSnapshot 按独立回合冻结一次。
 type imageGenerationSnapshot struct {
-	Enabled   bool
 	Available bool
 	Reason    string
 
@@ -64,7 +60,6 @@ type imageGenerationSnapshot struct {
 
 	Account, Epoch, Bridge, Tenant, ScopeID string
 
-	SwitchRevision   int64
 	SettingsRevision int64
 	Model            string
 	Size             string
@@ -125,8 +120,7 @@ func (a *App) imageGenerationAccountCurrent(b imageGenerationBinding) bool {
 }
 
 // imageGenerationTarget 解析会话作用域已保存的默认模型，或说明为何没有。
-func imageGenerationTarget(b imageGenerationBinding, cfg desktopConfig) (imageGenerationPreference, string) {
-	pref := imageGenerationPreferenceFor(cfg, b.Scope)
+func imageGenerationTarget(b imageGenerationBinding, pref imageGenerationPreference) (imageGenerationPreference, string) {
 	if pref.DefaultModel == nil {
 		return pref, "尚未选择生图模型，请在「设置 → 图片生成」中选择"
 	}
@@ -136,97 +130,8 @@ func imageGenerationTarget(b imageGenerationBinding, cfg desktopConfig) (imageGe
 	return pref, ""
 }
 
-func (a *App) explicitImageGenerationEntry(sessionID string) (*sessionEntry, error) {
-	if strings.TrimSpace(sessionID) == "" {
-		return nil, errNoSession
-	}
-	return a.entryOf(sessionID)
-}
-
-func (a *App) sessionImageGenerationView(e *sessionEntry, b imageGenerationBinding, sw imageGenerationSwitch, reason string) appwire.SessionImageGenerationView {
-	view := appwire.SessionImageGenerationView{SessionID: e.id, Enabled: sw.Enabled, Revision: sw.Revision, Reason: reason}
-	if reason != "" {
-		return view
-	}
-	if !a.imageGenerationAccountCurrent(b) {
-		view.Reason = "会话账号已变化，请重新打开会话"
-		return view
-	}
-	pref, why := imageGenerationTarget(b, loadRawConfig())
-	if why != "" {
-		view.Reason = why
-		return view
-	}
-	ref := *pref.DefaultModel
-	view.Available, view.Model, view.Size = true, &ref, pref.DefaultSize
-	return view
-}
-
-// GetSessionImageGeneration 读取会话已确认的开关。记录损坏只禁用生图，普通聊天不受影响。
-func (a *App) GetSessionImageGeneration(sessionID string) (appwire.SessionImageGenerationView, error) {
-	e, err := a.explicitImageGenerationEntry(sessionID)
-	if err != nil {
-		return appwire.SessionImageGenerationView{}, wireError(err)
-	}
-	b, reason := a.imageGenerationBindingOf(e)
-	if reason != "" {
-		return a.sessionImageGenerationView(e, b, imageGenerationSwitch{}, reason), nil
-	}
-	disk, err := readImageGenerationSession(e.workspace, e.id)
-	if err != nil {
-		return a.sessionImageGenerationView(e, b, imageGenerationSwitch{}, "图片生成开关记录无法读取，本会话暂不能生成图片；普通聊天不受影响"), nil
-	}
-	return a.sessionImageGenerationView(e, b, disk.Scopes[b.Scope], ""), nil
-}
-
-// SetSessionImageGeneration 改写下一回合的会话开关。回合进行中拒绝：当前回合
-// 继续用冻结快照，开关变更本来也只在之后生效。
-func (a *App) SetSessionImageGeneration(req appwire.SetSessionImageGenerationRequest) (appwire.SessionImageGenerationView, error) {
-	e, err := a.explicitImageGenerationEntry(req.SessionID)
-	if err != nil {
-		return appwire.SessionImageGenerationView{}, wireError(err)
-	}
-	b, reason := a.imageGenerationBindingOf(e)
-	if reason != "" {
-		return appwire.SessionImageGenerationView{}, wireError(errors.New(reason))
-	}
-	if !a.imageGenerationAccountCurrent(b) {
-		return appwire.SessionImageGenerationView{}, wireError(errors.New("会话账号已变化，请重新打开会话"))
-	}
-	// questionMu 避免换开关时同时准备提交；turnActive 覆盖已在跑的回合。
-	e.questionMu.Lock()
-	defer e.questionMu.Unlock()
-	a.mu.Lock()
-	busy, current := e.turnActive, a.entryLocked(e.id) == e && !e.closed
-	a.mu.Unlock()
-	if !current {
-		return appwire.SessionImageGenerationView{}, wireError(errors.New("会话已变化，请重新打开会话"))
-	}
-	if busy {
-		return appwire.SessionImageGenerationView{}, wireError(errors.New("回合进行中不能切换图片生成，请等待完成或停止后再试"))
-	}
-	disk, err := readImageGenerationSession(e.workspace, e.id)
-	if err != nil {
-		return appwire.SessionImageGenerationView{}, wireError(err)
-	}
-	sw := disk.Scopes[b.Scope]
-	if sw.Enabled == req.Enabled {
-		return a.sessionImageGenerationView(e, b, sw, ""), nil
-	}
-	if sw.Revision != req.ExpectedRevision {
-		return appwire.SessionImageGenerationView{}, wireError(errors.New("图片生成开关已变化，请刷新后重试"))
-	}
-	next := imageGenerationSwitch{Enabled: req.Enabled, Revision: sw.Revision + 1}
-	disk.Scopes[b.Scope] = next
-	if err := writeImageGenerationSession(e.workspace, e.id, disk); err != nil {
-		return appwire.SessionImageGenerationView{}, wireError(err)
-	}
-	return a.sessionImageGenerationView(e, b, next, ""), nil
-}
-
 // freezeImageGenerationTurn 为独立回合预留新 TurnID 并冻结目标。
 // 只由回合开始钩子调用；注入消息与恢复回合沿用已有快照。
-// 旧 sidecar 开关不参与可用性；损坏或缺失的开关记录也不阻断自动生图。
 func (a *App) freezeImageGenerationTurn(e *sessionEntry) {
 	if e == nil {
 		return
@@ -246,16 +151,11 @@ func (a *App) freezeImageGenerationTurn(e *sessionEntry) {
 	b, reason := a.imageGenerationBindingOf(e)
 	if reason == "" {
 		snap.Account, snap.Epoch, snap.Bridge, snap.Tenant, snap.ScopeID = b.Account, b.Epoch, b.Bridge, b.Tenant, b.Scope
-		if disk, err := readImageGenerationSession(workspace, e.id); err == nil {
-			sw := disk.Scopes[b.Scope]
-			snap.SwitchRevision = sw.Revision
-		}
-		pref, why := imageGenerationTarget(b, loadRawConfig())
+		pref, why := imageGenerationTarget(b, a.imageGenerationPreference(b.Scope))
 		snap.SettingsRevision = pref.Revision
 		if why != "" {
 			reason = why
 		} else {
-			snap.Enabled = true
 			snap.Model, snap.Size, snap.SupportedSizes, snap.ResponseFormat = pref.DefaultModel.Name, pref.DefaultSize, pref.SupportedSizes, pref.ResponseFormat
 			if len(snap.SupportedSizes) == 0 && pref.DefaultSize != "" {
 				snap.SupportedSizes = []string{pref.DefaultSize}

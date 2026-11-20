@@ -1,4 +1,4 @@
-﻿import { useDirectoryAccess } from '@/session/use-directory-access'
+import { useDirectoryAccess } from '@/session/use-directory-access'
 import { ArtifactActionsContext } from '@/chat/artifact-actions'
 import { useChatDrafts } from '@/session/use-chat-drafts'
 import { useQuestionRetry } from '@/session/use-question-retry'

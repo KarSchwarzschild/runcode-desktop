@@ -45,3 +45,15 @@ func TestDefaultOutboundSizePrefersSmallestSquare(t *testing.T) {
 		t.Fatalf("empty list = %q", got)
 	}
 }
+
+func TestParseSizeUsesOneCanonicalRule(t *testing.T) {
+	for _, input := range []string{"1024x768", "1024*768", "1024×768", " 1024 X 768 "} {
+		w, h, canonical, ok := ParseSize(input)
+		if !ok || w != 1024 || h != 768 || canonical != "1024x768" {
+			t.Fatalf("ParseSize(%q) = %d,%d,%q,%v", input, w, h, canonical, ok)
+		}
+	}
+	if _, _, _, ok := ParseSize("1024"); ok {
+		t.Fatal("missing height accepted")
+	}
+}

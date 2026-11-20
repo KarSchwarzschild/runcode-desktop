@@ -1,4 +1,4 @@
-﻿package desktop
+package desktop
 
 // 一个回合的生命周期:提交、打断、授权应答、以及回合之外的手动压缩。
 // 真正的执行在 host 管理的 goroutine 里,这里只维护桌面侧的记账(在途标记、

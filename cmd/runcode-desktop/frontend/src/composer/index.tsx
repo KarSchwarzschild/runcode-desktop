@@ -1,4 +1,4 @@
-﻿import type { QuestionDraft } from '@/core/bridge'
+import type { QuestionDraft } from '@/core/bridge'
 import { InlineEditor, type ComposerEditorHandle } from './inline-editor'
 import { GhostBtn } from '@/ui/ghost-btn'
 // composer 是对话输入区：多行输入框、@技能 / /子代理 / #文件 三种触发的选择器、

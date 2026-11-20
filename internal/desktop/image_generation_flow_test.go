@@ -104,7 +104,7 @@ type imageGenFlow struct {
 	tool   *imagegentool.Tool
 }
 
-// newImageGenFlow：已配置并开启生图的通行证会话（image-only-b64 @1024x1024），工具接宿主。
+// newImageGenFlow：已配置生图的通行证会话（image-only-b64 @1024x1024），工具接宿主。
 func newImageGenFlow(t *testing.T) *imageGenFlow {
 	t.Helper()
 	isolateConfigDir(t)
@@ -115,7 +115,6 @@ func newImageGenFlow(t *testing.T) *imageGenFlow {
 	id, sess := openParallelSession(t, app, built)
 	markImageGenPassport(app, id, "tenant-a")
 	saveImageModel(t, app, "tenant-a", "image-only-b64", "1024x1024")
-	setImageGen(t, app, id, true)
 	e, err := app.entryOf(id)
 	if err != nil {
 		t.Fatal(err)
@@ -170,12 +169,6 @@ func TestImageGenerationFlowGeneratesWithConfiguredModel(t *testing.T) {
 
 func TestImageGenerationFlowIneligibleSendNothing(t *testing.T) {
 	f := newImageGenFlow(t)
-	// 旧开关关闭不再拦截；OA 锁定仍必须零 POST。
-	setImageGen(t, f.app, f.id, false)
-	f.app.freezeImageGenerationTurn(f.entry)
-	if snap := f.state.snapshot(); !snap.Enabled || !snap.Available {
-		t.Fatalf("switch off must still auto-enable: %+v", snap)
-	}
 	f.app.mu.Lock()
 	f.entry.oaLocalModel = "local-model"
 	f.app.mu.Unlock()
