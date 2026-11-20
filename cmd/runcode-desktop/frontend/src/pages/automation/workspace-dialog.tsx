@@ -77,13 +77,21 @@ export function AutomationWorkspaceDialog({ open, onClose, onOpenSettings, onOpe
   }
 
   return (
-    <div className="fixed inset-0 z-30 bg-ink/30 flex items-center justify-center">
+    <div className="fixed inset-0 z-30 bg-ink/30 flex items-center justify-center p-4">
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="自动化任务"
         tabIndex={-1}
+        style={{
+          width: '100%',
+          height: '100%',
+          maxWidth: '1040px',
+          maxHeight: '760px',
+          minWidth: 'min(760px, 100%)',
+          minHeight: 'min(560px, 100%)',
+        }}
         className="automation-window bg-surface rounded-card shadow-modal flex flex-col outline-none overflow-hidden"
         onKeyDown={onKeyDown}
       >

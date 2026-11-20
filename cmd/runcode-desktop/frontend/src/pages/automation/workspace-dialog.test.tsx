@@ -79,6 +79,19 @@ function OpenRunHarness({ onOpenRun }: {
 }
 
 describe('automation workspace dialog', () => {
+  it('fills the available client area instead of shrinking to the task list', async () => {
+    await act(async () => {
+      root.render(<OpenRunHarness onOpenRun={async () => {}} />)
+    })
+    const dialog = host.querySelector('[role="dialog"]') as HTMLDivElement
+    expect(dialog.style.width).toBe('100%')
+    expect(dialog.style.height).toBe('100%')
+    expect(dialog.style.maxWidth).toBe('1040px')
+    expect(dialog.style.maxHeight).toBe('760px')
+    expect(dialog.style.minWidth).toBe('min(760px, 100%)')
+    expect(dialog.style.minHeight).toBe('min(560px, 100%)')
+  })
+
   it('returns focus to the trigger and leaves the composer draft untouched', async () => {
     await act(async () => { root.render(<Harness />) })
     const draft = host.querySelector('textarea') as HTMLTextAreaElement
