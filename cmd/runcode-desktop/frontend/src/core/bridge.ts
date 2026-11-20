@@ -15,7 +15,7 @@ import { Events as RuntimeEvents } from '@wailsio/runtime'
 
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
-  ConversationInfo as SessionInfo,
+  SessionInfo,
  ArtifactReference, DirectoryAccessRequest, DirectoryAccessGrant, DirectoryAccessView,
   ModelContextValues, ModelContextOverride, ModelContextView, SaveModelContextSettingsRequest,
   QuestionReference, QuestionImage, QuestionDraft, QuestionReceipt, SubmitQuestionRequest,
@@ -260,7 +260,7 @@ import {
   readArtifactBytes as readArtifactBytesCmd,
   switchModel as switchModelCmd,
 } from './protocol/commands'
-import type { EditRecord, ConversationInfo as SessionInfo } from './protocol/types'
+import type { EditRecord, SessionInfo } from './protocol/types'
 
 // switchModel spans platform (passport) and custom direct-connection models: a
 // same-connection platform swap is in place, any connection change rebuilds the

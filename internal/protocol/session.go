@@ -1,5 +1,7 @@
 package protocol
 
+import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
+
 // StartSessionRequest opens a session for a workspace. Empty fields fall back to
 // the environment (ANTHROPIC_MODEL/API key/etc.), mirroring the CLI's resolution
 // for the values the host does not yet surface in a settings form.
@@ -122,9 +124,9 @@ type ResumedTool struct {
 // ResumedSession carries a reopened session's status plus its prior conversation
 // as rendered blocks so the frontend can repaint it.
 type ResumedSession struct {
-	Source *QuestionReference `json:"source,omitempty"`
-	Info   ConversationInfo   `json:"info"`
-	Blocks []ResumedBlock     `json:"blocks"`
+	Source *QuestionReference    `json:"source,omitempty"`
+	Info   hostproto.SessionInfo `json:"info"`
+	Blocks []ResumedBlock        `json:"blocks"`
 	// ContextTokens is an estimate of the reopened history's context occupancy, so
 	// the usage bar shows a sensible value immediately instead of 0 (no turn has run
 	// yet to report an exact count). The first turn replaces it with the real value.

@@ -503,25 +503,6 @@ export interface ContextUsage {
   iteration: number;
 }
 
-// Mirrors protocol.ConversationInfo. ConversationInfo 是桌面会话显示契约，保留既有引擎 SessionInfo 的显示字段。 Kind 保留旧历史的模式标记；当前产品仅创建普通引擎会话。
-export interface ConversationInfo {
-  kind?: string;
-  readOnlyReason?: string;
-  sessionId: string;
-  model: string;
-  cwd: string;
-  permissionMode: string;
-  planMode: boolean;
-  reasoningScenario: string;
-  thinkingEffort: string;
-  maxContextTokens: number;
-  inputPricePerMTok: number;
-  outputPricePerMTok: number;
-  pricingSource: string;
-  previewBaseURL: string;
-  automation?: AutomationOrigin;
-}
-
 // Mirrors protocol.CreateAutomationTaskRequest. CreateAutomationTaskRequest creates one task.
 export interface CreateAutomationTaskRequest {
   context: AutomationContext;
@@ -912,7 +893,7 @@ export interface PlanApproveRequest {
 
 // Mirrors protocol.PlanApproveResult. PlanApproveResult 把审批的两件后果一起带回前端：会话状态已变（计划模式关、权限模式 切好），以及应当作为下一条消息发出去的执行指令。指令由后端拼是为了让措辞与清单编号 只有一个来源（也便于单测），发送仍走前端既有的 send 路径，这样 busy、用户气泡、回合 生命周期全部复用原有链路。
 export interface PlanApproveResult {
-  info: ConversationInfo;
+  info: SessionInfo;
   executionPrompt: string;
 }
 
@@ -1117,7 +1098,7 @@ export interface ResumedBlock {
 // Mirrors protocol.ResumedSession. ResumedSession carries a reopened session's status plus its prior conversation as rendered blocks so the frontend can repaint it.
 export interface ResumedSession {
   source?: QuestionReference;
-  info: ConversationInfo;
+  info: SessionInfo;
   blocks: ResumedBlock[] | null;
   contextTokens: number;
 }

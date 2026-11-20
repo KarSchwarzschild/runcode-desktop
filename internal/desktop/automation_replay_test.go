@@ -122,10 +122,6 @@ func TestAutomationReplayLinkAndWorkspace(t *testing.T) {
 	if opened.Session.Info.CWD != wsB || opened.Session.Info.CWD == current {
 		t.Fatalf("opened cwd = %q, linked %q, focused %q", opened.Session.Info.CWD, wsB, current)
 	}
-	if opened.Session.Info.Kind != "agent" || opened.Session.Info.Automation == nil || opened.Session.Info.Automation.TaskID != domain.ID {
-		t.Fatalf("opened info = %+v", opened.Session.Info)
-	}
-
 	openedID := opened.Session.Info.SessionID
 	app.mu.Lock()
 	if e := app.sessions[openedID]; e != nil {
