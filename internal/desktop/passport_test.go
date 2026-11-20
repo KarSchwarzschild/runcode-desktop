@@ -11,6 +11,7 @@ func TestPassportConfigDefaultsAndEnvOverride(t *testing.T) {
 	t.Setenv("RUNCODE_PASSPORT_AUTHORITY", "")
 	t.Setenv("RUNCODE_PASSPORT_CLIENT_ID", "")
 	t.Setenv("RUNCODE_BRIDGE_BASE_URL", "")
+	t.Setenv("RUNCODE_PASSPORT_REDIRECT_URI", "")
 	cfg := passportConfig()
 	if cfg.Authority != "https://passport-ai.ouchn.edu.cn" {
 		t.Fatalf("authority = %q", cfg.Authority)
@@ -29,6 +30,27 @@ func TestPassportConfigDefaultsAndEnvOverride(t *testing.T) {
 	cfg = passportConfig()
 	if cfg.BridgeBaseURL != "https://bridge.example" || cfg.RedirectURI != "https://bridge.example/oauth/callback" {
 		t.Fatalf("override: %+v", cfg)
+	}
+}
+
+func TestPassportConfigUsesRegisteredRedirectForLoopbackBridge(t *testing.T) {
+	t.Setenv("RUNCODE_PASSPORT_REDIRECT_URI", "")
+	const registered = "https://bridge-aibase.ouc-online.com.cn/oauth/callback"
+	for _, bridge := range []string{
+		"http://localhost:41729",
+		"http://127.0.0.1:41729",
+		"http://[::1]:41729",
+	} {
+		t.Run(bridge, func(t *testing.T) {
+			t.Setenv("RUNCODE_BRIDGE_BASE_URL", bridge)
+			cfg := passportConfig()
+			if cfg.BridgeBaseURL != bridge {
+				t.Fatalf("bridge = %q, want local API base %q", cfg.BridgeBaseURL, bridge)
+			}
+			if cfg.RedirectURI != registered {
+				t.Fatalf("redirect = %q, want %q", cfg.RedirectURI, registered)
+			}
+		})
 	}
 }
 

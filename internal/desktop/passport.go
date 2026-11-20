@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -27,9 +28,16 @@ type passportSettings struct {
 	RedirectURI   string // BridgeBaseURL + /oauth/callback
 }
 
+const defaultBridgeBaseURL = "https://bridge-aibase.ouc-online.com.cn"
+
 func passportConfig() passportSettings {
 	authority := strings.TrimRight(envOr("RUNCODE_PASSPORT_AUTHORITY", "https://passport-ai.ouchn.edu.cn"), "/")
-	bridge := strings.TrimRight(envOr("RUNCODE_BRIDGE_BASE_URL", "https://bridge-aibase.ouc-online.com.cn"), "/")
+	bridge := strings.TrimRight(envOr("RUNCODE_BRIDGE_BASE_URL", defaultBridgeBaseURL), "/")
+	redirectDefault := bridge + "/oauth/callback"
+	// 本机 Bridge 只替换 API 地址；OAuth 回调必须仍使用通行证已登记的正式中转。
+	if passportBridgeIsLoopback(bridge) {
+		redirectDefault = defaultBridgeBaseURL + "/oauth/callback"
+	}
 	return passportSettings{
 		Authority: authority,
 		ClientID:  envOr("RUNCODE_PASSPORT_CLIENT_ID", "runcode-desktop"),
@@ -46,8 +54,17 @@ func passportConfig() passportSettings {
 		// invalid_scope 失败；那时用环境变量退回旧的一串即可，不必等新包。
 		Scopes:        envOr("RUNCODE_PASSPORT_SCOPES", "openid profile offline_access passportapi manageapi"),
 		BridgeBaseURL: bridge,
-		RedirectURI:   bridge + "/oauth/callback",
+		RedirectURI:   envOr("RUNCODE_PASSPORT_REDIRECT_URI", redirectDefault),
 	}
+}
+
+func passportBridgeIsLoopback(bridge string) bool {
+	u, err := url.Parse(bridge)
+	if err != nil || u.Hostname() == "" {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	return host == "localhost" || host == "127.0.0.1" || host == "::1"
 }
 
 func (s passportSettings) tokenURL() string { return s.Authority + "/connect/token" }
