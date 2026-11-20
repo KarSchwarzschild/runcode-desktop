@@ -11,7 +11,8 @@ export type AgentNested = { agent: string; text: string; tools: ToolEvent[]; usa
 export type Block =
   | { kind: 'user'; id: string; questionId?: string; text: string; ts: string; attachments?: string[] }
   | { kind: 'assistant'; id: string; text: string; thinking?: string; streaming: boolean; ts: string }
-  | { kind: 'tool'; id: string; tool: ToolEvent; nested?: AgentNested }
+  // sessionId 标识工具实际运行的会话，自动化历史中的执行卡据此保持来源稳定。
+  | { kind: 'tool'; id: string; tool: ToolEvent; nested?: AgentNested; sessionId?: string }
   | { kind: 'error'; id: string; text: string }
   | { kind: 'warning'; id: string; text: string }
   | { kind: 'notice'; id: string; text: string }

@@ -9,6 +9,9 @@
 // the Wails runtime directly, and runtime access stays here + in the generated
 // events module.
 
+import { onEnvelope as onCoreEnvelope, type EventMap } from './protocol/events'
+import type { AutomationEventSource, Envelope as WireEnvelope } from './protocol/types'
+
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
  ArtifactReference, DirectoryAccessRequest, DirectoryAccessGrant, DirectoryAccessView,
@@ -105,8 +108,19 @@ export { Events, ToolEventTypes, Decisions, ErrCodes, PlanStages, PlanStates, Sk
 export type { PassportTenant } from './protocol/types'
 
 // ---- events (generated; unwraps the Envelope exactly like the old helpers) ----
-export { onEvent, onEnvelope } from './protocol/events'
-export type { EventMap } from './protocol/events'
+export { onEvent } from './protocol/events'
+export type { EventMap }
+
+export type DesktopEnvelope<P> = WireEnvelope<P> & { automationSource?: AutomationEventSource }
+
+export function onEnvelope<K extends keyof EventMap>(
+  event: K,
+  handler: (data: DesktopEnvelope<EventMap[K]>) => void,
+): () => void {
+  return onCoreEnvelope(event, (data) => {
+    handler(data as DesktopEnvelope<EventMap[K]>)
+  })
+}
 
 // ---- commands (generated; same lowerCamel names the old helpers used) ---------
 export {
@@ -305,6 +319,23 @@ export async function copyText(text: string): Promise<void> {
     await navigator.clipboard.writeText(text)
   }
 }
+
+// ---- 自动化任务：页面只通过 bridge 调用生成协议 --------------------------------
+export type {
+  AutomationBindingSummary, AutomationContext, AutomationContextChanged, AutomationConversationResult,
+  AutomationDefaults, AutomationEventSource, AutomationModelSummary, AutomationOrigin, AutomationRun,
+  AutomationRunChanged, AutomationRunPage, AutomationSchedule, AutomationServiceChanged, AutomationSessionResult,
+  AutomationTask, AutomationTaskChanged, AutomationTaskDraft, AutomationTaskPage, AutomationTaskResult,
+  AutomationRunResult, DeleteAutomationTaskRequest, DeleteAutomationTaskResult,
+  CreateAutomationTaskRequest, ListAutomationRunsRequest, ListAutomationTasksRequest, OpenAutomationSessionRequest,
+  RunAutomationTaskNowRequest, SessionAutomationRunsRequest, SetAutomationTaskPausedRequest, UpdateAutomationTaskRequest,
+} from './protocol/types'
+export {
+  getAutomationDefaults, listAutomationTasks, createAutomationTask, updateAutomationTask,
+  setAutomationTaskPaused, runAutomationTaskNow, deleteAutomationTask,
+  listAutomationRuns, listSessionAutomationRuns, getAutomationConversation,
+  openAutomationSession,
+} from './protocol/commands'
 
 // ---- frontend-only data shapes and narrowing helpers --------------------------
 

@@ -18,7 +18,8 @@ export function ExecutionCard({ tools, harmAllows, oaBlocked }: {
   oaBlocked?: Record<string, string>
 }) {
   const [sel, setSel] = useState<number | null>(null)
-  const runningIdx = tools.findIndex((t) => t.type !== 'completed' && t.type !== 'failed')
+  // 自动化任务摘要保持折叠，点击仍可查看参数；普通工具在运行时继续自动展开。
+  const runningIdx = tools.findIndex((t) => t.toolName !== 'automation_task' && t.type !== 'completed' && t.type !== 'failed')
   const activeIdx = sel != null && sel < tools.length ? sel : runningIdx
 
   return (

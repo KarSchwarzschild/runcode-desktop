@@ -68,6 +68,8 @@ export function toolVerbTarget(t: ToolEvent): { verb: string; target: string } {
     case 'install_runtime':
       target = RUNTIME_LABEL[String(o.runtime ?? '').trim().toLowerCase()] ?? String(o.runtime ?? '')
       break
+    case 'automation_task':
+      return { verb: '执行', target: clip(String(o.name ?? ''), 44) }
     default:
       target = basename(t.files?.[0]?.path) || basename(String(o.path ?? ''))
   }
