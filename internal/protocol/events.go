@@ -36,4 +36,9 @@ const (
 	// 一个红色的"执行失败"——系统正在自动恢复,这一轮随后会被整个重跑。界面按
 	// ToolUseID 精确改写那一张卡片,不靠匹配错误文案(措辞一改匹配就静默失效)。
 	EventOABlocked = "oa:blocked"
+	// 自动化任务、运行和身份代际事件。
+	EventAutomationTaskChanged    = "automation:task_changed"
+	EventAutomationRunChanged     = "automation:run_changed"
+	EventAutomationServiceChanged = "automation:service_changed"
+	EventAutomationContextChanged = "automation:context_changed"
 )

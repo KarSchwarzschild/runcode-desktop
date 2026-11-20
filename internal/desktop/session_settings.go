@@ -22,6 +22,9 @@ import (
 
 // SetPermissionMode switches the permission mode at runtime.
 func (a *App) SetPermissionMode(sessionID, mode string) error {
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return wireError(err)
+	}
 	id, err := a.sessionIDOf(sessionID)
 	if err != nil {
 		return wireError(err)
@@ -64,6 +67,9 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 	if id == "" {
 		return SessionInfo{}, nil
 	}
+	if a.sessionLeased(id) {
+		return a.Status(id)
+	}
 	if err := a.SetPermissionMode(id, req.PermissionMode); err != nil {
 		return SessionInfo{}, err
 	}
@@ -75,6 +81,9 @@ func (a *App) SetModel(sessionID, model string) error {
 	model = strings.TrimSpace(model)
 	if model == "" {
 		return wireError(errors.New("模型为空"))
+	}
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return wireError(err)
 	}
 	a.startMu.Lock()
 	e, err := a.entryOf(sessionID)
@@ -114,6 +123,9 @@ func (a *App) SwitchModel(sessionID, kind, name string) (SessionInfo, error) {
 	debugLog("SwitchModel kind=%q name=%q", kind, name)
 	if name == "" {
 		return SessionInfo{}, wireError(errors.New("模型为空"))
+	}
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return SessionInfo{}, wireError(err)
 	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
@@ -264,6 +276,9 @@ func persistConnectionChoice(provider, model, customModelName string) {
 // resuming the current conversation. Explicit connection identity keeps custom
 // URLs and Passport routing distinct. The caller must hold startMu.
 func (a *App) rebuildResumingWithConnectionHeld(cfg engine.Config, resumeID string, passport bool, tenantID string, refs ...modelReference) (SessionInfo, error) {
+	if err := a.rejectIfAutomationLeased(resumeID); err != nil {
+		return SessionInfo{}, wireError(err)
+	}
 
 	e, err := a.entryOf(resumeID)
 	if err != nil {
@@ -359,6 +374,9 @@ func (a *App) adoptRebuiltSession(id string, directoryGrants []permissions.Direc
 // SetPlanMode toggles plan mode on the active session and returns the updated
 // status so the UI reflects it.
 func (a *App) SetPlanMode(sessionID string, on bool) (SessionInfo, error) {
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return SessionInfo{}, wireError(err)
+	}
 	id, err := a.sessionIDOf(sessionID)
 	if err != nil {
 		return SessionInfo{}, wireError(err)
@@ -396,6 +414,9 @@ func (a *App) SetReasoningScenario(sessionID, scenario string) (SessionInfo, err
 // (off/low/medium/high) at runtime and returns the updated status. This is the
 // knob that makes a reasoning model emit the reasoning content shown in the UI.
 func (a *App) SetThinkingEffort(sessionID, effort string) (SessionInfo, error) {
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return SessionInfo{}, wireError(err)
+	}
 	id, err := a.sessionIDOf(sessionID)
 	if err != nil {
 		return SessionInfo{}, wireError(err)

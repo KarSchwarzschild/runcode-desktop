@@ -258,6 +258,9 @@ type App struct {
 	// oaBindings 缓存"当前账号在 Passport 里绑没绑 OA"（见 oa.go）。与上一行同一套
 	// 理由：会话创建不能每次都去问一趟。键同样是租户 id。
 	oaBindings map[string]oaBindingEntry
+	// 自动化任务的后台租约与身份代际。
+	auto    automationHost
+	autoCtl autoCtl
 }
 
 // New returns an App that emits events to sink. Session events are enveloped
@@ -295,6 +298,7 @@ func newWithBuild(sink EventSink, build host.BuildFunc) *App {
 		a.mu.Lock()
 		a.passportUser = nil
 		a.mu.Unlock()
+		a.noteAutomationIdentity()
 		a.sink.Emit(EventPassportChanged, PassportStatus{})
 	})
 	a.tokens.loadPersisted()
@@ -377,6 +381,7 @@ func (a *App) Startup() {
 			debugLog("context audit restore: %v", err)
 		}
 	}
+	a.initAutomation()
 }
 
 // hostSinkAdapter forwards host envelopes to the shell sink under the
@@ -397,10 +402,12 @@ func (s hostSinkAdapter) Emit(env protocol.Envelope) {
 			s.app.noteToolFinished(ev.ToolName)
 		}
 	}
+	lease, leased := s.app.automationLease(env.SessionID)
+	s.app.observeAutomationEnvelope(env)
 	// Record the turn lifecycle to the diagnostic log before forwarding, so a turn
 	// that fails or ends empty is traceable even when nothing renders in the UI.
 	logEnvelope(env)
-	s.app.out.Emit(env.Event, env)
+	s.app.forwardAutomationEnvelope(env, lease, leased)
 }
 
 // noteTurnDone clears the in-flight mirror when a session's turn finishes
@@ -1123,6 +1130,9 @@ func (a *App) closeCurrentHeld() error {
 func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) error {
 	if e == nil {
 		return nil
+	}
+	if err := a.rejectIfAutomationLeased(e.id); err != nil {
+		return err
 	}
 	a.mu.Lock()
 	id := ""

@@ -1,7 +1,9 @@
 package desktop
 
 import (
+	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -15,6 +17,7 @@ const ExitTimeout = 20 * time.Second
 // in-app quit, SIGTERM, update install) shares the same result.
 type exitState struct {
 	once     sync.Once
+	closing  atomic.Bool
 	done     chan struct{}
 	deadline time.Time
 }
@@ -28,10 +31,14 @@ type exitState struct {
 // serially their two 15 s limits would add up.
 func (a *App) PrepareExit(limit time.Duration) bool {
 	a.exit.once.Do(func() {
+		a.exit.closing.Store(true)
 		a.exit.done = make(chan struct{})
 		a.exit.deadline = time.Now().Add(limit)
 		go func() {
 			defer close(a.exit.done)
+			ctx, cancel := context.WithDeadline(context.Background(), a.exit.deadline)
+			defer cancel()
+			automationErr := a.prepareAutomationShutdown(ctx)
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
@@ -42,6 +49,10 @@ func (a *App) PrepareExit(limit time.Duration) bool {
 				debugLog("exit: close sessions: %v", err)
 			}
 			wg.Wait()
+			a.stopAutomation(ctx)
+			if automationErr != nil {
+				debugLog("exit: automation shutdown: %v", automationErr)
+			}
 		}()
 	})
 	timer := time.NewTimer(time.Until(a.exit.deadline))

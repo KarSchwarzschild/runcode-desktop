@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,8 +23,9 @@ type tokenManager struct {
 	// onLoggedOut 在静默续期失败（refresh token 失效）时回调，用于向前端广播登出。
 	onLoggedOut func()
 
-	mu sync.Mutex
-	ts tokenSet
+	mu         sync.Mutex
+	ts         tokenSet
+	generation int64
 }
 
 var errNotLoggedIn = errors.New("未登录通行证，请先登录")
@@ -84,6 +86,44 @@ func (m *tokenManager) Token() (string, error) {
 	return fresh.AccessToken, nil
 }
 
+// TokenFor returns a token only when it still belongs to the bound issuer/subject.
+func (m *tokenManager) TokenFor(issuer, subject string) (string, error) {
+	issuer = strings.TrimSpace(issuer)
+	subject = strings.TrimSpace(subject)
+	if issuer == "" || subject == "" {
+		return "", errAutomationUnbound
+	}
+	m.mu.Lock()
+	gotIss, gotSub := tokenIdentityParts(m.ts.AccessToken)
+	gen := m.generation
+	m.mu.Unlock()
+	if gotIss != issuer || gotSub != subject {
+		return "", errAutomationIdentityChanged
+	}
+	if _, err := m.Token(); err != nil {
+		return "", err
+	}
+	if automationCredentialGap != nil {
+		automationCredentialGap()
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.generation != gen {
+		return "", errAutomationIdentityChanged
+	}
+	gotIss, gotSub = tokenIdentityParts(m.ts.AccessToken)
+	if gotIss != issuer || gotSub != subject || m.ts.AccessToken == "" {
+		return "", errAutomationIdentityChanged
+	}
+	return m.ts.AccessToken, nil
+}
+
+func (m *tokenManager) noteRefresh(ts tokenSet) {
+	m.mu.Lock()
+	m.ts = ts
+	m.mu.Unlock()
+}
+
 // ForceRefresh 无视续期窗口立即用 refresh token 续期一次，用于服务端返回 401
 // (令牌被拒)时的补救。持锁刷新(与 Token 一致的单飞语义)；回调/落盘在锁外。
 // 无 refresh token 或续期失败则清空并通知登出。
@@ -114,6 +154,7 @@ func (m *tokenManager) Set(ts tokenSet) {
 	m.mu.Lock()
 	m.ts = ts
 	m.identity = rand.Text()
+	m.generation++
 	m.mu.Unlock()
 	persistTokens(ts)
 }
@@ -123,6 +164,7 @@ func (m *tokenManager) setInMemory(ts tokenSet) {
 	m.mu.Lock()
 	m.ts = ts
 	m.identity = rand.Text()
+	m.generation++
 	m.mu.Unlock()
 }
 
@@ -135,6 +177,7 @@ func (m *tokenManager) Clear() {
 
 func (m *tokenManager) clearLocked() {
 	m.identity = rand.Text()
+	m.generation++
 	m.ts = tokenSet{}
 	if path, err := passportTokenPath(); err == nil {
 		_ = os.Remove(path)

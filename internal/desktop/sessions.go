@@ -109,6 +109,17 @@ func (a *App) ListSessions() ([]SessionSummary, error) {
 			Turns: info.Turns,
 		})
 	}
+	refs := make([]automationSessionRef, 0, len(out))
+	for _, item := range out {
+		refs = append(refs, automationSessionRef{workspace: ws, sessionID: item.ID})
+	}
+	origins := a.automationOrigins(refs)
+	for i := range out {
+		if origin, ok := originAt(origins, ws, out[i].ID); ok {
+			out[i].Kind = "agent"
+			out[i].Automation = &origin
+		}
+	}
 	return out, nil
 }
 
@@ -120,6 +131,9 @@ func (a *App) ListSessions() ([]SessionSummary, error) {
 // 回合会把它重新创建出来——留下一个只含删除后内容、历史却已丢失的僵尸会话,反而
 // 比不删更糟。要删就先关闭对应会话（仅切换焦点不够）。
 func (a *App) DeleteSession(id string) error {
+	if err := a.rejectIfAutomationLeased(id); err != nil {
+		return wireError(err)
+	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
 	a.mu.Lock()
@@ -227,7 +241,15 @@ func (a *App) PickWorkspaceFolder() (string, error) {
 		return "", wireError(errors.New("当前环境不支持目录选择"))
 	}
 	dir, err := dialog.PickFolder("选择工作区目录", "")
+	if err != nil && isFolderPickerCancellation(err) {
+		return "", nil
+	}
 	return dir, wireError(err)
+}
+
+func isFolderPickerCancellation(err error) bool {
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	return message == "cancelled by user" || message == "canceled by user"
 }
 
 // resolveWorkspaceDir 把用户选的目录归一成绝对路径并确认它真的是个目录。

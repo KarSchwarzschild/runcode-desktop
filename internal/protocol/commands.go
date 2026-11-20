@@ -155,4 +155,19 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"RemoveRuntime":    hostproto.CommandTrigger,
 	"InstallUpdate":    hostproto.CommandTrigger,
 	"RevealUpdate":     hostproto.CommandTrigger,
+
+	// 自动化任务。
+	"GetAutomationDefaults":     hostproto.CommandQuery,
+	"ListAutomationTasks":       hostproto.CommandQuery,
+	"ListAutomationRuns":        hostproto.CommandQuery,
+	"ListSessionAutomationRuns": hostproto.CommandQuery,
+	"GetAutomationConversation": hostproto.CommandQuery,
+	"CreateAutomationTask":      hostproto.CommandTrigger,
+	"UpdateAutomationTask":      hostproto.CommandTrigger,
+	"SetAutomationTaskPaused":   hostproto.CommandIdempotentSet,
+	"RunAutomationTaskNow":      hostproto.CommandTrigger,
+	"DeleteAutomationTask":      hostproto.CommandTrigger,
+	"OpenAutomationSession":     hostproto.CommandTrigger,
+	"CloseMainWindow":           hostproto.CommandTrigger,
+	"RequestAppExit":            hostproto.CommandTrigger,
 }

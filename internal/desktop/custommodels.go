@@ -199,18 +199,44 @@ func (a *App) SaveCustomModel(req SaveCustomModelRequest) ([]CustomModel, error)
 			ref.Name = req.Name
 		}
 		cfg.VisionRevision++
+		oldRev := int64(0)
+		oldKey := ""
+		oldHas := false
+		if source >= 0 {
+			prev := cfg.CustomModels[source]
+			oldRev = prev.CredentialRevision
+			oldHas = prev.APIKeyProtected != ""
+			if oldHas {
+				if key, ok := unprotectSecret(prev.APIKeyProtected); ok {
+					oldKey = key
+				}
+			}
+		}
 		switch {
 		case req.ClearAPIKey:
 			// Explicit clear: leave both secret fields empty.
+			if oldHas || oldRev > 0 {
+				persisted.CredentialRevision = effectiveCredentialRevision(oldRev, oldHas) + 1
+			}
 		case req.APIKey != "":
 			protected, ok := protectSecret(req.APIKey)
 			if !ok {
 				return errors.New("当前系统无法安全保存 API 密钥，请使用无需密钥的端点或配置系统凭据存储")
 			}
 			persisted.APIKeyProtected = protected
+			base := effectiveCredentialRevision(oldRev, oldHas)
+			if source < 0 || req.APIKey != oldKey {
+				persisted.CredentialRevision = base + 1
+				if persisted.CredentialRevision < 1 {
+					persisted.CredentialRevision = 1
+				}
+			} else {
+				persisted.CredentialRevision = base
+			}
 		case source >= 0:
 			// Preserve the opaque ciphertext without decrypting/re-encrypting it.
 			persisted.APIKeyProtected = cfg.CustomModels[source].APIKeyProtected
+			persisted.CredentialRevision = effectiveCredentialRevision(oldRev, oldHas)
 		}
 
 		if source >= 0 {

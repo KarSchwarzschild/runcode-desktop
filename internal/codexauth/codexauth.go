@@ -95,14 +95,15 @@ type DeviceCode struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-// Tokens 是一次成功登录的产物。AccountID 是调 Codex 后端时要带的
-// chatgpt-account-id，没有它上游不认这个订阅。
+// Tokens 是一次成功登录的产物。Issuer/Subject 是自动化绑定所需的稳定身份。
 type Tokens struct {
 	AccessToken  string
 	RefreshToken string
 	Expiry       time.Time
 	AccountID    string
 	Email        string
+	Issuer       string
+	Subject      string
 }
 
 // Client 发起并完成设备码登录。零值不可用，用 New 构造。
@@ -285,7 +286,7 @@ func (c *Client) tokenRequest(ctx context.Context, form url.Values) (Tokens, err
 	if body.AccessToken == "" {
 		return Tokens{}, errors.New("令牌响应缺少 access_token")
 	}
-	accountID, email := accountFromIDToken(body.IDToken)
+	ident := accountFromIDToken(body.IDToken)
 	expiry := time.Time{}
 	if body.ExpiresIn > 0 {
 		expiry = time.Now().Add(time.Duration(body.ExpiresIn) * time.Second)
@@ -294,8 +295,10 @@ func (c *Client) tokenRequest(ctx context.Context, form url.Values) (Tokens, err
 		AccessToken:  body.AccessToken,
 		RefreshToken: body.RefreshToken,
 		Expiry:       expiry,
-		AccountID:    accountID,
-		Email:        email,
+		AccountID:    ident.AccountID,
+		Email:        ident.Email,
+		Issuer:       ident.Issuer,
+		Subject:      ident.Subject,
 	}, nil
 }
 
@@ -326,16 +329,25 @@ func (c *Client) postJSON(ctx context.Context, endpoint string, body []byte, out
 //
 // account id 有两处可能：顶层 chatgpt_account_id，或命名空间 claim
 // "https://api.openai.com/auth" 里的同名字段。两处都看，取先有的那个。
-func accountFromIDToken(idToken string) (accountID, email string) {
+type idClaims struct {
+	AccountID string
+	Email     string
+	Issuer    string
+	Subject   string
+}
+
+func accountFromIDToken(idToken string) idClaims {
 	parts := strings.Split(idToken, ".")
 	if len(parts) < 2 {
-		return "", ""
+		return idClaims{}
 	}
 	raw, err := base64.RawURLEncoding.DecodeString(parts[1])
 	if err != nil {
-		return "", ""
+		return idClaims{}
 	}
 	var claims struct {
+		Issuer           string `json:"iss"`
+		Subject          string `json:"sub"`
 		ChatGPTAccountID string `json:"chatgpt_account_id"`
 		Email            string `json:"email"`
 		OpenAIAuth       struct {
@@ -343,13 +355,13 @@ func accountFromIDToken(idToken string) (accountID, email string) {
 		} `json:"https://api.openai.com/auth"`
 	}
 	if err := json.Unmarshal(raw, &claims); err != nil {
-		return "", ""
+		return idClaims{}
 	}
 	id := claims.ChatGPTAccountID
 	if id == "" {
 		id = claims.OpenAIAuth.ChatGPTAccountID
 	}
-	return id, claims.Email
+	return idClaims{AccountID: id, Email: claims.Email, Issuer: claims.Issuer, Subject: claims.Subject}
 }
 
 // parseInterval 容忍服务端把间隔写成数字或字符串。取不到就用默认值。
