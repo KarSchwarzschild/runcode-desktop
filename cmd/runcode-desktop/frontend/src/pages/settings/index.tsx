@@ -3,9 +3,9 @@
 // 各自直接落后端的小节（账号/代理/自定义模型草稿）状态内化，只把共享数据（平台
 // 模型、自定义模型列表，二者合成模型候选）回流给父级。
 //
-// 分类目录只改滚动与焦点：不保存、不重建账号协调器、不改变业务小节的 key。
-// 正文按完整清单顺序挂载；目录按可见清单过滤。录音按品牌决定是否挂载；审核探测
-// 始终挂载，未知／不支持只隐藏包装与目录项。
+// 分类标题切换右侧完整分类，三级项常驻且只改变滚动与焦点；不保存、不重建账号
+// 协调器、不改变业务小节的 key。正文按完整清单顺序挂载，目录按可见清单过滤。
+// 录音按品牌决定是否挂载；审核探测始终挂载，未知／不支持只隐藏包装与目录项。
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { toModelOptions, type ModelOption } from '@/ui/model-picker'
 import {
@@ -33,7 +33,6 @@ import {
   SETTINGS_CATEGORIES,
   buildSettingsNavigation,
   categoryForSection,
-  defaultExpandedCategory,
   sectionsInCategory,
   visibleSectionIds,
   type SettingsCategoryId,
@@ -137,9 +136,6 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   const [selectedCategoryId, setSelectedCategoryId] = useState<SettingsCategoryId>(
     initialSection ? categoryForSection(initialSection).id : 'account',
   )
-  const [expandedCategoryId, setExpandedCategoryId] = useState<SettingsCategoryId | null>(
-    initialSection ? categoryForSection(initialSection).id : 'account',
-  )
   const [pendingTarget, setPendingTarget] = useState<SettingsSectionId | null>(null)
   // 审核能力：默认 false，真值只来自 ContextAuditSection 的单次读取。
   const [auditSupported, setAuditSupported] = useState(false)
@@ -173,7 +169,6 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
     if (!visibleIds.includes(initialSection)) return
     const categoryId = categoryForSection(initialSection).id
     setSelectedCategoryId(categoryId)
-    setExpandedCategoryId(categoryId)
     setPendingTarget(initialSection)
   }, [initialSection, visibleIds])
 
@@ -187,27 +182,13 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   const navigateSection = useCallback((id: SettingsSectionId) => {
     const categoryId = categoryForSection(id).id
     setSelectedCategoryId(categoryId)
-    setExpandedCategoryId(categoryId)
     setPendingTarget(id)
   }, [])
 
-  const toggleCategory = useCallback((id: SettingsCategoryId) => {
-    const collapsing = expandedCategoryId === id
-    setSelectedCategoryId(id)
-    if (collapsing) {
-      setExpandedCategoryId(null)
-      return
-    }
-    setExpandedCategoryId(id)
-    const first = sectionsInCategory(categories, id)[0]
-    if (first) setPendingTarget(first)
-  }, [categories, expandedCategoryId])
-
   useEffect(() => {
     if (categories.some((category) => category.id === selectedCategoryId)) return
-    const fallback = defaultExpandedCategory(categories, nav.activeId)
-    setSelectedCategoryId(fallback ?? categories[0]?.id ?? 'account')
-    setExpandedCategoryId(fallback)
+    const fallback = nav.activeId ? categoryForSection(nav.activeId).id : categories[0]?.id
+    setSelectedCategoryId(fallback ?? 'account')
   }, [categories, nav.activeId, selectedCategoryId])
 
   // 外部会话/配置变化只刷新未编辑字段，用户刚输入的内容不会被迟到回读覆盖。
@@ -239,9 +220,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
           <SettingsNavigation
             categories={categories}
             activeId={nav.activeId}
-              expandedCategoryId={expandedCategoryId}
             onNavigate={navigateSection}
-              onToggleCategory={toggleCategory}
             narrow={false}
             compactNavRef={nav.compactNavRef}
           />
@@ -252,9 +231,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
           <SettingsNavigation
             categories={categories}
             activeId={nav.activeId}
-            expandedCategoryId={expandedCategoryId}
             onNavigate={navigateSection}
-            onToggleCategory={toggleCategory}
             narrow
             compactNavRef={nav.compactNavRef}
           />

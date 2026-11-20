@@ -224,9 +224,7 @@ describe('SettingsNavigation (wide)', () => {
       <SettingsNavigation
         categories={buildSettingsNavigation(FULL)}
         activeId="passport"
-        expandedCategoryId="account"
         onNavigate={onNavigate}
-        onToggleCategory={() => {}}
         narrow={false}
         compactNavRef={{ current: null }}
       />,
@@ -251,9 +249,7 @@ describe('SettingsNavigation (wide)', () => {
       <SettingsNavigation
         categories={buildSettingsNavigation(FULL)}
         activeId="passport"
-        expandedCategoryId="account"
         onNavigate={onNavigate}
-        onToggleCategory={() => {}}
         narrow={false}
         compactNavRef={{ current: null }}
       />,
@@ -264,8 +260,7 @@ describe('SettingsNavigation (wide)', () => {
     await act(async () => root.unmount())
   })
 
-  it('rendersCategoryHeadingsAsExpandableButtons', async () => {
-    const onToggleCategory = vi.fn()
+  it('keepsEveryCategorySectionVisibleWithoutDisclosureState', async () => {
     const host = document.createElement('div')
     document.body.append(host)
     const root = createRoot(host)
@@ -273,20 +268,56 @@ describe('SettingsNavigation (wide)', () => {
       <SettingsNavigation
         categories={buildSettingsNavigation(FULL)}
         activeId="passport"
-        expandedCategoryId="account"
         onNavigate={() => {}}
-        onToggleCategory={onToggleCategory}
         narrow={false}
         compactNavRef={{ current: null }}
       />,
     ))
     const nav = host.querySelector('nav[aria-label="设置目录"]')!
     const category = button(host, '账号与登录')
-    expect(category.getAttribute('aria-expanded')).toBe('true')
-    expect(nav.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(false)
-    expect(nav.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(true)
+    expect(category.hasAttribute('aria-expanded')).toBe(false)
+    expect(category.children).toHaveLength(1)
+    expect(nav.querySelectorAll('ul[id^="settings-category-"]:not([hidden])')).toHaveLength(5)
+    await act(async () => root.unmount())
+  })
+
+  it('navigatesToTheFirstCategoryItemOnEveryCategoryClick', async () => {
+    const onNavigate = vi.fn()
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => root.render(
+      <SettingsNavigation
+        categories={buildSettingsNavigation(FULL)}
+        activeId="passport"
+        onNavigate={onNavigate}
+        narrow={false}
+        compactNavRef={{ current: null }}
+      />,
+    ))
     await click(button(host, '模型与对话'))
-    expect(onToggleCategory).toHaveBeenCalledWith('models')
+    await click(button(host, '模型与对话'))
+    expect(onNavigate.mock.calls).toEqual([['session'], ['session']])
+    expect(host.querySelectorAll('ul[id^="settings-category-"]:not([hidden])')).toHaveLength(5)
+    await act(async () => root.unmount())
+  })
+
+  it('rendersAnIconForEveryVisibleSection', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => root.render(
+      <SettingsNavigation
+        categories={buildSettingsNavigation(FULL)}
+        activeId="passport"
+        onNavigate={() => {}}
+        narrow={false}
+        compactNavRef={{ current: null }}
+      />,
+    ))
+    const items = Array.from(host.querySelectorAll('.settings-nav-item'))
+    expect(items).toHaveLength(13)
+    expect(items.every((item) => item.querySelector('svg') !== null)).toBe(true)
     await act(async () => root.unmount())
   })
 
@@ -302,9 +333,9 @@ describe('SettingsNavigation (wide)', () => {
         '网络与运行环境', '出网代理', '运行时环境',
         '关于与诊断', '关于与更新', '工作区',
       ])
-      expect(nav.querySelectorAll('ul[id^="settings-category-"]:not([hidden])')).toHaveLength(1)
+      expect(nav.querySelectorAll('ul[id^="settings-category-"]:not([hidden])')).toHaveLength(5)
       expect(nav.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(false)
-      expect(nav.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(true)
+      expect(nav.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(false)
       expect(current(m.host)).toBe('账号（通行证）')
       expect(nav.querySelectorAll('[aria-current]')).toHaveLength(1)
       expect(m.host.querySelector('#settings-recorder')).toBeNull()

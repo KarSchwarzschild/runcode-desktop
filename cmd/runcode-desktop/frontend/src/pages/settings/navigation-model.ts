@@ -71,17 +71,6 @@ export function sectionsInCategory(
   return categories.find((category) => category.id === id)?.sections.map((section) => section.id) ?? []
 }
 
-export function defaultExpandedCategory(
-  categories: readonly SettingsCategory[],
-  activeId: SettingsSectionId | null,
-): SettingsCategoryId | null {
-  if (activeId) {
-    const owner = categories.find((category) => category.sections.some((section) => section.id === activeId))
-    if (owner) return owner.id
-  }
-  return categories[0]?.id ?? null
-}
-
 function sectionVisible(id: SettingsSectionId, caps: SettingsCapabilities): boolean {
   if (id === 'recorder') return caps.recorderEnabled
   if (id === 'context-audit') return caps.auditSupported

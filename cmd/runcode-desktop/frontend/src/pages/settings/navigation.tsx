@@ -1,35 +1,47 @@
 // 设置页目录的展示件：宽布局的左侧目录、窄布局的吸顶选择框，以及正文里的分类标题与
-// 小节锚点包装。全部是纯展示 + 回调，不持有业务或登录状态；滚动与当前项归
-// use-settings-navigation。
+// 小节锚点包装。分类标题负责切换右侧分类内容，三级项始终展开；全部是纯展示 + 回调，
+// 不持有业务或登录状态，滚动与当前项归 use-settings-navigation。
 import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObject } from 'react'
 import { BTN } from '@/ui/tokens'
 import { LABEL_CLS, SelectField } from '@/ui/fields'
+import { Icon } from '@/ui/icons'
 import {
-  defaultExpandedCategory,
   sectionAnchorId,
   visibleSectionIds,
   type SettingsCategory,
-  type SettingsCategoryId,
   type SettingsSection,
   type SettingsSectionId,
 } from './navigation-model'
 import { SettingsSearch } from './settings-search'
 import './settings.css'
 
+// 每个设置项使用稳定的语义图标；目录项由能力开关动态过滤，图标本身不参与业务判断。
+const SECTION_ICONS: Record<SettingsSectionId, string> = {
+  passport: 'bot',
+  login: 'logout',
+  session: 'chat',
+  'custom-models': 'plug',
+  'model-context': 'settings',
+  vision: 'eye',
+  'image-generation': 'image-gen',
+  recorder: 'mic',
+  proxy: 'globe',
+  runtimes: 'terminal',
+  'context-audit': 'shield',
+  updates: 'refresh',
+  workspace: 'folder',
+}
+
 export function SettingsNavigation({
   categories,
   activeId,
-  expandedCategoryId,
   onNavigate,
-  onToggleCategory,
   narrow,
   compactNavRef,
 }: {
   categories: readonly SettingsCategory[]
   activeId: SettingsSectionId | null
-  expandedCategoryId?: SettingsCategoryId | null
   onNavigate: (id: SettingsSectionId) => void
-  onToggleCategory?: (id: SettingsCategoryId) => void
   narrow: boolean
   compactNavRef: RefObject<HTMLDivElement>
 }) {
@@ -51,11 +63,7 @@ export function SettingsNavigation({
     <WideNavigation
       categories={categories}
       activeId={activeId}
-      expandedCategoryId={expandedCategoryId === undefined
-        ? defaultExpandedCategory(categories, activeId)
-        : expandedCategoryId}
       onNavigate={onNavigate}
-      onToggleCategory={onToggleCategory}
     />
   )
 }
@@ -63,15 +71,11 @@ export function SettingsNavigation({
 function WideNavigation({
   categories,
   activeId,
-  expandedCategoryId,
   onNavigate,
-  onToggleCategory,
 }: {
   categories: readonly SettingsCategory[]
   activeId: SettingsSectionId | null
-  expandedCategoryId: SettingsCategoryId | null
   onNavigate: (id: SettingsSectionId) => void
-  onToggleCategory?: (id: SettingsCategoryId) => void
 }) {
   const navRef = useRef<HTMLElement>(null)
   // 目录比视口高时它自己滚动；当前项变了只把目录自己滚到能看见当前项，不用
@@ -92,7 +96,6 @@ function WideNavigation({
       <SettingsSearch categories={categories} onSelect={onNavigate} />
       <ul className="settings-nav-groups">
         {categories.map((c) => {
-          const expanded = c.id === expandedCategoryId
           const activeCategory = c.sections.some((section) => section.id === activeId)
           const listId = `settings-category-${c.id}-sections`
           return (
@@ -100,14 +103,15 @@ function WideNavigation({
             <button
               type="button"
               className={`settings-nav-category${activeCategory ? ' settings-nav-category-active' : ''}`}
-              aria-expanded={expanded}
-              aria-controls={listId}
-              onClick={() => onToggleCategory?.(c.id)}
+              onClick={() => {
+                // 分类标题不是折叠开关：每次点击都打开完整分类，并定位到首项。
+                const first = c.sections[0]
+                if (first) onNavigate(first.id)
+              }}
             >
-              <span className="settings-nav-chevron" aria-hidden="true" />
               <span>{c.title}</span>
             </button>
-            <ul id={listId} className="settings-nav-subitems" hidden={!expanded}>
+            <ul id={listId} className="settings-nav-subitems">
               {c.sections.map((s) => {
                 const active = s.id === activeId
                 return (
@@ -118,7 +122,8 @@ function WideNavigation({
                       className={`settings-nav-item${active ? ' settings-nav-item-active' : ''}`}
                       onClick={() => onNavigate(s.id)}
                     >
-                      {s.title}
+                      <Icon name={SECTION_ICONS[s.id]} size={15} className="settings-nav-item-icon" />
+                      <span>{s.title}</span>
                     </button>
                   </li>
                 )
