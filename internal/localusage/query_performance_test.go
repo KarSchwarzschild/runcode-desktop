@@ -6,10 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 )
+
+func TestAggregateSQLUsesMaterializedCacheEstimates(t *testing.T) {
+	sql := aggregateColumnsSQL()
+	if strings.Contains(sql, "FROM events ps") || strings.Contains(sql, "prevTokenFieldSQL") {
+		t.Fatalf("aggregate SQL regressed to per-row event subqueries: %s", sql)
+	}
+	if !strings.Contains(sql, "ce.cache_hit_tokens") || !strings.Contains(sql, "ce.cache_miss_tokens") {
+		t.Fatalf("aggregate SQL does not read materialized cache: %s", sql)
+	}
+}
 
 // A pending start must not consume a user-visible page or its total count.
 func TestQueryPageExcludesPendingAndKeepsSnapshot(t *testing.T) {
@@ -52,6 +63,9 @@ func TestQueryPageExcludesPendingAndKeepsSnapshot(t *testing.T) {
 func TestQueryDoesNotWaitForWriterConnection(t *testing.T) {
 	s := openTemp(t, time.Now)
 	now := time.Now()
+	if err := s.WaitMaintenance(context.Background()); err != nil {
+		t.Fatal(err)
+	}
 	conn, err := s.db.Conn(context.Background())
 	if err != nil {
 		t.Fatal(err)

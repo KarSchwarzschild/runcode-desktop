@@ -2,6 +2,7 @@ package localusage
 
 import (
 	"context"
+	"database/sql"
 	"os"
 	"path/filepath"
 	"testing"
@@ -260,6 +261,73 @@ func TestLocalUsageSchemaVersion(t *testing.T) {
 	_ = s.Close()
 	if _, err := Open(path, now); err == nil {
 		t.Fatal("expected schema too new")
+	}
+}
+
+func TestLocalUsageV2MigrationMaterializesExistingCacheEstimates(t *testing.T) {
+	base := time.Date(2026, 11, 13, 5, 0, 0, 0, time.UTC)
+	path := filepath.Join(t.TempDir(), "usage.sqlite3")
+	s, err := Open(path, testClock(t, base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := sampleScope("migrate-v3")
+	writeTokenCall(t, s, scope, "a", "qwen-max", base, 100, 10, nil, nil)
+	writeTokenCall(t, s, scope, "b", "qwen-max", base.Add(time.Minute), 120, 12, nil, nil)
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	raw, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := raw.Exec(`DROP TABLE cache_estimates; UPDATE meta SET value='2' WHERE key='schema_version'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := raw.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	migrated, err := Open(path, testClock(t, base.Add(2*time.Minute)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer migrated.Close()
+	var hit, miss, estimated int64
+	if err := migrated.db.QueryRow(`SELECT cache_hit_tokens, cache_miss_tokens, estimated
+		FROM cache_estimates WHERE call_id='b'`).Scan(&hit, &miss, &estimated); err != nil {
+		t.Fatal(err)
+	}
+	if hit != 100 || miss != 20 || estimated != 1 {
+		t.Fatalf("backfilled hit/miss/estimated = %d/%d/%d", hit, miss, estimated)
+	}
+}
+
+func TestPruneBeforeRemovesEventsAndMaterializedEstimates(t *testing.T) {
+	base := time.Date(2026, 11, 13, 5, 0, 0, 0, time.UTC)
+	s := openTemp(t, testClock(t, base))
+	scope := sampleScope("prune")
+	writeTokenCall(t, s, scope, "old-a", "qwen-max", base.Add(-48*time.Hour), 100, 10, nil, nil)
+	writeTokenCall(t, s, scope, "old-b", "qwen-max", base.Add(-47*time.Hour), 120, 12, nil, nil)
+	writeTokenCall(t, s, scope, "new-a", "qwen-max", base.Add(-time.Hour), 100, 10, nil, nil)
+	writeTokenCall(t, s, scope, "new-b", "qwen-max", base.Add(-30*time.Minute), 120, 12, nil, nil)
+
+	if _, err := s.PruneBefore(context.Background(), base.Add(-24*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var oldEvents, newEvents, oldEstimates int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE call_id IN ('old-a','old-b')`).Scan(&oldEvents); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM events WHERE call_id IN ('new-a','new-b')`).Scan(&newEvents); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM cache_estimates WHERE call_id IN ('old-a','old-b')`).Scan(&oldEstimates); err != nil {
+		t.Fatal(err)
+	}
+	if oldEvents != 0 || newEvents != 4 || oldEstimates != 0 {
+		t.Fatalf("prune oldEvents=%d newEvents=%d oldEstimates=%d", oldEvents, newEvents, oldEstimates)
 	}
 }
 

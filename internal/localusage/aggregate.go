@@ -69,7 +69,7 @@ func (s *Store) QueryOverview(ctx context.Context, filter QueryFilter, boundarie
 	}
 	defer done()
 	filter.SnapshotSeq = seq
-	cols := aggregateColumnsSQL(seq)
+	cols := aggregateColumnsSQL()
 	out := OverviewResult{Seq: seq}
 	if len(boundaries) == 0 {
 		from, args := callsFrom(filter, true)
@@ -94,6 +94,7 @@ func (s *Store) QueryOverview(ctx context.Context, filter QueryFilter, boundarie
 SELECT b.bucket, ` + cols + `
 FROM boundaries b CROSS JOIN events s
 LEFT JOIN events f ON f.call_id=s.call_id AND f.phase='finish' AND f.seq<=?
+LEFT JOIN cache_estimates ce ON ce.call_id=f.call_id
 WHERE s.phase='start' AND s.seq<=? AND s.scope_id=? AND s.started_at_ms>=b.begin_ms AND s.started_at_ms<b.end_ms`
 	args = append(args, seq, seq, filter.ScopeID)
 	if filter.Model != "" {
@@ -137,7 +138,7 @@ func (s *Store) QueryDimensions(ctx context.Context, filter QueryFilter, search 
 	}
 	defer done()
 	filter.SnapshotSeq = seq
-	cols := aggregateColumnsSQL(seq)
+	cols := aggregateColumnsSQL()
 	from, args := callsFrom(filter, false)
 	if search != "" {
 		from += ` AND instr(lower(s.model),lower(?))>0`
@@ -175,38 +176,16 @@ const outputKnownSQL = `(f.output_tokens_known<>0 AND f.output_tokens IS NOT NUL
 const reportedCacheSQL = `(` + tokenCallSQL + ` AND f.cache_hit_tokens_known<>0 AND f.cache_hit_tokens IS NOT NULL AND f.cache_miss_tokens_known<>0 AND f.cache_miss_tokens IS NOT NULL)`
 const estimateWindowMs = int64(30 * 60 * 1000)
 
-// prevTokenFieldSQL 取同 scope／同模型、按开始时间紧邻的前一次已结束 Token 调用字段。
-// seq 写入 SQL，避免与外层参数位置纠缠。
-func prevTokenFieldSQL(seq int64, field string) string {
-	return fmt.Sprintf(`(SELECT %s FROM events ps JOIN events pf ON pf.call_id=ps.call_id AND pf.phase='finish' AND pf.seq<=%d WHERE ps.phase='start' AND ps.seq<=%d AND ps.scope_id=s.scope_id AND ps.model=s.model AND ps.call_kind IN ('llm','vision') AND pf.input_tokens_known<>0 AND pf.input_tokens IS NOT NULL AND (ps.started_at_ms<s.started_at_ms OR (ps.started_at_ms=s.started_at_ms AND ps.call_id<s.call_id)) ORDER BY ps.started_at_ms DESC, ps.call_id DESC LIMIT 1)`, field, seq, seq)
-}
+const effectiveCacheSQL = `(ce.cache_hit_tokens IS NOT NULL AND ce.cache_miss_tokens IS NOT NULL)`
+const effectiveCacheHitSQL = `ce.cache_hit_tokens`
+const effectiveCacheMissSQL = `ce.cache_miss_tokens`
+const estimatedCacheSQL = `(ce.estimated<>0)`
 
-func canEstimateSQL(seq int64) string {
-	prevIn := prevTokenFieldSQL(seq, "pf.input_tokens")
-	prevStart := prevTokenFieldSQL(seq, "ps.started_at_ms")
-	return fmt.Sprintf(`(%s AND %s AND NOT %s AND (%s) IS NOT NULL AND (%s) IS NOT NULL AND (s.started_at_ms-(%s))<=%d AND f.input_tokens>=(%s))`,
-		tokenCallSQL, inputKnownSQL, reportedCacheSQL, prevIn, prevStart, prevStart, estimateWindowMs, prevIn)
-}
-
-func effectiveCacheHitSQL(seq int64) string {
-	prevIn := prevTokenFieldSQL(seq, "pf.input_tokens")
-	return `(CASE WHEN ` + reportedCacheSQL + ` THEN f.cache_hit_tokens WHEN ` + canEstimateSQL(seq) + ` THEN MIN(f.input_tokens,(` + prevIn + `)) END)`
-}
-
-func effectiveCacheMissSQL(seq int64) string {
-	prevIn := prevTokenFieldSQL(seq, "pf.input_tokens")
-	return `(CASE WHEN ` + reportedCacheSQL + ` THEN f.cache_miss_tokens WHEN ` + canEstimateSQL(seq) + ` THEN f.input_tokens-(` + prevIn + `) END)`
-}
-
-func effectiveCacheSQL(seq int64) string {
-	return `(` + reportedCacheSQL + ` OR ` + canEstimateSQL(seq) + `)`
-}
-
-func aggregateColumnsSQL(seq int64) string {
-	eff := effectiveCacheSQL(seq)
-	hit := effectiveCacheHitSQL(seq)
-	miss := effectiveCacheMissSQL(seq)
-	est := canEstimateSQL(seq)
+func aggregateColumnsSQL() string {
+	eff := effectiveCacheSQL
+	hit := effectiveCacheHitSQL
+	miss := effectiveCacheMissSQL
+	est := estimatedCacheSQL
 	return `COUNT(f.seq),
 COUNT(CASE WHEN ` + tokenCallSQL + ` THEN 1 END),
 COUNT(CASE WHEN ` + inputKnownSQL + ` THEN 1 END),

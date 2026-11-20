@@ -70,6 +70,10 @@ var (
 // readSnapshot pins all statements to one SQLite read transaction and event seq.
 func (s *Store) readSnapshot(ctx context.Context, filter QueryFilter) (*sql.Tx, int64, func(), error) {
 	ctx, cancel := boundedQueryContext(ctx)
+	if err := s.awaitMaintenance(ctx); err != nil {
+		cancel()
+		return nil, 0, nil, err
+	}
 	release, err := s.acquire(ctx)
 	if err != nil {
 		cancel()
@@ -134,7 +138,7 @@ func (s *Store) QueryPage(ctx context.Context, filter QueryFilter, cursor string
 		args = append(args, decoded.Started, decoded.CallID)
 	}
 	args = append(args, limit+1)
-	calls, err := queryCalls(ctx, tx, callColumnsSQL(seq)+from+` ORDER BY s.started_at_ms DESC, s.call_id DESC LIMIT ?`, args)
+	calls, err := queryCalls(ctx, tx, callColumnsSQL()+from+` ORDER BY s.started_at_ms DESC, s.call_id DESC LIMIT ?`, args)
 	if err != nil {
 		return QueryPage{}, err
 	}
@@ -154,6 +158,9 @@ func (s *Store) ListTenantIDs(ctx context.Context, accountDigest, bridgeDigest s
 	}
 	ctx, cancel := boundedQueryContext(ctx)
 	defer cancel()
+	if err := s.awaitMaintenance(ctx); err != nil {
+		return nil, err
+	}
 	release, err := s.acquire(ctx)
 	if err != nil {
 		return nil, err
@@ -199,13 +206,13 @@ func snapshotSeq(ctx context.Context, tx *sql.Tx, requested int64, pinned bool) 
 	return current, nil
 }
 
-func callColumnsSQL(seq int64) string {
+func callColumnsSQL() string {
 	return `SELECT s.call_id, s.scope_id, s.model, s.call_kind, s.started_at_ms,
  f.finished_at_ms, f.duration_ms, CASE WHEN f.seq IS NULL THEN 'pending'
  WHEN f.status IN ('succeeded','failed','cancelled','unknown','save_failed') THEN f.status ELSE 'unknown' END,
  f.input_tokens, f.input_tokens_known, f.output_tokens, f.output_tokens_known,
- ` + effectiveCacheHitSQL(seq) + `, ` + effectiveCacheMissSQL(seq) + `,
- CASE WHEN ` + canEstimateSQL(seq) + ` THEN 1 ELSE 0 END,
+ ` + effectiveCacheHitSQL + `, ` + effectiveCacheMissSQL + `,
+ CASE WHEN ` + estimatedCacheSQL + ` THEN 1 ELSE 0 END,
  f.generated_images`
 }
 
@@ -215,6 +222,7 @@ func callsFrom(f QueryFilter, includePending bool) (string, []any) {
 		join = ` LEFT JOIN `
 	}
 	query := ` FROM events s` + join + `events f ON f.call_id=s.call_id AND f.phase='finish' AND f.seq<=?
+	 LEFT JOIN cache_estimates ce ON ce.call_id=f.call_id
  WHERE s.phase='start' AND s.seq<=? AND s.scope_id=? AND s.started_at_ms>=? AND s.started_at_ms<?`
 	args := []any{f.SnapshotSeq, f.SnapshotSeq, f.ScopeID, f.StartAt.UTC().UnixMilli(), f.EndAt.UTC().UnixMilli()}
 	if f.Model != "" {

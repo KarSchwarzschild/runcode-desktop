@@ -268,6 +268,9 @@ func (s *Store) QueryCoverage(ctx context.Context, scope Scope, start, end time.
 	}
 	ctx, cancel := boundedQueryContext(ctx)
 	defer cancel()
+	if err := s.awaitMaintenance(ctx); err != nil {
+		return out, err
+	}
 	release, err := s.acquire(ctx)
 	if err != nil {
 		return out, err

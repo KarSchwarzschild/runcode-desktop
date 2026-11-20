@@ -74,6 +74,14 @@ CREATE INDEX IF NOT EXISTS idx_events_scope_model
 CREATE INDEX IF NOT EXISTS idx_events_call_seq
   ON events(call_id, seq);
 
+-- 有效缓存（供应商上报或本地近似）在 finish 时物化，查询只做普通连接。
+CREATE TABLE IF NOT EXISTS cache_estimates (
+  call_id TEXT PRIMARY KEY NOT NULL,
+  cache_hit_tokens INTEGER,
+  cache_miss_tokens INTEGER,
+  estimated INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS diagnostics (
   seq INTEGER PRIMARY KEY AUTOINCREMENT,
   at_ms INTEGER NOT NULL,

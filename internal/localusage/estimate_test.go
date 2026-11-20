@@ -63,6 +63,24 @@ func TestLocalUsageEstimateContinuousCalls(t *testing.T) {
 	}
 }
 
+func TestLocalUsageCacheEstimateIsMaterializedAtFinish(t *testing.T) {
+	base := time.Date(2026, 11, 13, 4, 0, 0, 0, time.UTC)
+	s := openTemp(t, testClock(t, base))
+	scope := sampleScope("est-materialized")
+	writeTokenCall(t, s, scope, "a", "qwen-max", base, 100, 10, nil, nil)
+	writeTokenCall(t, s, scope, "b", "qwen-max", base.Add(time.Minute), 120, 12, nil, nil)
+
+	var hit, miss, estimated int64
+	err := s.db.QueryRow(`SELECT cache_hit_tokens, cache_miss_tokens, estimated
+		FROM cache_estimates WHERE call_id=?`, "b").Scan(&hit, &miss, &estimated)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hit != 100 || miss != 20 || estimated != 1 {
+		t.Fatalf("materialized estimate hit/miss/estimated = %d/%d/%d", hit, miss, estimated)
+	}
+}
+
 func TestLocalUsageEstimateFirstCallStaysUnknown(t *testing.T) {
 	base := time.Date(2026, 11, 13, 4, 0, 0, 0, time.UTC)
 	s := openTemp(t, testClock(t, base))

@@ -20,6 +20,7 @@ const writeBudget = 200 * time.Millisecond
 
 const queryBudget = 5 * time.Second
 const readPoolSize = 4
+const usageRetention = 365 * 24 * time.Hour
 
 var (
 	// ErrSchemaTooNew 表示库 schema 比本二进制新，拒绝打开，不得删库。
@@ -46,6 +47,9 @@ type Store struct {
 	active    sync.WaitGroup
 	closeDone chan struct{}
 	closeErr  error
+
+	maintenanceDone chan struct{}
+	maintenanceErr  error
 }
 
 // Open 打开或创建独立用量库。path 必须是绝对路径；now 可注入测试时钟。
@@ -70,12 +74,16 @@ func Open(path string, now func() time.Time) (*Store, error) {
 		return nil, err
 	}
 	db.SetMaxOpenConns(1) // 单写序列
-	s := &Store{db: db, path: path, now: now, run: fmt.Sprintf("run-%d", now().UTC().UnixNano()), closeDone: make(chan struct{})}
+	s := &Store{
+		db: db, path: path, now: now, run: fmt.Sprintf("run-%d", now().UTC().UnixNano()),
+		closeDone: make(chan struct{}), maintenanceDone: make(chan struct{}),
+	}
 	if err := s.initSchema(); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
-	if err := s.recoverDirtyRuns(); err != nil {
+	previousRun, err := s.activeRunMarker()
+	if err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -96,6 +104,7 @@ func Open(path string, now func() time.Time) (*Store, error) {
 	readDB.SetMaxOpenConns(readPoolSize)
 	readDB.SetMaxIdleConns(readPoolSize)
 	s.readDB = readDB
+	s.startMaintenance(previousRun)
 	return s, nil
 }
 
@@ -139,9 +148,15 @@ func (s *Store) initSchema() error {
 		return fmt.Errorf("%w: 库=%d 客户端=%d", ErrSchemaTooNew, n, SchemaVersion)
 	}
 	if n < SchemaVersion {
-		if n == 1 && SchemaVersion == 2 {
+		if n == 1 {
 			if err := migrateV1ToV2(s.db); err != nil {
 				return fmt.Errorf("本地用量库迁移到 v2 失败: %w", err)
+			}
+			n = 2
+		}
+		if n == 2 {
+			if err := migrateV2ToV3(s.db); err != nil {
+				return fmt.Errorf("本地用量库迁移到 v3 失败: %w", err)
 			}
 			return nil
 		}
@@ -174,6 +189,81 @@ func migrateV1ToV2(db *sql.DB) error {
 	return tx.Commit()
 }
 
+// migrateV2ToV3 增加有效缓存物化表，并用窗口函数一次性回填历史 Token 调用。
+// 迁移只在升级时执行，之后的查询与恢复不再展开逐行前序子查询。
+func migrateV2ToV3(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS cache_estimates (
+			call_id TEXT PRIMARY KEY NOT NULL,
+			cache_hit_tokens INTEGER,
+			cache_miss_tokens INTEGER,
+			estimated INTEGER NOT NULL DEFAULT 0
+		)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT OR REPLACE INTO cache_estimates(call_id, cache_hit_tokens, cache_miss_tokens, estimated)
+		WITH ordered AS (
+			SELECT f.call_id,
+			       f.input_tokens, f.input_tokens_known,
+			       f.cache_hit_tokens, f.cache_hit_tokens_known,
+			       f.cache_miss_tokens, f.cache_miss_tokens_known,
+			       s.started_at_ms,
+			       LAG(f.input_tokens) OVER (
+			         PARTITION BY s.scope_id, s.model
+			         ORDER BY s.started_at_ms, s.call_id
+			       ) AS prev_input,
+			       LAG(s.started_at_ms) OVER (
+			         PARTITION BY s.scope_id, s.model
+			         ORDER BY s.started_at_ms, s.call_id
+			       ) AS prev_start
+			FROM events s
+			JOIN events f ON f.call_id=s.call_id AND f.phase='finish'
+			WHERE s.phase='start' AND s.call_kind IN ('llm','vision')
+		)
+		SELECT call_id,
+		       CASE
+		         WHEN cache_hit_tokens_known<>0 AND cache_hit_tokens IS NOT NULL
+		          AND cache_miss_tokens_known<>0 AND cache_miss_tokens IS NOT NULL
+		           THEN cache_hit_tokens
+		         WHEN input_tokens_known<>0 AND input_tokens IS NOT NULL
+		          AND prev_input IS NOT NULL AND prev_start IS NOT NULL
+		          AND started_at_ms-prev_start<=1800000 AND input_tokens>=prev_input
+		           THEN MIN(input_tokens, prev_input)
+		       END,
+		       CASE
+		         WHEN cache_hit_tokens_known<>0 AND cache_hit_tokens IS NOT NULL
+		          AND cache_miss_tokens_known<>0 AND cache_miss_tokens IS NOT NULL
+		           THEN cache_miss_tokens
+		         WHEN input_tokens_known<>0 AND input_tokens IS NOT NULL
+		          AND prev_input IS NOT NULL AND prev_start IS NOT NULL
+		          AND started_at_ms-prev_start<=1800000 AND input_tokens>=prev_input
+		           THEN input_tokens-prev_input
+		       END,
+		       CASE
+		         WHEN cache_hit_tokens_known<>0 AND cache_hit_tokens IS NOT NULL
+		          AND cache_miss_tokens_known<>0 AND cache_miss_tokens IS NOT NULL
+		           THEN 0
+		         WHEN input_tokens_known<>0 AND input_tokens IS NOT NULL
+		          AND prev_input IS NOT NULL AND prev_start IS NOT NULL
+		          AND started_at_ms-prev_start<=1800000 AND input_tokens>=prev_input
+		           THEN 1
+		         ELSE 0
+		       END
+		FROM ordered`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`UPDATE meta SET value='3' WHERE key='schema_version'`); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func isMissingTable(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "no such table")
 }
@@ -184,17 +274,54 @@ func (s *Store) markRunDirty() error {
 	return err
 }
 
+func (s *Store) activeRunMarker() (string, error) {
+	var value string
+	err := s.db.QueryRow(`SELECT value FROM meta WHERE key='active_run_id'`).Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	return value, err
+}
+
+func (s *Store) startMaintenance(previousRun string) {
+	s.active.Add(1)
+	go func() {
+		defer s.active.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		err := s.recoverDirtyRuns(ctx, previousRun)
+		if err == nil {
+			_, err = s.pruneBefore(ctx, s.now().UTC().Add(-usageRetention))
+		}
+		s.mu.Lock()
+		s.maintenanceErr = err
+		close(s.maintenanceDone)
+		s.mu.Unlock()
+	}()
+}
+
+func (s *Store) awaitMaintenance(ctx context.Context) error {
+	select {
+	case <-s.maintenanceDone:
+		s.mu.Lock()
+		err := s.maintenanceErr
+		s.mu.Unlock()
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// WaitMaintenance 等待启动恢复与保留清理结束；生产查询会自动等待，
+// 该入口供启动状态检查和测试使用。
+func (s *Store) WaitMaintenance(ctx context.Context) error {
+	return s.awaitMaintenance(ctx)
+}
+
 // recoverDirtyRuns 在新 run 接纳调用前，把所有遗留 start 追加 unknown finish。
 // 旧版 Close 可能误删 dirty marker，不能只依赖它找到未完成调用。
 // 不在查询页面时恢复；不重发任何上游请求。
-func (s *Store) recoverDirtyRuns() error {
-	var dirty string
-	err := s.db.QueryRow(`SELECT value FROM meta WHERE key = 'active_run_id'`).Scan(&dirty)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
-		return err
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+func (s *Store) recoverDirtyRuns(ctx context.Context, dirty string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -206,7 +333,8 @@ func (s *Store) recoverDirtyRuns() error {
 		       e.model, e.call_kind, e.session_id, e.turn_id, e.generation_id, e.started_at_ms, e.run_id
 		FROM events e
 		WHERE e.phase = 'start'
-		  AND NOT EXISTS (SELECT 1 FROM events f WHERE f.call_id = e.call_id AND f.phase = 'finish')`)
+		  AND e.run_id <> ?
+		  AND NOT EXISTS (SELECT 1 FROM events f WHERE f.call_id = e.call_id AND f.phase = 'finish')`, s.run)
 	if err != nil {
 		return err
 	}
@@ -249,12 +377,54 @@ func (s *Store) recoverDirtyRuns() error {
 			INSERT INTO coverage_gaps(scope_id, start_at_ms, end_at_ms, reason)
 			VALUES (?,?,?,?)`, p.scopeID, p.started, nowMs, "unclean_exit")
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM meta WHERE key = 'active_run_id'`); err != nil {
-		return err
-	}
 	_, _ = tx.ExecContext(ctx, `INSERT INTO diagnostics(at_ms, code, detail) VALUES (?,?,?)`,
 		nowMs, "recovered_unclean_exit", dirty)
 	return tx.Commit()
+}
+
+// PruneBefore 删除 cutoff 之前开始的调用及其派生缓存估算。默认维护保留一年；
+// 手动调用可用于测试或更严格的部署策略。
+func (s *Store) PruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	ctx, cancel := context.WithTimeout(ctx, queryBudget)
+	defer cancel()
+	if err := s.awaitMaintenance(ctx); err != nil {
+		return 0, err
+	}
+	release, err := s.acquire(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer release()
+	return s.pruneBefore(ctx, cutoff)
+}
+
+func (s *Store) pruneBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	cutoffMs := cutoff.UTC().UnixMilli()
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM cache_estimates
+		WHERE call_id IN (SELECT call_id FROM events WHERE phase='start' AND started_at_ms < ?)`,
+		cutoffMs); err != nil {
+		return 0, err
+	}
+	res, err := tx.ExecContext(ctx, `
+		DELETE FROM events
+		WHERE call_id IN (SELECT call_id FROM events WHERE phase='start' AND started_at_ms < ?)`,
+		cutoffMs)
+	if err != nil {
+		return 0, err
+	}
+	deleted, _ := res.RowsAffected()
+	_, _ = tx.ExecContext(ctx, `DELETE FROM coverage_gaps WHERE end_at_ms < ?`, cutoffMs)
+	_, _ = tx.ExecContext(ctx, `DELETE FROM diagnostics WHERE at_ms < ?`, cutoffMs)
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return deleted, nil
 }
 
 // Begin 写入 start 事件；重复 start（同 callId）返回错误但不破坏库。
@@ -435,7 +605,56 @@ func (s *Store) finishLocked(ctx context.Context, finish FinishRecord) error {
 	if err != nil {
 		return err
 	}
+	if err := materializeCacheEstimate(ctx, tx, finish, frozen); err != nil {
+		return err
+	}
 	return tx.Commit()
+}
+
+func materializeCacheEstimate(ctx context.Context, tx *sql.Tx, finish FinishRecord, frozen StartRecord) error {
+	if frozen.CallKind != CallKindLLM && frozen.CallKind != CallKindVision {
+		return nil
+	}
+	var hit, miss sql.NullInt64
+	estimated := 0
+	reported := finish.CacheHitTokensKnown && finish.CacheHitTokens != nil &&
+		finish.CacheMissTokensKnown && finish.CacheMissTokens != nil
+	if reported {
+		hit, miss = sql.NullInt64{Int64: *finish.CacheHitTokens, Valid: true}, sql.NullInt64{Int64: *finish.CacheMissTokens, Valid: true}
+	} else if finish.InputTokensKnown && finish.InputTokens != nil && *finish.InputTokens >= 0 {
+		var prevInput, prevStart int64
+		started := frozen.StartedAt.UTC().UnixMilli()
+		err := tx.QueryRowContext(ctx, `
+			SELECT pf.input_tokens, ps.started_at_ms
+			FROM events ps
+			JOIN events pf ON pf.call_id=ps.call_id AND pf.phase='finish'
+			WHERE ps.phase='start'
+			  AND ps.scope_id=? AND ps.model=? AND ps.call_kind IN ('llm','vision')
+			  AND pf.input_tokens_known<>0 AND pf.input_tokens IS NOT NULL
+			  AND (ps.started_at_ms<? OR (ps.started_at_ms=? AND ps.call_id<?))
+			ORDER BY ps.started_at_ms DESC, ps.call_id DESC
+			LIMIT 1`,
+			frozen.Scope.ScopeID, frozen.Model, started, started, finish.CallID).Scan(&prevInput, &prevStart)
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return nil
+		case err != nil:
+			return err
+		}
+		if started-prevStart > estimateWindowMs || *finish.InputTokens < prevInput {
+			return nil
+		}
+		h := min(*finish.InputTokens, prevInput)
+		hit = sql.NullInt64{Int64: h, Valid: true}
+		miss = sql.NullInt64{Int64: *finish.InputTokens - h, Valid: true}
+		estimated = 1
+	}
+	if !hit.Valid || !miss.Valid {
+		return nil
+	}
+	_, err := tx.ExecContext(ctx, `INSERT OR REPLACE INTO cache_estimates(call_id, cache_hit_tokens, cache_miss_tokens, estimated)
+		VALUES(?,?,?,?)`, finish.CallID, hit.Int64, miss.Int64, estimated)
+	return err
 }
 
 func ensureScope(ctx context.Context, tx *sql.Tx, scope Scope, startedMs int64) error {

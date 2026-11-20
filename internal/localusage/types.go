@@ -6,7 +6,7 @@ import (
 )
 
 // SchemaVersion 是本机用量库的当前 schema；打开时若库版本更新则拒绝，不得静默删库。
-const SchemaVersion = 2
+const SchemaVersion = 3
 
 // SourceKindLocalPlatform 是本机采集的固定来源标记（与 Bridge 读库口径区分）。
 const SourceKindLocalPlatform = "local_platform"
