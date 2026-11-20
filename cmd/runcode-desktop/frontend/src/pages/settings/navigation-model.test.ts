@@ -4,7 +4,6 @@ import {
   SETTINGS_NARROW_BREAKPOINT,
   SETTINGS_SECTION_ORDER,
   buildSettingsNavigation,
-  defaultExpandedCategory,
   isNarrowLayout,
   resolveActiveSection,
   resolveVisibleSection,
@@ -90,17 +89,6 @@ describe('settings catalog', () => {
     expect(SETTINGS_CATEGORIES.flatMap((c) => c.sections)).toHaveLength(13)
   })
 
-  it('expandsTheCategoryThatOwnsTheActiveSection', () => {
-    const categories = buildSettingsNavigation({ recorderEnabled: false, auditSupported: false })
-    expect(defaultExpandedCategory(categories, 'session')).toBe('models')
-    expect(defaultExpandedCategory(categories, 'image-generation')).toBe('media')
-  })
-
-  it('fallsBackToTheFirstCategoryWhenTheActiveSectionIsUnavailable', () => {
-    const categories = buildSettingsNavigation({ recorderEnabled: false, auditSupported: false })
-    expect(defaultExpandedCategory(categories, 'context-audit')).toBe('account')
-    expect(defaultExpandedCategory([], 'passport')).toBeNull()
-  })
 })
 
 describe('resolveVisibleSection', () => {

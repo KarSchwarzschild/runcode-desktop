@@ -213,13 +213,13 @@ async function typeInto(el: HTMLInputElement, value: string) {
 }
 
 describe('SettingsPage navigation shell', () => {
-  it('showsOnlyTheSelectedCategoryAndExpandsItsCategoryHeading', async () => {
+  it('showsOnlyTheSelectedCategoryContentWhileKeepingAllDirectoryItemsVisible', async () => {
     await mount(page())
     expect(host.querySelector('input[placeholder="搜索设置"]')).not.toBeNull()
-    expect(navButton('账号与登录').getAttribute('aria-expanded')).toBe('true')
-    expect(navButton('模型与对话').getAttribute('aria-expanded')).toBe('false')
+    expect(navButton('账号与登录').hasAttribute('aria-expanded')).toBe(false)
+    expect(navButton('模型与对话').hasAttribute('aria-expanded')).toBe(false)
     expect(host.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(false)
-    expect(host.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(true)
+    expect(host.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(false)
     expect(host.querySelector('.settings-page-heading')?.textContent).toContain('账号与登录')
     expect(host.querySelector<HTMLElement>('#settings-passport')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(false)
     expect(host.querySelector<HTMLElement>('#settings-login')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(false)
@@ -239,17 +239,17 @@ describe('SettingsPage navigation shell', () => {
     if (!result) throw new Error('search result missing')
     await act(async () => result.click())
     await flush()
-    expect(navButton('图片与录音').getAttribute('aria-expanded')).toBe('true')
+    expect(host.querySelector('#settings-category-media-sections')?.hasAttribute('hidden')).toBe(false)
     expect(host.querySelector('.settings-page-heading')?.textContent).toContain('图片与录音')
     expect(host.querySelector('nav [aria-current="location"]')?.textContent).toBe('图片生成')
   })
 
-  it('switchesTheExpandedCategoryAndCollapsesThePreviousOne', async () => {
+  it('showsTheFullClickedCategoryAndSelectsItsFirstItem', async () => {
     await mount(page())
     await go('模型与对话')
-    expect(navButton('账号与登录').getAttribute('aria-expanded')).toBe('false')
-    expect(navButton('模型与对话').getAttribute('aria-expanded')).toBe('true')
-    expect(host.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(true)
+    expect(navButton('账号与登录').hasAttribute('aria-expanded')).toBe(false)
+    expect(navButton('模型与对话').hasAttribute('aria-expanded')).toBe(false)
+    expect(host.querySelector('#settings-category-account-sections')?.hasAttribute('hidden')).toBe(false)
     expect(host.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(false)
     expect(host.querySelector('.settings-page-heading')?.textContent).toContain('模型与对话')
     expect(host.querySelector('nav [aria-current="location"]')?.textContent).toBe('会话')
@@ -258,13 +258,13 @@ describe('SettingsPage navigation shell', () => {
     expect(modelGroup.querySelectorAll('section[id^="settings-"]')).toHaveLength(3)
   })
 
-  it('collapsesTheCurrentCategoryWithoutChangingTheRightPane', async () => {
+  it('keepsTheCurrentCategoryOpenWhenItsHeadingIsClickedAgain', async () => {
     await mount(page())
     await go('模型与对话')
     await go('模型与对话')
-    expect(navButton('模型与对话').getAttribute('aria-expanded')).toBe('false')
+    expect(navButton('模型与对话').hasAttribute('aria-expanded')).toBe(false)
     expect(navButton('模型与对话').classList.contains('settings-nav-category-active')).toBe(true)
-    expect(host.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(true)
+    expect(host.querySelector('#settings-category-models-sections')?.hasAttribute('hidden')).toBe(false)
     expect(host.querySelector('.settings-page-heading')?.textContent).toContain('模型与对话')
     expect(host.querySelector<HTMLElement>('#settings-session')!.closest<HTMLElement>('.settings-group')!.hidden).toBe(false)
   })
@@ -306,7 +306,7 @@ describe('SettingsPage navigation shell', () => {
     await mount(page({ initialSection: 'image-generation' }))
     const active = host.querySelector('nav[aria-label="设置目录"] button[aria-current="location"]')
     expect(active?.textContent).toBe('图片生成')
-    expect(navButton('图片与录音').getAttribute('aria-expanded')).toBe('true')
+    expect(navButton('图片与录音').hasAttribute('aria-expanded')).toBe(false)
     expect(host.querySelector('#settings-category-media-sections')?.hasAttribute('hidden')).toBe(false)
     expect(document.activeElement?.closest('#settings-image-generation')).not.toBeNull()
   })
