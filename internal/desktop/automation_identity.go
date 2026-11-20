@@ -102,6 +102,8 @@ func (p automationPrincipal) binding() automation.Binding {
 
 // freezeAutomationBinding 按此刻的登录或已保存的密钥做一份不含秘密的绑定。
 // name 对平台是模型 id，对自定义和 Codex 是配置名。
+//
+//nolint:unparam // permission is part of the durable binding contract.
 func (a *App) freezeAutomationBinding(kind, name, permission string) (automation.Binding, error) {
 	p, err := a.automationPrincipal(kind, name, permission)
 	if err != nil {

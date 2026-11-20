@@ -6,16 +6,16 @@ package protocol
 // runRevision are separate and cannot substitute for it.
 
 const (
-	// ErrCodeAutomationContextChanged：请求或事件携带的 context 已过期。
+	// ErrCodeAutomationContextChanged means the request or event context is stale.
 	// 客户端必须丢掉这次结果，重新 GetAutomationDefaults 后再查。
 	ErrCodeAutomationContextChanged = "automation_context_changed"
-	// ErrCodeAutomationConflict：expectedRevision 与库中不一致。
+	// ErrCodeAutomationConflict means expectedRevision differs from the stored revision.
 	ErrCodeAutomationConflict = "automation_conflict"
-	// ErrCodeAutomationUnavailable：任务库或宿主窗口能力不可用。
+	// ErrCodeAutomationUnavailable means the task store or host window is unavailable.
 	ErrCodeAutomationUnavailable = "automation_unavailable"
-	// ErrCodeAutomationTaskActive：任务还有未结束的运行，不能改内容。
+	// ErrCodeAutomationTaskActive prevents edits while a run is unfinished.
 	ErrCodeAutomationTaskActive = "automation_task_active"
-	// ErrCodeAutomationBindingInvalid：填表期间模型或连接已变化。
+	// ErrCodeAutomationBindingInvalid means the model or connection changed while editing.
 	ErrCodeAutomationBindingInvalid = "automation_binding_invalid"
 )
 

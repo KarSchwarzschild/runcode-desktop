@@ -162,9 +162,6 @@ func CountOccurrences(s Schedule, fromExclusive, through time.Time) (int64, erro
 		n := s.Interval
 		delta := step * time.Duration(n)
 		// First k with anchor+k*delta > fromExclusive and <= through.
-		if through.Before(anchor) || through.Equal(anchor) && !anchor.After(fromExclusive) {
-			// still may have later ticks
-		}
 		var firstK int64
 		if !anchor.After(fromExclusive) {
 			elapsed := fromExclusive.Sub(anchor)

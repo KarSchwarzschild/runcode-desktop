@@ -42,7 +42,7 @@ var (
 	openAutomationStore = automation.OpenStore
 	// automationProductName is the product directory segment. Tests replace it
 	// instead of mutating the package-level app product.
-	automationProductName = func() string { return AppProduct() }
+	automationProductName = AppProduct
 	// rememberAutomationWorkspace records a directory in the MRU only.
 	rememberAutomationWorkspace = func(dir string) error {
 		return updateRawConfig(func(cfg *desktopConfig) error {

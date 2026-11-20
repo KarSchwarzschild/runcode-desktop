@@ -49,7 +49,7 @@ type fakeRunner struct {
 	sub      Submission
 }
 
-func (f *fakeRunner) Start(ctx context.Context, task Task, run Run) (Submission, error) {
+func (f *fakeRunner) Start(_ context.Context, _ Task, run Run) (Submission, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.starts = append(f.starts, run)
@@ -62,7 +62,7 @@ func (f *fakeRunner) Start(ctx context.Context, task Task, run Run) (Submission,
 	return f.sub, nil
 }
 
-func (f *fakeRunner) Cancel(ctx context.Context, run Run) error {
+func (f *fakeRunner) Cancel(_ context.Context, run Run) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancel = append(f.cancel, run)
