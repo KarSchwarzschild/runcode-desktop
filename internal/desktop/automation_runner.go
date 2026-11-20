@@ -17,6 +17,7 @@ import (
 // 工作区来自任务，不看来自前台正在看的目录。
 type automationRunner struct{ app *App }
 
+// AutomationRunner exposes the desktop session adapter to the scheduler.
 func (a *App) AutomationRunner() automation.Runner { return automationRunner{a} }
 
 func (r automationRunner) Start(ctx context.Context, task automation.Task, run automation.Run) (automation.Submission, error) {
@@ -174,7 +175,7 @@ func (a *App) reuseAutomationSession(ctx context.Context, reuse string, b automa
 	}
 	backend, err := sessions.OpenBackend(dir, sessions.BackendJSONL)
 	if err != nil {
-		return "", false, "", true, fmt.Errorf("%w: %v", errAutomationSessionUnknown, err)
+		return "", false, "", true, fmt.Errorf("%w: %w", errAutomationSessionUnknown, err)
 	}
 	defer func() { _ = backend.Close(ctx) }()
 	if _, err := backend.Describe(ctx, reuse); err != nil {
@@ -182,11 +183,11 @@ func (a *App) reuseAutomationSession(ctx context.Context, reuse string, b automa
 		if errors.Is(err, os.ErrNotExist) && automationSessionsDirUsable(dir) {
 			return "", false, "", false, nil
 		}
-		return "", false, "", true, fmt.Errorf("%w: %v", errAutomationSessionUnknown, err)
+		return "", false, "", true, fmt.Errorf("%w: %w", errAutomationSessionUnknown, err)
 	}
 	meta, err := backend.LoadMeta(ctx, reuse)
 	if err != nil {
-		return "", false, "", true, fmt.Errorf("%w: %v", errAutomationSessionUnknown, err)
+		return "", false, "", true, fmt.Errorf("%w: %w", errAutomationSessionUnknown, err)
 	}
 	if err := a.automationMetaDrift(dir, reuse, b, meta); err != nil {
 		return "", false, "", true, err

@@ -240,6 +240,7 @@ func TestServiceMissedAndBusy(t *testing.T) {
 	}
 }
 
+//nolint:unparam // keep helpers explicit so new tests can vary these limits.
 func waitRun(t *testing.T, svc *Service, st *Store, taskID string, d time.Duration, ok func(Run) bool) Run {
 	t.Helper()
 	deadline := time.Now().Add(d)
@@ -261,6 +262,7 @@ func waitRun(t *testing.T, svc *Service, st *Store, taskID string, d time.Durati
 	}
 }
 
+//nolint:unparam // keep helpers explicit so new tests can vary counts and limits.
 func waitStarts(t *testing.T, svc *Service, runner *fakeRunner, n int, d time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(d)

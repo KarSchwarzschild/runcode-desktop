@@ -26,6 +26,7 @@ type TaskPage struct {
 	NextCursor string
 }
 
+// RunPage is one cursor-based page of automation runs.
 type RunPage struct {
 	Items      []Run
 	NextCursor string

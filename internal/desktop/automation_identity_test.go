@@ -3,6 +3,7 @@ package desktop
 import (
 	"encoding/base64"
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
 )
 
+//nolint:unparam // issuer remains a test seam for identity variants.
 func testJWT(issuer, subject, extra string) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none"}`))
 	payload, _ := json.Marshal(map[string]string{"iss": issuer, "sub": subject, "jti": extra})
@@ -230,8 +232,10 @@ func TestAutomationCredentialSwitchBetweenCheckAndRead(t *testing.T) {
 	done := make(chan struct{})
 	app.tokens.onLoggedOut = func() {
 		app.mu.Lock()
+		runtime.Gosched()
 		app.mu.Unlock()
 		app.tokens.mu.Lock()
+		runtime.Gosched()
 		app.tokens.mu.Unlock()
 		close(done)
 	}

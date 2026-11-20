@@ -12,7 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // Register the pure-Go SQLite driver.
 )
 
 const maxSummaryBytes = 4 * 1024
@@ -43,6 +43,7 @@ func OpenStore(path string) (*Store, error) {
 	return &Store{db: db}, nil
 }
 
+// Close closes the underlying SQLite database.
 func (s *Store) Close() error {
 	if s == nil || s.db == nil {
 		return nil
@@ -76,12 +77,13 @@ func (s *Store) TaskByClientRequestForOwners(ctx context.Context, clientRequestI
 		return Task{}, ErrNotFound
 	}
 	clause, args := ownerPlaceholders(owners)
+	//nolint:gosec // clause contains only generated "?" placeholders; values stay bound.
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM tasks WHERE client_request_id=? AND owner_scope IN `+clause+` ORDER BY created_at_utc, id`,
 		append([]any{clientRequestID}, args...)...)
 	if err != nil {
 		return Task{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var id string
 	if rows.Next() {
 		if err := rows.Scan(&id); err != nil {
@@ -123,13 +125,14 @@ func (s *Store) LinkForOwners(ctx context.Context, taskID, sessionID string, own
 		return SessionLink{}, ErrNotFound
 	}
 	clause, args := ownerPlaceholders(owners)
+	//nolint:gosec // clause contains only generated "?" placeholders; values stay bound.
 	q := `SELECT owner_scope, workspace, session_id, task_id, task_name FROM session_links
 		WHERE task_id=? AND session_id=? AND owner_scope IN ` + clause
 	rows, err := s.db.QueryContext(ctx, q, append([]any{taskID, sessionID}, args...)...)
 	if err != nil {
 		return SessionLink{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var found []SessionLink
 	for rows.Next() {
 		var link SessionLink
@@ -170,6 +173,7 @@ func ownerPlaceholders(owners []string) (string, []any) {
 	return b.String(), args
 }
 
+// CreateTask persists one task and returns its stored representation.
 func (s *Store) CreateTask(ctx context.Context, task Task) (Task, error) {
 	if task.ID == "" || task.OwnerScope == "" || task.ClientRequestID == "" {
 		return Task{}, fmt.Errorf("automation: task id/owner/clientRequestId required")
@@ -317,6 +321,7 @@ func (s *Store) DeleteTask(ctx context.Context, taskID string, expectedRevision 
 	return s.getTask(ctx, taskID)
 }
 
+// UpdateTask applies an optimistic update at expectedRevision.
 func (s *Store) UpdateTask(ctx context.Context, task Task, expectedRevision int64) (Task, error) {
 	cur, err := s.getTask(ctx, task.ID)
 	if err != nil {
@@ -369,6 +374,7 @@ func (s *Store) UpdateTask(ctx context.Context, task Task, expectedRevision int6
 	return s.getTask(ctx, task.ID)
 }
 
+// SetPaused changes only the enabled/paused state of one task.
 func (s *Store) SetPaused(ctx context.Context, taskID string, expectedRevision int64, paused bool, now time.Time) (Task, error) {
 	cur, err := s.getTask(ctx, taskID)
 	if err != nil {
@@ -391,11 +397,6 @@ func (s *Store) SetPaused(ctx context.Context, taskID string, expectedRevision i
 		return cur, nil
 	}
 	cur.State = want
-	if paused {
-		// Cancel is service-layer; store only flips state.
-	} else if cur.NextRunAtUTC != nil {
-		// Caller recomputes next; keep existing unless nil.
-	}
 	cur.UpdatedAtUTC = now.UTC()
 	return s.UpdateTask(ctx, cur, expectedRevision)
 }
@@ -477,6 +478,7 @@ func (s *Store) ClaimDue(ctx context.Context, taskID string, expectedRevision in
 	return &run, nil
 }
 
+// SaveRun applies an optimistic update to one run.
 func (s *Store) SaveRun(ctx context.Context, run Run, expectedRunRevision int64) (Run, error) {
 	cur, err := s.getRun(ctx, run.ID)
 	if err != nil {
@@ -514,6 +516,7 @@ func (s *Store) SaveRun(ctx context.Context, run Run, expectedRunRevision int64)
 	return s.getRun(ctx, run.ID)
 }
 
+// LinkSession records the workspace session associated with a task.
 func (s *Store) LinkSession(ctx context.Context, link SessionLink) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO session_links(owner_scope, workspace, session_id, task_id, task_name)
 		VALUES (?,?,?,?,?)
@@ -523,6 +526,7 @@ func (s *Store) LinkSession(ctx context.Context, link SessionLink) error {
 	return err
 }
 
+// ListTasks returns an owner-filtered page of tasks.
 func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) (TaskPage, error) {
 	limit := clampLimit(filter.Limit)
 	owners := filter.AllowedOwners
@@ -566,7 +570,7 @@ func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) (TaskPage, err
 	if err != nil {
 		return TaskPage{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var items []Task
 	for rows.Next() {
 		t, err := scanTask(rows)
@@ -587,6 +591,7 @@ func (s *Store) ListTasks(ctx context.Context, filter TaskFilter) (TaskPage, err
 	return TaskPage{Items: items, NextCursor: next}, rows.Err()
 }
 
+// ListRuns returns an owner-filtered page of runs.
 func (s *Store) ListRuns(ctx context.Context, filter RunFilter) (RunPage, error) {
 	limit := clampLimit(filter.Limit)
 	if len(filter.AllowedOwners) == 0 {
@@ -630,7 +635,7 @@ func (s *Store) ListRuns(ctx context.Context, filter RunFilter) (RunPage, error)
 	if err != nil {
 		return RunPage{}, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var items []Run
 	for rows.Next() {
 		r, err := scanRun(rows)
@@ -651,6 +656,7 @@ func (s *Store) ListRuns(ctx context.Context, filter RunFilter) (RunPage, error)
 	return RunPage{Items: items, NextCursor: next}, rows.Err()
 }
 
+// Recover reconciles runs left in flight by an earlier process.
 func (s *Store) Recover(ctx context.Context, now time.Time) error {
 	// submitting/running/waiting_permission → interrupted; do not resubmit.
 	// queued stays queued for the service to re-check the 60s window.
@@ -850,6 +856,7 @@ func (s *Store) OriginsForSessions(ctx context.Context, owners []string, refs []
 		return out, nil
 	}
 	clause, args := ownerPlaceholders(owners)
+	//nolint:gosec // clause contains only generated "?" placeholders; values stay bound.
 	rows, err := s.db.QueryContext(ctx, `SELECT l.workspace, l.session_id, l.task_id, l.task_name,
 		COALESCE(t.name, ''), COALESCE(t.updated_at_utc, '')
 		FROM session_links l
@@ -858,7 +865,7 @@ func (s *Store) OriginsForSessions(ctx context.Context, owners []string, refs []
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type candidate struct {
 		origin  SessionOrigin
 		updated string
@@ -930,16 +937,14 @@ func clipSummary(s string) string {
 		return s
 	}
 	// trim to valid UTF-8 boundary
-	for len(s) > maxSummaryBytes {
+	if len(s) > maxSummaryBytes {
 		_, size := utf8.DecodeLastRuneInString(s[:maxSummaryBytes+1])
-		if size <= 0 {
-			break
+		if size > 0 {
+			s = s[:maxSummaryBytes]
+			for !utf8.ValidString(s) && len(s) > 0 {
+				s = s[:len(s)-1]
+			}
 		}
-		s = s[:maxSummaryBytes]
-		for !utf8.ValidString(s) && len(s) > 0 {
-			s = s[:len(s)-1]
-		}
-		break
 	}
 	return s
 }

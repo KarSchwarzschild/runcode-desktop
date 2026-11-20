@@ -149,5 +149,8 @@ type Clock interface {
 // SystemClock is the production Clock.
 type SystemClock struct{}
 
-func (SystemClock) Now() time.Time                         { return time.Now().UTC() }
+// Now returns the current time in UTC.
+func (SystemClock) Now() time.Time { return time.Now().UTC() }
+
+// After schedules a timer through the real wall clock.
 func (SystemClock) After(d time.Duration) <-chan time.Time { return time.After(d) }

@@ -84,6 +84,7 @@ func sinkSnapshot(s *recordingSink) []sinkEvent {
 	return append([]sinkEvent(nil), s.events...)
 }
 
+//nolint:unparam // tenant remains a test seam for owner-scope variants.
 func loginPassport(app *App, subject, tenant, jti string) {
 	app.tokens.setInMemory(tokenSet{
 		AccessToken:  testJWT("https://passport.example", subject, jti),
@@ -823,7 +824,7 @@ func TestAutomationStartupFailureKeepsChat(t *testing.T) {
 	})
 	t.Cleanup(func() {
 		openAutomationStore = automation.OpenStore
-		automationProductName = func() string { return AppProduct() }
+		automationProductName = AppProduct
 		failed.stopAutomation(context.Background())
 	})
 	openAutomationStore = func(string) (*automation.Store, error) {
@@ -851,7 +852,7 @@ func TestAutomationStartupFailureKeepsChat(t *testing.T) {
 		t.Fatalf("unsafe product defaults = %+v err=%v", escapedDefaults, err)
 	}
 	var leaked []string
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+	_ = filepath.WalkDir(dir, func(path string, _ os.DirEntry, err error) error {
 		if err == nil && strings.HasSuffix(path, "automations.sqlite3") && !strings.Contains(path, filepath.Join("automation", "xrun")) {
 			leaked = append(leaked, path)
 		}

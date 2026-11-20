@@ -89,6 +89,7 @@ type WindowLifecycle struct {
 	hold       func()
 }
 
+// NewWindowLifecycle builds the platform-neutral close and exit controller.
 func NewWindowLifecycle(opts WindowLifecycleOptions) *WindowLifecycle {
 	if opts.QuitFallbackDelay <= 0 {
 		opts.QuitFallbackDelay = defaultQuitFallbackWait
@@ -117,10 +118,12 @@ func NewAppWindowLifecycle(app *App, host WindowHostOptions) *WindowLifecycle {
 	})
 }
 
+// BackgroundSupported reports whether closing may hide instead of exit.
 func (l *WindowLifecycle) BackgroundSupported() bool {
 	return l != nil && l.opts.BackgroundSupported
 }
 
+// Quitting reports whether bounded process cleanup has started.
 func (l *WindowLifecycle) Quitting() bool {
 	if l == nil {
 		return false
@@ -130,6 +133,7 @@ func (l *WindowLifecycle) Quitting() bool {
 	return l.quitting
 }
 
+// CloseMainWindow asks the user to hide, exit or cancel the close operation.
 func (l *WindowLifecycle) CloseMainWindow() error {
 	if l == nil {
 		return errors.New("窗口生命周期不可用")
@@ -214,6 +218,7 @@ func (l *WindowLifecycle) finishClose(choice CloseChoice) {
 	}
 }
 
+// RestoreMainWindow unminimises, shows and focuses the main window.
 func (l *WindowLifecycle) RestoreMainWindow() error {
 	if l == nil {
 		return errors.New("窗口生命周期不可用")
@@ -240,6 +245,7 @@ func (l *WindowLifecycle) PendingCount(ctx context.Context) (int, error) {
 	return summary.UnfinishedCount, nil
 }
 
+// RequestAppExit confirms and performs bounded process shutdown.
 func (l *WindowLifecycle) RequestAppExit() error {
 	if l == nil {
 		return errors.New("窗口生命周期不可用")

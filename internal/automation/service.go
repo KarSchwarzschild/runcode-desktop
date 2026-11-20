@@ -38,11 +38,16 @@ type Service struct {
 	receiptHook func() error
 }
 
+// ServiceOption configures scheduler callbacks without exposing internals.
 type ServiceOption func(*Service)
 
+// WithTaskChange observes persisted task changes.
 func WithTaskChange(fn func(Task)) ServiceOption { return func(s *Service) { s.onTaskChange = fn } }
-func WithRunChange(fn func(Run)) ServiceOption   { return func(s *Service) { s.onRunChange = fn } }
 
+// WithRunChange observes run lifecycle changes.
+func WithRunChange(fn func(Run)) ServiceOption { return func(s *Service) { s.onRunChange = fn } }
+
+// NewService builds one in-process scheduler around a store and runner.
 func NewService(store *Store, runner Runner, clock Clock, opts ...ServiceOption) *Service {
 	if clock == nil {
 		clock = SystemClock{}
@@ -62,6 +67,7 @@ func NewService(store *Store, runner Runner, clock Clock, opts ...ServiceOption)
 	return s
 }
 
+// Start recovers unfinished work and begins the scheduler loop.
 func (s *Service) Start(ctx context.Context) error {
 	s.mu.Lock()
 	if s.started {
@@ -98,6 +104,7 @@ func (s *Service) abortStart() {
 	}
 }
 
+// Stop cancels the scheduler loop and waits for it to exit.
 func (s *Service) Stop() {
 	s.mu.Lock()
 	if s.cancel != nil {
@@ -107,6 +114,7 @@ func (s *Service) Stop() {
 	<-s.done
 }
 
+// Observe feeds an engine fact into run state tracking.
 func (s *Service) Observe(f Fact) {
 	// Non-blocking for host Emit: buffer sized for active+queue; retry once then drop only if still full.
 	select {
@@ -120,6 +128,7 @@ func (s *Service) Observe(f Fact) {
 	s.nudge()
 }
 
+// HoldAdmission blocks new runs until the returned release function is called.
 func (s *Service) HoldAdmission(reason string) (release func()) {
 	s.mu.Lock()
 	s.holds[reason]++
@@ -146,6 +155,7 @@ func (s *Service) admissionBlocked() bool {
 	return len(s.holds) > 0
 }
 
+// ExitSummary reports tasks and runs that a process exit would interrupt.
 func (s *Service) ExitSummary(ctx context.Context) (ExitSummary, error) {
 	var enabled, unfinished int
 	if err := s.store.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tasks WHERE state=? AND deleted_at_utc IS NULL`, TaskEnabled).Scan(&enabled); err != nil {
@@ -158,6 +168,7 @@ func (s *Service) ExitSummary(ctx context.Context) (ExitSummary, error) {
 	return ExitSummary{EnabledCount: enabled, UnfinishedCount: unfinished}, nil
 }
 
+// PrepareShutdown stops admission and gives active runners a chance to cancel.
 func (s *Service) PrepareShutdown(ctx context.Context) error {
 	_ = s.HoldAdmission("shutdown") // keep hold until process exit
 	s.mu.Lock()
@@ -178,6 +189,7 @@ func (s *Service) PrepareShutdown(ctx context.Context) error {
 	return nil
 }
 
+// Wake asks the scheduler loop to recompute due work immediately.
 func (s *Service) Wake() { s.nudge() }
 
 func (s *Service) nudge() {
@@ -501,7 +513,7 @@ func (s *Service) claimDueIntoQueue(ctx context.Context, now time.Time) {
 	if err != nil {
 		return
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	type cand struct {
 		id  string
 		rev int64
@@ -705,7 +717,7 @@ func (s *Service) reloadQueued(ctx context.Context, now time.Time) error {
 	if err != nil {
 		return err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
@@ -751,6 +763,7 @@ func (s *Service) CreateTask(ctx context.Context, task Task) (Task, error) {
 	return got, nil
 }
 
+// SetPaused pauses or resumes a task at the supplied revision.
 func (s *Service) SetPaused(ctx context.Context, taskID string, rev int64, paused bool) (Task, error) {
 	now := s.clock.Now()
 	got, err := s.store.SetPaused(ctx, taskID, rev, paused, now)

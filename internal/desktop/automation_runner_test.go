@@ -688,6 +688,7 @@ func waitAutomationRun(t *testing.T, store *automation.Store, taskID string, mat
 	return automation.Run{}
 }
 
+//nolint:unparam // permission remains explicit because session safety is under test.
 func writeAutomationSession(t *testing.T, workspace, id, model, permission string) {
 	t.Helper()
 	dir := filepath.Join(workspace, ".runcode", "sessions")
