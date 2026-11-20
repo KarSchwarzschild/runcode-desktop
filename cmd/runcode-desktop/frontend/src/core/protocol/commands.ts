@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CustomModel, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, Info, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RuntimeInfo, SaveCustomModelRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionInfo, SessionSummary, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateInfo, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationRunResult, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CreateAutomationTaskRequest, CustomModel, DeleteAutomationTaskRequest, DeleteAutomationTaskResult, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RunAutomationTaskNowRequest, RuntimeInfo, SaveCustomModelRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionAutomationRunsRequest, SessionInfo, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -73,6 +73,12 @@ export function closeAllSessions(): Promise<void> {
   return call<void>('CloseAllSessions');
 }
 
+// CloseMainWindow hides the main window when a native host is installed.
+// kind: trigger
+export function closeMainWindow(): Promise<void> {
+  return call<void>('CloseMainWindow');
+}
+
 // CloseSession 关掉一条会话（空串 = 聚焦的那条）。 与替换式打开时的关闭不同：那时条目要留着（界面上旧对话还在，「已编辑」卡片 得能继续复审）；用户主动关掉一条会话时它从界面上整个消失，条目一并移除， 聚焦顺势落到还开着的另一条上。
 // kind: trigger
 export function closeSession(sessionID: string): Promise<void> {
@@ -127,10 +133,22 @@ export function contextAuditStatus(): Promise<ContextAuditInfo> {
   return call<ContextAuditInfo>('ContextAuditStatus');
 }
 
+// CreateAutomationTask persists one task.
+// kind: trigger
+export function createAutomationTask(req: CreateAutomationTaskRequest): Promise<AutomationTaskResult> {
+  return call<AutomationTaskResult>('CreateAutomationTask', req);
+}
+
 // DeleteAgent removes a sub-agent file in the given scope and returns the list.
 // kind: idempotent-set
 export function deleteAgent(name: string, scope: string): Promise<AgentList> {
   return call<AgentList>('DeleteAgent', name, scope);
+}
+
+// DeleteAutomationTask hides the task and closes its future scheduling while preserving run history and session links.
+// kind: trigger
+export function deleteAutomationTask(req: DeleteAutomationTaskRequest): Promise<DeleteAutomationTaskResult> {
+  return call<DeleteAutomationTaskResult>('DeleteAutomationTask', req);
 }
 
 // DeleteCustomModel 按名称删除，返回最新列表。未知名称是幂等 no-op。
@@ -185,6 +203,18 @@ export function focusSession(sessionID: string): Promise<SessionInfo> {
 // kind: trigger
 export function forkQuestion(ref: QuestionReference): Promise<ResumedSession> {
   return call<ResumedSession>('ForkQuestion', ref);
+}
+
+// GetAutomationConversation reads a linked session without focusing it.
+// kind: query
+export function getAutomationConversation(req: OpenAutomationSessionRequest): Promise<AutomationConversationResult> {
+  return call<AutomationConversationResult>('GetAutomationConversation', req);
+}
+
+// GetAutomationDefaults returns the context bootstrap.
+// kind: query
+export function getAutomationDefaults(): Promise<AutomationDefaults> {
+  return call<AutomationDefaults>('GetAutomationDefaults');
 }
 
 // GetModelContextSettings reads defaults and local overrides for one model.
@@ -271,6 +301,18 @@ export function listAgents(): Promise<AgentList> {
   return call<AgentList>('ListAgents');
 }
 
+// ListAutomationRuns lists one task's runs, newest first.
+// kind: query
+export function listAutomationRuns(req: ListAutomationRunsRequest): Promise<AutomationRunPage> {
+  return call<AutomationRunPage>('ListAutomationRuns', req);
+}
+
+// ListAutomationTasks lists tasks in the host-computed owner set.
+// kind: query
+export function listAutomationTasks(req: ListAutomationTasksRequest): Promise<AutomationTaskPage> {
+  return call<AutomationTaskPage>('ListAutomationTasks', req);
+}
+
 // ListCustomModels 返回脱敏后的自定义模型列表。连接密钥只在后端解析会话时 解密，前端仅知道是否已配置，不能读取明文或落盘密文。
 // kind: query
 export function listCustomModels(): Promise<CustomModel[] | null> {
@@ -305,6 +347,12 @@ export function listMCPServers(): Promise<MCPServerInfo[] | null> {
 // kind: query
 export function listRecordings(): Promise<RecordingInfo[] | null> {
   return call<RecordingInfo[] | null>('ListRecordings');
+}
+
+// ListSessionAutomationRuns lists runs linked to one workspace session.
+// kind: query
+export function listSessionAutomationRuns(req: SessionAutomationRunsRequest): Promise<AutomationRunPage> {
+  return call<AutomationRunPage>('ListSessionAutomationRuns', req);
 }
 
 // ListSessionFiles never borrows the focused workspace for an async request.
@@ -353,6 +401,12 @@ export function newSession(): Promise<SessionInfo> {
 // kind: trigger
 export function openArtifact(sessionID: string, path: string): Promise<ArtifactReference> {
   return call<ArtifactReference>('OpenArtifact', sessionID, path);
+}
+
+// OpenAutomationSession focuses a linked session.
+// kind: trigger
+export function openAutomationSession(req: OpenAutomationSessionRequest): Promise<AutomationSessionResult> {
+  return call<AutomationSessionResult>('OpenAutomationSession', req);
 }
 
 // OpenExternal hands the authorized source file to the OS default application.
@@ -529,6 +583,12 @@ export function renderOfficePDF(reference: string): Promise<string> {
   return call<string>('RenderOfficePDF', reference);
 }
 
+// RequestAppExit asks the native host to quit.
+// kind: trigger
+export function requestAppExit(): Promise<void> {
+  return call<void>('RequestAppExit');
+}
+
 // Reset clears the in-memory working history (the on-disk log is untouched).
 // kind: trigger
 export function reset(sessionID: string): Promise<void> {
@@ -587,6 +647,12 @@ export function reviewEdit(sessionID: string, snapshotID: string): Promise<EditD
 // kind: trigger
 export function revokeDirectoryAccess(req: DirectoryAccessRequest): Promise<DirectoryAccessView> {
   return call<DirectoryAccessView>('RevokeDirectoryAccess', req);
+}
+
+// RunAutomationTaskNow queues one explicit manual run without changing the schedule or enabled/paused state.
+// kind: trigger
+export function runAutomationTaskNow(req: RunAutomationTaskNowRequest): Promise<AutomationRunResult> {
+  return call<AutomationRunResult>('RunAutomationTaskNow', req);
 }
 
 // RuntimeStatus 返回运行时环境的当前状态（纯读，不联网）。
@@ -689,6 +755,12 @@ export function setActiveTenant(tenantID: string): Promise<void> {
 // kind: idempotent-set
 export function setAgentEnabled(name: string, scope: string, enabled: boolean): Promise<void> {
   return call<void>('SetAgentEnabled', name, scope, enabled);
+}
+
+// SetAutomationTaskPaused sets the paused bit.
+// kind: idempotent-set
+export function setAutomationTaskPaused(req: SetAutomationTaskPausedRequest): Promise<AutomationTaskResult> {
+  return call<AutomationTaskResult>('SetAutomationTaskPaused', req);
 }
 
 // SetContextAudit 开关上下文审核并持久化。仅测试版构建允许开启；关闭总是允许 （正式版里它本来就不可能开着）。运行态先行、持久化随后：持久化失败会回滚刚 打开的运行态，保证界面所见与重启后的行为一致。
@@ -797,6 +869,12 @@ export function submitQuestion(req: SubmitQuestionRequest): Promise<QuestionRece
 // kind: trigger
 export function switchModel(sessionID: string, kind: string, name: string): Promise<SessionInfo> {
   return call<SessionInfo>('SwitchModel', sessionID, kind, name);
+}
+
+// UpdateAutomationTask replaces the editable fields.
+// kind: trigger
+export function updateAutomationTask(req: UpdateAutomationTaskRequest): Promise<AutomationTaskResult> {
+  return call<AutomationTaskResult>('UpdateAutomationTask', req);
 }
 
 // UpdateStatus returns the current update snapshot without network access.

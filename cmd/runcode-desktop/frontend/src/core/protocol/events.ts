@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Events } from '@wailsio/runtime';
-import type { AskpassDone, AskpassRequest, AssistantDelta, ContextCompaction, ContextUsage, DirectoryAccessChanged, Envelope, HarmAutoAllow, OABlocked, PassportStatus, PermissionRequest, PlanRun, RecorderLevel, RecorderState, RecorderTranscript, RetryNotice, RuntimeInfo, SessionInfo, SessionRenamed, SkillInstallProgress, ToolEvent, TurnEnd, TurnError, TurnQueued, UpdateInfo, Warning } from './types';
+import type { AskpassDone, AskpassRequest, AssistantDelta, AutomationContextChanged, AutomationRunChanged, AutomationServiceChanged, AutomationTaskChanged, ContextCompaction, ContextUsage, DirectoryAccessChanged, Envelope, HarmAutoAllow, OABlocked, PassportStatus, PermissionRequest, PlanRun, RecorderLevel, RecorderState, RecorderTranscript, RetryNotice, RuntimeInfo, SessionInfo, SessionRenamed, SkillInstallProgress, ToolEvent, TurnEnd, TurnError, TurnQueued, UpdateInfo, Warning } from './types';
 
 // EventMap maps every wire event name to its payload type.
 export interface EventMap {
@@ -13,6 +13,10 @@ export interface EventMap {
   'askpass:request': AskpassRequest;
   'assistant:delta': AssistantDelta;
   'assistant:thinking': AssistantDelta;
+  'automation:context_changed': AutomationContextChanged;
+  'automation:run_changed': AutomationRunChanged;
+  'automation:service_changed': AutomationServiceChanged;
+  'automation:task_changed': AutomationTaskChanged;
   'context:compaction': ContextCompaction;
   'context:usage': ContextUsage;
   'directory:changed': DirectoryAccessChanged;
