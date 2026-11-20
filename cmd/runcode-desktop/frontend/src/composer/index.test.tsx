@@ -69,7 +69,7 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 
-async function mount(options: { kind?: string; busy?: boolean; attachments?: Attachment[]; sendBlock?: string; sessionId?: string } = {}) {
+async function mount(options: { busy?: boolean; attachments?: Attachment[]; sendBlock?: string; sessionId?: string } = {}) {
   const handle = createRef<ComposerEditorHandle>(), chat = createRef<HTMLDivElement>()
   let text = 'abcd'
   let toast = ''
@@ -81,7 +81,7 @@ async function mount(options: { kind?: string; busy?: boolean; attachments?: Att
     root.render(<main><div ref={chat} /><Composer attachments={options.attachments ?? []} setAttachments={noop}
       retry={undefined} retryDisabled={false} submitting={false} onCancelRetry={noop} onRemoveOriginal={noop}
       input={text} onInputChange={(value) => { text = value; render() }} taRef={handle} chatScrollRef={chat}
-      busy={options.busy ?? false} toast={toast} onNotify={(message) => { toast = message; render() }} info={options.kind ? { kind: options.kind } as SessionInfo : null} files={['name']} sessionId={sessionId} onRefreshFiles={refreshFiles}
+      busy={options.busy ?? false} toast={toast} onNotify={(message) => { toast = message; render() }} info={options.sessionId ? { sessionId: options.sessionId } as SessionInfo : null} files={['name']} sessionId={sessionId} onRefreshFiles={refreshFiles}
       onSend={async body => { sends.push(body); return true }} onStop={noop} onToggleMode={noop} onTogglePlan={noop}
       onChooseReasoning={noop} onChooseThinking={noop} onPickModel={noop} onPickScenario={noop} /></main>)
   }

@@ -16,7 +16,7 @@ const base: ImageGenerationResult = {
 }
 const tool = (data: ImageGenerationResult | undefined, type: ToolEvent['type'] = 'completed', message = ''): ToolEvent =>
   ({ type, toolName: 'image_generate', toolUseID: 'preview', data, message } as ToolEvent)
-const info = { sessionId: 'preview', kind: 'agent', model: 'platform-chat-model', permissionMode: 'interactive' } as SessionInfo
+const info = { sessionId: 'preview', model: 'platform-chat-model', permissionMode: 'interactive' } as SessionInfo
 
 function Toolbar() {
   return <ComposerToolbar info={info} busy={false} canSend onOpenSkillPicker={noop} onOpenAgentPicker={noop} onOpenFilePicker={noop}

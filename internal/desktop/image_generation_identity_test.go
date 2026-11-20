@@ -85,13 +85,13 @@ func startLongConversationImageSession(t *testing.T, warmup int) (*imageGenHostQ
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = app.mgr.CloseAll(context.Background()) })
+	identity := app.sessionIdentitySnapshot()
 	app.mu.Lock()
 	edits, plans, emit, imageState := app.pendingEdits, app.pendingPlans, app.pendingEmit, app.pendingImageGeneration
 	app.pendingEdits, app.pendingPlans, app.pendingEmit, app.pendingImageGeneration = nil, nil, nil, nil
-	app.registerSessionLocked(id, cwd, edits, plans, emit)
+	app.registerSessionModeLocked(id, cwd, edits, plans, emit, true, identity)
 	e := app.entryLocked(id)
 	e.passport, e.tenantID, e.imageGeneration = true, "tenant-a", imageState
-	app.bindSessionIdentityLocked(e)
 	app.mu.Unlock()
 	setImageGen(t, app, id, true)
 	f := &imageGenHostQuestionSession{app: app, sink: sink, bridge: bridge, cwd: cwd, id: id, hostCalls: hostCalls, modelCalls: modelCalls}

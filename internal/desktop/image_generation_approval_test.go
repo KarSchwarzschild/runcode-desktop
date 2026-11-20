@@ -326,13 +326,13 @@ func startImageGenHostQuestionSessionOpts(t *testing.T, captureUsage, holdFirstM
 
 	// Manager.Create 只负责引擎会话；以下登记沿用 App 正式建会话路径的同一
 	// pending store 接缝。所有身份字段在发布前一次性绑定，不从历史猜测。
+	identity := app.sessionIdentitySnapshot()
 	app.mu.Lock()
 	edits, plans, emit, imageState := app.pendingEdits, app.pendingPlans, app.pendingEmit, app.pendingImageGeneration
 	app.pendingEdits, app.pendingPlans, app.pendingEmit, app.pendingImageGeneration = nil, nil, nil, nil
-	app.registerSessionLocked(id, cwd, edits, plans, emit)
+	app.registerSessionModeLocked(id, cwd, edits, plans, emit, true, identity)
 	e := app.entryLocked(id)
 	e.passport, e.tenantID, e.imageGeneration = true, "tenant-a", imageState
-	app.bindSessionIdentityLocked(e)
 	app.mu.Unlock()
 	if imageState == nil {
 		t.Fatal("manager build did not park image generation state")

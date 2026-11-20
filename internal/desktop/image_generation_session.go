@@ -22,8 +22,11 @@ type sessionIdentityBinding struct {
 	Account, Epoch string
 }
 
-// bindSessionIdentityLocked 在会话条目发布时写入不可变身份，供生图等按会话分区的产品能力使用。
-func (a *App) bindSessionIdentityLocked(e *sessionEntry) {
+// sessionIdentitySnapshot 读取登录账号与登录周期快照。
+//
+// 调用方必须在获取 App.mu 之前调用：Token 续期可能持有 tokenManager.mu 长达
+// 30 秒，不能把它嵌进 App.mu 的临界区。
+func (a *App) sessionIdentitySnapshot() sessionIdentityBinding {
 	account, epoch := "anonymous", ""
 	if a.tokens != nil {
 		a.tokens.mu.Lock()
@@ -33,7 +36,13 @@ func (a *App) bindSessionIdentityLocked(e *sessionEntry) {
 		}
 		a.tokens.mu.Unlock()
 	}
-	e.identity = sessionIdentityBinding{Account: account, Epoch: epoch}
+	return sessionIdentityBinding{Account: account, Epoch: epoch}
+}
+
+// bindSessionIdentity 写入已经读取好的不可变身份。它不读取令牌，也不获取 App.mu，
+// 因而可以在发布会话条目时安全地持 App.mu 调用。
+func bindSessionIdentity(e *sessionEntry, identity sessionIdentityBinding) {
+	e.identity = identity
 }
 
 // imageGenerationBinding 是会话生图状态所属的身份分区。

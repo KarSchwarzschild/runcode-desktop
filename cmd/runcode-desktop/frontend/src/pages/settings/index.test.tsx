@@ -76,7 +76,7 @@ const onSaved = vi.fn()
 
 function info(patch: Partial<SessionInfo> = {}): SessionInfo {
   return {
-    sessionId: 'A', kind: 'agent', model: 'platform-model', permissionMode: 'interactive',
+    sessionId: 'A', model: 'platform-model', permissionMode: 'interactive',
     planMode: false, thinkingEffort: 'medium', reasoningScenario: 'auto', cwd: 'C:\\ws',
     ...patch,
   } as SessionInfo
@@ -368,20 +368,17 @@ describe('SettingsPage draft and save contracts', () => {
 })
 
 describe('SettingsPage disable matrix', () => {
-  it('keepsDirectoryUsableUnderReadOnlyBusyAndAccountSync', async () => {
+  it('keepsDirectoryUsableWhileBusyAndAccountSync', async () => {
     // accountBusy while resolving: delay passportStatus.
     let releaseStatus!: (v: { loggedIn: boolean }) => void
     api.passportStatus.mockReturnValue(new Promise((r) => { releaseStatus = r }))
-    await mount(page({ busy: true, session: info({ readOnlyReason: '只读历史会话' }) }))
+    await mount(page({ busy: true }))
     expect(saveButton().disabled).toBe(true)
-    expect(host.textContent).toContain('只读历史会话')
     expect(host.textContent).toContain('对话进行中，暂不能切换模型')
     expect(navButton('图片生成')).not.toBeNull()
     await go('图片生成')
     await go('出网代理')
     expect(host.querySelector('#settings-proxy')).not.toBeNull()
-    // The rest of the page remains editable when the session fieldset is read-only.
-    expect(host.querySelector('fieldset')?.disabled).toBe(true)
     expect(skipToggle().disabled).toBe(false)
     await act(async () => { releaseStatus({ loggedIn: false }) })
     await flush()

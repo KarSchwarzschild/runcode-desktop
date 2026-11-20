@@ -11,6 +11,48 @@ import (
 	appwire "github.com/wt68/runcode/internal/protocol"
 )
 
+func TestBindSessionIdentityDoesNotWaitForTokenLock(t *testing.T) {
+	app := New(&recordingSink{})
+	app.tokens.mu.Lock()
+	defer app.tokens.mu.Unlock()
+
+	e := &sessionEntry{id: "sess_cached_identity"}
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		bindSessionIdentity(e, sessionIdentityBinding{Account: "cached", Epoch: "epoch-1"})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("binding a cached identity waited for tokenManager.mu")
+	}
+	if e.identity.Account != "cached" || e.identity.Epoch != "epoch-1" {
+		t.Fatalf("identity = %+v", e.identity)
+	}
+}
+
+func TestSessionIdentitySnapshotDoesNotAcquireAppLock(t *testing.T) {
+	app := New(&recordingSink{})
+	app.tokens.setInMemory(tokenSet{AccessToken: imageGenJWT("user-a"), Expiry: time.Now().Add(time.Hour)})
+	app.mu.Lock()
+	defer app.mu.Unlock()
+
+	got := make(chan sessionIdentityBinding, 1)
+	go func() { got <- app.sessionIdentitySnapshot() }()
+	select {
+	case identity := <-got:
+		if identity.Account == "" || identity.Epoch == "" {
+			t.Fatalf("identity snapshot = %+v", identity)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("identity snapshot waited for App.mu")
+	}
+}
+
 // imageGenSessionApp：在假引擎上打开绑定通行证的普通会话（fixture 目录，sub／tenant）。
 //
 //nolint:unparam // 夹具保留 sub，便于以后换账号而不改调用点签名。
@@ -28,11 +70,12 @@ func imageGenSessionApp(t *testing.T, sub, tenant string) (*App, string, string)
 }
 
 func markImageGenPassport(app *App, id, tenant string) {
+	identity := app.sessionIdentitySnapshot()
 	app.mu.Lock()
 	defer app.mu.Unlock()
 	e := app.entryLocked(id)
 	e.passport, e.tenantID = true, tenant
-	app.bindSessionIdentityLocked(e)
+	bindSessionIdentity(e, identity)
 }
 
 func setImageGen(t *testing.T, app *App, id string, enabled bool) appwire.SessionImageGenerationView {
@@ -69,9 +112,7 @@ func TestImageGenerationSessionDefaultsOffAndIsIndependent(t *testing.T) {
 func openSecondImageGenSession(t *testing.T, app *App, tenant string) string {
 	t.Helper()
 	cwd := t.TempDir()
-	app.mu.Lock()
-	app.registerSessionLocked("sess_image_second", cwd, nil, nil, nil)
-	app.mu.Unlock()
+	app.registerSession("sess_image_second", cwd, nil, nil, nil)
 	markImageGenPassport(app, "sess_image_second", tenant)
 	return "sess_image_second"
 }
@@ -125,9 +166,7 @@ func TestImageGenerationSessionRestoresOnlyForSameIdentity(t *testing.T) {
 		t.Helper()
 		next := New(&recordingSink{})
 		next.tokens.setInMemory(tokenSet{AccessToken: imageGenJWT(sub), Expiry: time.Now().Add(time.Hour)})
-		next.mu.Lock()
-		next.registerSessionLocked(id, cwd, nil, nil, nil)
-		next.mu.Unlock()
+		next.registerSession(id, cwd, nil, nil, nil)
 		markImageGenPassport(next, id, tenant)
 		v, err := next.GetSessionImageGeneration(id)
 		if err != nil {

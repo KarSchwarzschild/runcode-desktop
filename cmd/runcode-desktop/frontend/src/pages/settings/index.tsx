@@ -61,8 +61,6 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   // 从会话工具条等入口直达某一节（如「图片生成」），不从目录顶开始。
   initialSection?: SettingsSectionId
 }) {
-  // 只读历史限制改写会话设置。
-  const sessionRestriction = info?.readOnlyReason || ''
   // The session's model is now switched live (see 模型 field below), so it is read
   // straight from the running session, not a form field. Permission mode still prefers
   // the live session. Saving this form never sends connection fields.
@@ -113,7 +111,6 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   const switchOpts = toModelOptions(platformModels, customModels)
   const modelOpts = toModelOptions(platformModels, [])
   async function save() {
-    if (sessionRestriction) return
     setSaving(true)
     setSaved(false)
     setError('')
@@ -179,9 +176,8 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
           </SettingsGroup>
 
           <SettingsGroup category={modelsCat}>
-            {sessionRestriction && <p role="status" className="text-[12px] text-amberink">{sessionRestriction}</p>}
             <SettingsAnchor section={sectionMeta('session')} register={register}>
-              <fieldset disabled={!!sessionRestriction} className="min-w-0">
+              <div className="min-w-0">
                 <SessionSection
                   currentModel={info?.model ?? ''}
                   switchOpts={switchOpts}
@@ -195,7 +191,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
                   onHarmJudgeVotes={setHarmJudgeVotes}
                   modelOpts={modelOpts}
                 />
-              </fieldset>
+              </div>
             </SettingsAnchor>
             <SettingsAnchor section={sectionMeta('custom-models')} register={register}>
               <CustomModelsSection models={customModels} onChanged={setCustomModels} />
@@ -246,7 +242,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
 
           {error && <InlineError variant="text">{error}</InlineError>}
           <div className="flex flex-wrap items-center gap-3 pb-2">
-            <button className={`${BTN} ${BTN_PRIMARY} px-7 py-2.5`} disabled={!!sessionRestriction || saving || accountBusy || (!!activeTenantId && !accountReady)} onClick={save}>{saving ? '保存中…' : accountBusy ? '正在同步租户…' : '保存设置'}</button>
+            <button className={`${BTN} ${BTN_PRIMARY} px-7 py-2.5`} disabled={saving || accountBusy || (!!activeTenantId && !accountReady)} onClick={save}>{saving ? '保存中…' : accountBusy ? '正在同步租户…' : '保存设置'}</button>
             <span className="text-[12px] text-muted">仅保存免登录、权限模式与判定设置；其他项目在各自区域保存。</span>
             {saved && <span className="text-green text-[13px]">✓ 已保存</span>}
           </div>

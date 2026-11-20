@@ -77,8 +77,6 @@ export function ComposerToolbar({
   onSend: () => void
   onStop: () => void
 }) {
-  // 模式由后端 kind 决定；仅真实只读历史禁用整条工具栏相关入口。
-  const restricted = !!info?.readOnlyReason
   const [addMenu, setAddMenu] = useState(false)
   const [reasonMenu, setReasonMenu] = useState(false)
   const [thinkMenu, setThinkMenu] = useState(false)
@@ -156,7 +154,7 @@ export function ComposerToolbar({
               { icon: 'hash', label: '文件', run: onOpenFilePicker },
               { icon: 'paperclip', label: '图片附件', run: onPickAttachment },
             ] as const).map((it) => (
-              <button type="button" disabled={restricted}
+              <button type="button"
                 key={it.label}
                 onClick={() => { setAddMenu(false); it.run() }}
                 className="w-full px-3 py-[7px] text-[13px] cursor-pointer text-ink hover:bg-surface2 flex items-center gap-2 disabled:opacity-40 disabled:cursor-default"
@@ -168,12 +166,11 @@ export function ComposerToolbar({
         </div>
         {/* The mode label is the last to go: unlike the toggles below, the shield
             icon alone carries no hint of which mode is active. */}
-        <GhostBtn disabled={restricted} className="flex-none whitespace-nowrap" onClick={onToggleMode} title={info?.readOnlyReason || `点击切换权限模式\n当前：${modeLabel(info?.permissionMode)}`}>
+        <GhostBtn className="flex-none whitespace-nowrap" onClick={onToggleMode} title={`点击切换权限模式\n当前：${modeLabel(info?.permissionMode)}`}>
           <Icon name="shield" size={16} />
-          {info?.readOnlyReason ? '只读历史' : !tinyBar && modeLabel(info?.permissionMode)}
+          {!tinyBar && modeLabel(info?.permissionMode)}
         </GhostBtn>
         <button
-          disabled={restricted}
           onClick={onTogglePlan}
           title="计划模式：先调研、产出方案；可新建和修改文件，不删除、不执行命令"
           className={`border text-[13px] px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 flex-none whitespace-nowrap transition ${info?.planMode ? 'border-primary text-primaryink bg-primarysoft font-medium' : 'border-transparent bg-transparent text-muted hover:bg-surface2 hover:text-ink'}`}
@@ -184,7 +181,6 @@ export function ComposerToolbar({
         {SHOW_THINKING_MODEL && (
         <div className="relative flex-none">
           <button
-            disabled={restricted}
             onClick={() => setReasonMenu((v) => !v)}
             title="思考模型：为本轮注入一套思维方法论"
             className={`border text-[13px] px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 flex-none whitespace-nowrap transition ${(info?.reasoningScenario ?? 'off') !== 'off' ? 'border-primary text-primaryink bg-primarysoft font-medium' : 'border-transparent bg-transparent text-muted hover:bg-surface2 hover:text-ink'}`}
@@ -208,7 +204,6 @@ export function ComposerToolbar({
         )}
         <div className="relative flex-none">
           <button
-            disabled={restricted}
             onClick={() => setThinkMenu((v) => !v)}
             title={`思考强度：让推理模型输出思考过程（reasoning_effort）\n当前：${(info?.thinkingEffort ?? 'off') === 'off' ? '不启用' : (THINKING_LABEL[info!.thinkingEffort!] ?? info!.thinkingEffort)}`}
             className={`border text-[13px] px-2.5 py-1.5 rounded-lg cursor-pointer inline-flex items-center gap-1.5 flex-none whitespace-nowrap transition ${(info?.thinkingEffort ?? 'off') !== 'off' ? 'border-primary text-primaryink bg-primarysoft font-medium' : 'border-transparent bg-transparent text-muted hover:bg-surface2 hover:text-ink'}`}
@@ -236,7 +231,7 @@ export function ComposerToolbar({
         <div className="relative min-w-0">
           <button
             type="button"
-            disabled={busy || restricted}
+            disabled={busy}
             onClick={() => (modelPickerOpen ? setModelPickerOpen(false) : void openModelPicker())}
             className={`font-mono text-[12px] text-muted bg-surface2 border border-line px-[11px] py-[5px] rounded-lg inline-flex items-center gap-1.5 min-w-0 ${tinyBar ? 'max-w-[110px]' : compactBar ? 'max-w-[150px]' : 'max-w-[240px]'} hover:border-primary hover:text-ink transition disabled:opacity-50 disabled:cursor-default disabled:hover:border-line disabled:hover:text-muted`}
             title={busy ? '对话进行中，无法切换模型' : `点击切换模型\n当前：${info?.model ?? ''}`}
@@ -268,7 +263,7 @@ export function ComposerToolbar({
           <div className="flex items-center gap-2 flex-none">
             {/* 补充按钮:回合进行中把已输入的内容插进正在跑的回合(中途插入),模型会在
                 当前步骤结束后看到。描边样式区别于实心红色的停止,避免误当作"立即回复"。 */}
-            {canSend && !restricted && (
+            {canSend && (
               <button
                 className="w-10 h-10 rounded-btn flex-none border border-primary text-primary bg-transparent inline-flex items-center justify-center cursor-pointer hover:bg-primarysoft transition"
                 onClick={onSend}

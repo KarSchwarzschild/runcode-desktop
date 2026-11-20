@@ -129,6 +129,34 @@ func imageGenerationSessionPath(id string) (string, error) {
 	return filepath.Join(".runcode", "image-generation", "sessions", id+".json"), nil
 }
 
+// deleteImageGenerationSessionRecords 只清理随会话派生的三类记录：
+// 会话开关、请求账本与回合标记。生成的图片属于用户产物，刻意不在这里删除。
+//
+// 所有路径都经 os.Root 限定在工作区内，且先校验不透明会话 id，避免路径穿越。
+func deleteImageGenerationSessionRecords(workspace, id string) error {
+	if !validImageGenerationID(id) {
+		return errImageGenerationStorage
+	}
+	root, err := os.OpenRoot(workspace)
+	if err != nil {
+		return errImageGenerationStorage
+	}
+	defer func() { _ = root.Close() }()
+
+	base := filepath.Join(".runcode", "image-generation")
+	paths := []string{
+		filepath.Join(base, "sessions", id+".json"),
+		filepath.Join(base, "requests", id),
+		filepath.Join(base, "turns", id),
+	}
+	for _, path := range paths {
+		if err := root.RemoveAll(path); err != nil {
+			return errImageGenerationStorage
+		}
+	}
+	return nil
+}
+
 func readImageGenerationSession(workspace, id string) (imageGenerationSessionDisk, error) {
 	disk := imageGenerationSessionDisk{Version: imageGenerationStoreVersion, SessionID: id, Scopes: map[string]imageGenerationSwitch{}}
 	path, err := imageGenerationSessionPath(id)

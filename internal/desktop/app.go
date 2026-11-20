@@ -1113,6 +1113,8 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 			cancel()
 		}
 	}
+	// 令牌锁可能被一次 30 秒的续期长期持有；先取快照，再进入 App.mu。
+	identity := a.sessionIdentitySnapshot()
 	a.mu.Lock()
 	pendingEdits, pendingPlans, pendingEmit := a.pendingEdits, a.pendingPlans, a.pendingEmit
 	a.pendingEdits, a.pendingPlans, a.pendingEmit = nil, nil, nil
@@ -1126,13 +1128,12 @@ func (a *App) buildSessionResolvedHeld(ctx context.Context, cfg engine.Config, p
 	// "until a new session replaces them",替换点就是这里。
 	a.dropClosedLocked()
 	// 登记顺带把 focused 与 workspace 一起切到新会话(见 focusLocked)。
-	a.registerSessionModeLocked(id, cfg.CWD, pendingEdits, pendingPlans, pendingEmit, focus)
+	a.registerSessionModeLocked(id, cfg.CWD, pendingEdits, pendingPlans, pendingEmit, focus, identity)
 	entry := a.entryLocked(id)
 	if pendingImageGeneration != nil && pendingImageGeneration.sessionID == id {
 		entry.imageGeneration = pendingImageGeneration
 	}
 	entry.connectionConfig, entry.passport, entry.tenantID = cfg, passport, strings.TrimSpace(tenantID)
-	a.bindSessionIdentityLocked(entry)
 	entry.modelRef = modelRef
 	// 锁跟着会话进内存:此后闸门、模型切换拦截、出网工具封锁读的都是这一份。
 	oaLock, oaLocked := readOALock(cfg.CWD, id)
@@ -1234,19 +1235,23 @@ func (a *App) closeEntryHeld(ctx context.Context, e *sessionEntry, drop bool) er
 	return nil
 }
 
-// registerSessionLocked 把 Create 成功的会话登记进会话表并聚焦它。调用方持 a.mu。
+// registerSession 把 Create 成功的会话登记进会话表并聚焦它。
+// 它先读身份快照，再获取 App.mu；调用方不得持 App.mu。
 //
 // 它**不关掉别的会话**——那是调用方的策略(当前只允许一条活动会话,所以开新会话
 // 前先 closeCurrentHeld)。拆出来是为了让开一条会话与关掉旧的这两件事分开:
 // 多会话 UI(P2)要的正是前者不带后者。
-func (a *App) registerSessionLocked(id, workspace string, edits *editStore, plans *planStore, emit func(string, any)) {
-	a.registerSessionModeLocked(id, workspace, edits, plans, emit, true)
+func (a *App) registerSession(id, workspace string, edits *editStore, plans *planStore, emit func(string, any)) {
+	identity := a.sessionIdentitySnapshot()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.registerSessionModeLocked(id, workspace, edits, plans, emit, true, identity)
 }
 
-func (a *App) registerSessionModeLocked(id, workspace string, edits *editStore, plans *planStore, emit func(string, any), focus bool) {
+func (a *App) registerSessionModeLocked(id, workspace string, edits *editStore, plans *planStore, emit func(string, any), focus bool, identity sessionIdentityBinding) {
 	a.sessionSeq++
 	entry := &sessionEntry{id: id, seq: a.sessionSeq, workspace: workspace, emit: emit, edits: edits, plans: plans}
-	a.bindSessionIdentityLocked(entry)
+	bindSessionIdentity(entry, identity)
 	// Configure 一定在 Create 成功前跑过,所以这两个不该为 nil;真为 nil 时用兜底
 	// 存储顶上,免得后面每个取用点都要判空。
 	if entry.edits == nil {
@@ -1373,7 +1378,6 @@ func (a *App) Status(sessionID string) (SessionInfo, error) {
 // live preview base URL.
 func (a *App) sessionInfo(st engine.Status) SessionInfo {
 	return SessionInfo{
-		Kind:               "agent",
 		SessionID:          st.SessionID,
 		Model:              st.Model,
 		CWD:                st.CWD,
