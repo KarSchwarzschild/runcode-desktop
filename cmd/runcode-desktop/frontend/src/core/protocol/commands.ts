@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationRunResult, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CreateAutomationTaskRequest, CustomModel, DeleteAutomationTaskRequest, DeleteAutomationTaskResult, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecordingInfo, ResumedSession, RunAutomationTaskNowRequest, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionAutomationRunsRequest, SessionInfo, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationRunResult, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CreateAutomationTaskRequest, CustomModel, DeleteAutomationTaskRequest, DeleteAutomationTaskResult, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecorderSettingsPatch, RecordingInfo, ResumedSession, RunAutomationTaskNowRequest, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionAutomationRunsRequest, SessionInfo, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -503,6 +503,12 @@ export function passportTenants(): Promise<PassportTenant[] | null> {
 // kind: query
 export function passportValidate(): Promise<PassportStatus> {
   return call<PassportStatus>('PassportValidate');
+}
+
+// PatchRecorderSettings 合并设置页或录音窗的一次字段修改。两处会同时写同一文件， 全对象覆盖会让一个窗口刚改的字段被另一个窗口的旧快照撤回。
+// kind: idempotent-set
+export function patchRecorderSettings(patch: RecorderSettingsPatch): Promise<RecorderSettings> {
+  return call<RecorderSettings>('PatchRecorderSettings', patch);
 }
 
 // PauseRecording 暂停。本地 WAV 与服务端时间轴一起停住，恢复后接着走。

@@ -13,29 +13,34 @@ export type SettingsSectionId = 'passport' | 'login' | 'session' | 'custom-model
 // 用户必须看到的空态一并藏掉——那些状态在卡片里显示，目录项常驻。
 export type SettingsCapabilities = { recorderEnabled: boolean; auditSupported: boolean }
 export type SettingsSection = { id: SettingsSectionId; title: string }
-export type SettingsCategory = { id: SettingsCategoryId; title: string; sections: readonly SettingsSection[] }
+export type SettingsCategory = {
+  id: SettingsCategoryId
+  title: string
+  description: string
+  sections: readonly SettingsSection[]
+}
 export type SectionPosition = { id: SettingsSectionId; top: number }
 
 export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
-  { id: 'account', title: '账号与登录', sections: [
+  { id: 'account', title: '账号与登录', description: '管理通行证账号、租户与启动登录方式。', sections: [
     { id: 'passport', title: '账号（通行证）' },
     { id: 'login', title: '登录' },
   ] },
-  { id: 'models', title: '模型与对话', sections: [
+  { id: 'models', title: '模型与对话', description: '选择会话模型、权限模式并管理模型配置。', sections: [
     { id: 'session', title: '会话' },
     { id: 'custom-models', title: '自定义模型' },
     { id: 'model-context', title: '模型上下文配置' },
   ] },
-  { id: 'media', title: '图片与录音', sections: [
+  { id: 'media', title: '图片与录音', description: '配置图片识别、图片生成及当前版本提供的录音能力。', sections: [
     { id: 'vision', title: '图片识别' },
     { id: 'image-generation', title: '图片生成' },
     { id: 'recorder', title: '录音纪要' },
   ] },
-  { id: 'environment', title: '网络与运行环境', sections: [
+  { id: 'environment', title: '网络与运行环境', description: '设置联网代理并管理本机运行环境。', sections: [
     { id: 'proxy', title: '出网代理' },
     { id: 'runtimes', title: '运行时环境' },
   ] },
-  { id: 'about', title: '关于与诊断', sections: [
+  { id: 'about', title: '关于与诊断', description: '查看客户端信息、工作区与可用的诊断功能。', sections: [
     { id: 'context-audit', title: '上下文审核' },
     { id: 'updates', title: '关于与更新' },
     { id: 'workspace', title: '工作区' },
@@ -45,11 +50,35 @@ export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
 export const SETTINGS_SECTION_ORDER: readonly SettingsSectionId[] =
   SETTINGS_CATEGORIES.flatMap((c) => c.sections.map((s) => s.id))
 
-// 可用内容宽度低于它改单列 + 顶部目录；正好 864 仍是双列（200 目录 + 24 间距 + 640 正文）。
-export const SETTINGS_NARROW_BREAKPOINT = 864
+// 以设置根的实际可用宽度判断，避免主侧栏展开/收起时按整窗宽度误判。
+export const SETTINGS_NARROW_BREAKPOINT = 880
 
 export function sectionAnchorId(id: SettingsSectionId): string {
   return `settings-${id}`
+}
+
+export function categoryForSection(id: SettingsSectionId): SettingsCategory {
+  const category = SETTINGS_CATEGORIES.find((item) => item.sections.some((section) => section.id === id))
+  if (!category) throw new Error(`unknown settings section: ${id}`)
+  return category
+}
+
+export function sectionsInCategory(
+  categories: readonly SettingsCategory[],
+  id: SettingsCategoryId,
+): SettingsSectionId[] {
+  return categories.find((category) => category.id === id)?.sections.map((section) => section.id) ?? []
+}
+
+export function defaultExpandedCategory(
+  categories: readonly SettingsCategory[],
+  activeId: SettingsSectionId | null,
+): SettingsCategoryId | null {
+  if (activeId) {
+    const owner = categories.find((category) => category.sections.some((section) => section.id === activeId))
+    if (owner) return owner.id
+  }
+  return categories[0]?.id ?? null
 }
 
 function sectionVisible(id: SettingsSectionId, caps: SettingsCapabilities): boolean {

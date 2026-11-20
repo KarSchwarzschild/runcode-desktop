@@ -13,8 +13,10 @@ import (
 	"os"
 	"strings"
 
+	wireprotocol "github.com/wt68/runcode/internal/protocol"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/host"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
+	engineprotocol "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
 
 	engine "gitlab.ouc-online.com.cn/aibase/agentloop"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/llm"
@@ -45,6 +47,22 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 	}
 	a.startMu.Lock()
 	defer a.startMu.Unlock()
+
+	explicitSession := req.SessionID != nil
+	targetID := ""
+	if explicitSession {
+		targetID = strings.TrimSpace(*req.SessionID)
+		if targetID != "" {
+			a.mu.Lock()
+			target := a.entryLocked(targetID)
+			valid := target != nil && !target.closed
+			a.mu.Unlock()
+			if !valid {
+				return SessionInfo{}, wireError(errNoSession)
+			}
+		}
+	}
+
 	if err := updateRawConfig(func(cfg *desktopConfig) error {
 		cfg.PermissionMode = req.PermissionMode
 		cfg.HarmJudgeModel = strings.TrimSpace(req.HarmJudgeModel)
@@ -58,24 +76,33 @@ func (a *App) SaveSettings(req SaveSettingsRequest) (SessionInfo, error) {
 	a.config.PermissionMode = req.PermissionMode
 	a.config.HarmJudgeModel = firstNonEmpty(req.HarmJudgeModel, os.Getenv("RUNCODE_HARM_JUDGE_MODEL"))
 	a.config.HarmJudgeVotes = harmVotesFromRequest(StartSessionRequest{HarmJudgeVotes: req.HarmJudgeVotes})
-	e := a.liveEntryLocked()
-	id := ""
-	if e != nil {
-		id = e.id
+	if explicitSession {
+		if targetID == "" {
+			a.mu.Unlock()
+			return SessionInfo{}, nil
+		}
+	} else {
+		e := a.liveEntryLocked()
+		if e != nil {
+			targetID = e.id
+		}
 	}
 	a.mu.Unlock()
-	if id == "" {
+	if targetID == "" {
 		return SessionInfo{}, nil
 	}
 	// 正在跑的自动化会话保持它启动时的权限。设置页的保存仍然落盘，
 	// 只是不把这次改动套到那条会话上。
-	if a.sessionLeased(id) {
-		return a.Status(id)
+	if a.sessionLeased(targetID) {
+		return a.Status(targetID)
 	}
-	if err := a.SetPermissionMode(id, req.PermissionMode); err != nil {
-		return SessionInfo{}, err
+	if err := a.SetPermissionMode(targetID, req.PermissionMode); err != nil {
+		return SessionInfo{}, &engineprotocol.Error{
+			Code:    wireprotocol.ErrCodeSettingsApplyFailed,
+			Message: fmt.Sprintf("配置已保存，当前会话未应用：%v", err),
+		}
 	}
-	return a.Status(id)
+	return a.Status(targetID)
 }
 
 // SetModel uses the same budget-aware rebuild as the model picker.

@@ -5,18 +5,31 @@ import { useCallback, useEffect, useRef, useState, type ReactNode, type RefObjec
 import { BTN } from '@/ui/tokens'
 import { LABEL_CLS, SelectField } from '@/ui/fields'
 import {
+  defaultExpandedCategory,
   sectionAnchorId,
   visibleSectionIds,
   type SettingsCategory,
+  type SettingsCategoryId,
   type SettingsSection,
   type SettingsSectionId,
 } from './navigation-model'
+import { SettingsSearch } from './settings-search'
 import './settings.css'
 
-export function SettingsNavigation({ categories, activeId, onNavigate, narrow, compactNavRef }: {
+export function SettingsNavigation({
+  categories,
+  activeId,
+  expandedCategoryId,
+  onNavigate,
+  onToggleCategory,
+  narrow,
+  compactNavRef,
+}: {
   categories: readonly SettingsCategory[]
   activeId: SettingsSectionId | null
+  expandedCategoryId?: SettingsCategoryId | null
   onNavigate: (id: SettingsSectionId) => void
+  onToggleCategory?: (id: SettingsCategoryId) => void
   narrow: boolean
   compactNavRef: RefObject<HTMLDivElement>
 }) {
@@ -34,13 +47,31 @@ export function SettingsNavigation({ categories, activeId, onNavigate, narrow, c
       />
     )
   }
-  return <WideNavigation categories={categories} activeId={activeId} onNavigate={onNavigate} />
+  return (
+    <WideNavigation
+      categories={categories}
+      activeId={activeId}
+      expandedCategoryId={expandedCategoryId === undefined
+        ? defaultExpandedCategory(categories, activeId)
+        : expandedCategoryId}
+      onNavigate={onNavigate}
+      onToggleCategory={onToggleCategory}
+    />
+  )
 }
 
-function WideNavigation({ categories, activeId, onNavigate }: {
+function WideNavigation({
+  categories,
+  activeId,
+  expandedCategoryId,
+  onNavigate,
+  onToggleCategory,
+}: {
   categories: readonly SettingsCategory[]
   activeId: SettingsSectionId | null
+  expandedCategoryId: SettingsCategoryId | null
   onNavigate: (id: SettingsSectionId) => void
+  onToggleCategory?: (id: SettingsCategoryId) => void
 }) {
   const navRef = useRef<HTMLElement>(null)
   // 目录比视口高时它自己滚动；当前项变了只把目录自己滚到能看见当前项，不用
@@ -49,7 +80,7 @@ function WideNavigation({ categories, activeId, onNavigate }: {
     const nav = navRef.current
     if (!nav || nav.scrollHeight <= nav.clientHeight) return
     const item = nav.querySelector<HTMLElement>('[aria-current="location"]')
-    if (!item) return
+    if (!item || item.closest('[hidden]')) return
     const box = nav.getBoundingClientRect()
     const at = item.getBoundingClientRect()
     if (at.top < box.top) nav.scrollTop -= box.top - at.top
@@ -58,17 +89,25 @@ function WideNavigation({ categories, activeId, onNavigate }: {
 
   return (
     <nav ref={navRef} aria-label="设置目录" className="settings-nav">
-      <ul className="m-0 p-0 list-none flex flex-col gap-2">
-        {categories.map((c) => (
-          <li key={c.id}>
+      <SettingsSearch categories={categories} onSelect={onNavigate} />
+      <ul className="settings-nav-groups">
+        {categories.map((c) => {
+          const expanded = c.id === expandedCategoryId
+          const activeCategory = c.sections.some((section) => section.id === activeId)
+          const listId = `settings-category-${c.id}-sections`
+          return (
+          <li key={c.id} className="settings-nav-group">
             <button
               type="button"
-              className="settings-nav-item w-full text-left rounded-lg px-2.5 py-1.5 text-[13px] font-semibold text-ink hover:bg-surface2"
-              onClick={() => onNavigate(c.sections[0].id)}
+              className={`settings-nav-category${activeCategory ? ' settings-nav-category-active' : ''}`}
+              aria-expanded={expanded}
+              aria-controls={listId}
+              onClick={() => onToggleCategory?.(c.id)}
             >
-              {c.title}
+              <span className="settings-nav-chevron" aria-hidden="true" />
+              <span>{c.title}</span>
             </button>
-            <ul className="m-0 p-0 list-none flex flex-col gap-0.5 mt-0.5">
+            <ul id={listId} className="settings-nav-subitems" hidden={!expanded}>
               {c.sections.map((s) => {
                 const active = s.id === activeId
                 return (
@@ -76,11 +115,7 @@ function WideNavigation({ categories, activeId, onNavigate }: {
                     <button
                       type="button"
                       aria-current={active ? 'location' : undefined}
-                      className={`settings-nav-item w-full text-left rounded-lg border-l-2 pl-5 pr-2.5 py-1.5 text-[13px] ${
-                        active
-                          ? 'border-primary bg-primarysoft text-primaryink font-semibold'
-                          : 'border-transparent text-ink2 hover:bg-surface2'
-                      }`}
+                      className={`settings-nav-item${active ? ' settings-nav-item-active' : ''}`}
                       onClick={() => onNavigate(s.id)}
                     >
                       {s.title}
@@ -90,7 +125,8 @@ function WideNavigation({ categories, activeId, onNavigate }: {
               })}
             </ul>
           </li>
-        ))}
+          )
+        })}
       </ul>
     </nav>
   )
@@ -115,6 +151,7 @@ function CompactNavigation({ categories, activeId, pending, onPending, onNavigat
   }
   return (
     <nav ref={barRef} aria-label="设置目录" className="settings-compact-nav">
+      <SettingsSearch categories={categories} onSelect={onNavigate} />
       <div className="flex items-end gap-2">
         <label className={`${LABEL_CLS} flex-1 min-w-0`}>
           设置目录
@@ -133,12 +170,14 @@ function CompactNavigation({ categories, activeId, pending, onPending, onNavigat
   )
 }
 
-// 正文里的分类：一个清晰的大类标题 + 它的小节。
-export function SettingsGroup({ category, children }: { category: SettingsCategory; children: ReactNode }) {
-  const headingId = `settings-group-${category.id}`
+// 正文分组始终挂载，只隐藏非当前组，保住账号协调器、能力探测和表单草稿。
+export function SettingsGroup({ category, hidden, children }: {
+  category: SettingsCategory
+  hidden?: boolean
+  children: ReactNode
+}) {
   return (
-    <div role="group" aria-labelledby={headingId} className="settings-group">
-      <h3 id={headingId} className="m-0 text-[15px] font-bold text-ink tracking-tight">{category.title}</h3>
+    <div role="group" aria-label={category.title} className="settings-group" hidden={hidden}>
       {children}
     </div>
   )

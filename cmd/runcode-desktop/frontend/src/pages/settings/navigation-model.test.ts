@@ -4,6 +4,7 @@ import {
   SETTINGS_NARROW_BREAKPOINT,
   SETTINGS_SECTION_ORDER,
   buildSettingsNavigation,
+  defaultExpandedCategory,
   isNarrowLayout,
   resolveActiveSection,
   resolveVisibleSection,
@@ -27,6 +28,13 @@ describe('settings catalog', () => {
   it('listsFiveCategoriesInFixedOrder', () => {
     expect(SETTINGS_CATEGORIES.map((c) => c.id)).toEqual(['account', 'models', 'media', 'environment', 'about'])
     expect(SETTINGS_CATEGORIES.map((c) => c.title)).toEqual(['账号与登录', '模型与对话', '图片与录音', '网络与运行环境', '关于与诊断'])
+  })
+
+  it('givesEveryCategoryAOneSentenceDescription', () => {
+    for (const category of SETTINGS_CATEGORIES) {
+      expect(category.description.trim().length).toBeGreaterThan(0)
+      expect(category.description.trim().endsWith('。')).toBe(true)
+    }
   })
 
   it('placesEachOfThirteenSectionsExactlyOnce', () => {
@@ -80,6 +88,18 @@ describe('settings catalog', () => {
   it('doesNotMutateTheFullCatalog', () => {
     buildSettingsNavigation({ recorderEnabled: false, auditSupported: false })
     expect(SETTINGS_CATEGORIES.flatMap((c) => c.sections)).toHaveLength(13)
+  })
+
+  it('expandsTheCategoryThatOwnsTheActiveSection', () => {
+    const categories = buildSettingsNavigation({ recorderEnabled: false, auditSupported: false })
+    expect(defaultExpandedCategory(categories, 'session')).toBe('models')
+    expect(defaultExpandedCategory(categories, 'image-generation')).toBe('media')
+  })
+
+  it('fallsBackToTheFirstCategoryWhenTheActiveSectionIsUnavailable', () => {
+    const categories = buildSettingsNavigation({ recorderEnabled: false, auditSupported: false })
+    expect(defaultExpandedCategory(categories, 'context-audit')).toBe('account')
+    expect(defaultExpandedCategory([], 'passport')).toBeNull()
   })
 })
 
@@ -136,11 +156,11 @@ describe('resolveActiveSection', () => {
 })
 
 describe('isNarrowLayout', () => {
-  it('switchesBelow864CssPixels', () => {
-    expect(SETTINGS_NARROW_BREAKPOINT).toBe(864)
-    expect(isNarrowLayout(863)).toBe(true)
-    expect(isNarrowLayout(864)).toBe(false)
-    expect(isNarrowLayout(865)).toBe(false)
+  it('switchesBelow880CssPixels', () => {
+    expect(SETTINGS_NARROW_BREAKPOINT).toBe(880)
+    expect(isNarrowLayout(879)).toBe(true)
+    expect(isNarrowLayout(880)).toBe(false)
+    expect(isNarrowLayout(881)).toBe(false)
   })
 
   it('treatsAnUnmeasuredLayoutAsUnknown', () => {

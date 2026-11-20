@@ -6,11 +6,10 @@
 // 分类目录只改滚动与焦点：不保存、不重建账号协调器、不改变业务小节的 key。
 // 正文按完整清单顺序挂载；目录按可见清单过滤。录音按品牌决定是否挂载；审核探测
 // 始终挂载，未知／不支持只隐藏包装与目录项。
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react'
-import { BTN, BTN_PRIMARY } from '@/ui/tokens'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { toModelOptions, type ModelOption } from '@/ui/model-picker'
 import {
-  errText, listCustomModels, saveSettings,
+  listCustomModels, saveSettings,
   type CustomModel, type PassportModel, type SessionInfo, type SettingsView,
 } from '@/core/bridge'
 import { Toggle } from '@/ui/toggle'
@@ -27,18 +26,22 @@ import { ContextSection } from './context'
 import { ContextAuditSection } from './context-audit'
 import { RuntimesSection } from './runtimes'
 import { AboutSection } from './about'
-import { InlineError } from '@/ui/feedback'
-import { PageShell } from '@/ui/layout'
 import { type UpdateController } from '@/session/use-update'
 import { useRuntimes } from '@/session/use-runtimes'
 import {
   SETTINGS_CATEGORIES,
   buildSettingsNavigation,
+  categoryForSection,
+  defaultExpandedCategory,
+  sectionsInCategory,
   visibleSectionIds,
+  type SettingsCategoryId,
   type SettingsSectionId,
 } from './navigation-model'
 import { SettingsAnchor, SettingsGroup, SettingsNavigation } from './navigation'
 import { useSettingsNavigation } from './use-settings-navigation'
+import { createAutoSaveChannel, type AutoSaveChannel, type AutoSaveSnapshot } from './autosave-channel'
+import { useSettingsSaveRegistry } from './settings-save-provider'
 
 function sectionMeta(id: SettingsSectionId) {
   for (const category of SETTINGS_CATEGORIES) {
@@ -46,6 +49,30 @@ function sectionMeta(id: SettingsSectionId) {
     if (section) return section
   }
   throw new Error(`unknown settings section: ${id}`)
+}
+
+type FourFieldDraft = {
+  permissionMode: string
+  harmJudgeModel: string
+  harmJudgeVotes: number
+  skipLogin: boolean
+}
+
+function AutoSaveStatus({ snapshot }: { snapshot: AutoSaveSnapshot<FourFieldDraft> }) {
+  const text = snapshot.phase === 'saving' ? '正在自动保存…'
+    : snapshot.phase === 'saved' ? '已自动保存'
+      : snapshot.phase === 'invalid' || snapshot.phase === 'error' ? `未保存：${snapshot.error}`
+        : ''
+  if (!text) return null
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className={`text-[12px] ${snapshot.phase === 'invalid' || snapshot.phase === 'error' ? 'text-red' : 'text-muted'}`}
+    >
+      {text}
+    </p>
+  )
 }
 
 export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchModel, initialSection }: {
@@ -61,24 +88,58 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   // 从会话工具条等入口直达某一节（如「图片生成」），不从目录顶开始。
   initialSection?: SettingsSectionId
 }) {
-  // The session's model is now switched live (see 模型 field below), so it is read
-  // straight from the running session, not a form field. Permission mode still prefers
-  // the live session. Saving this form never sends connection fields.
-  const [harmJudgeModel, setHarmJudgeModel] = useState(initial.harmJudgeModel ?? '')
-  const [harmJudgeVotes, setHarmJudgeVotes] = useState(initial.harmJudgeVotes ?? 1)
-  const [permissionMode, setPermissionMode] = useState(info?.permissionMode || initial.permissionMode || 'interactive')
-  // 免登录:关闭(默认)时启动强制走登录页;开启后未登录也可直接进表单用本地自定义模型。
-  const [skipLogin, setSkipLogin] = useState(initial.skipLogin ?? false)
-  const [saving, setSaving] = useState(false)
   const [accountBusy, setAccountBusy] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const [error, setError] = useState('')
   // 共享数据：平台模型（账号小节回流）+ 自定义模型列表（自定义模型小节维护），
   // 合成会话/判定模型选择器共用的候选列表。
   const [platformModels, setPlatformModels] = useState<PassportModel[]>([])
   const [activeTenantId, setActiveTenantId] = useState(initial.tenantId ?? '')
   const [accountReady, setAccountReady] = useState(false)
   const [customModels, setCustomModels] = useState<CustomModel[]>([])
+  const settingsSaves = useSettingsSaveRegistry()
+  const onSavedRef = useRef(onSaved)
+  onSavedRef.current = onSaved
+  const settingsSessionId = info?.sessionId ?? ''
+  const authoritativeFour = useMemo<FourFieldDraft>(() => ({
+    permissionMode: info?.permissionMode || initial.permissionMode || 'interactive',
+    harmJudgeModel: initial.harmJudgeModel ?? '',
+    harmJudgeVotes: initial.harmJudgeVotes ?? 1,
+    skipLogin: initial.skipLogin ?? false,
+  }), [info?.permissionMode, initial.harmJudgeModel, initial.harmJudgeVotes, initial.permissionMode, initial.skipLogin])
+  const fourFieldKey = `four:${settingsSessionId}:${activeTenantId}`
+  const fourChannelRef = useRef<{
+    key: string
+    channel: AutoSaveChannel<FourFieldDraft>
+  } | null>(null)
+  if (!fourChannelRef.current || fourChannelRef.current.key !== fourFieldKey) {
+    const existing = settingsSaves.getChannel<FourFieldDraft>(fourFieldKey)
+    const channel = existing ?? createAutoSaveChannel<FourFieldDraft>({
+      initial: authoritativeFour,
+      delayMs: 600,
+      write: async (value) => {
+        const saved = await saveSettings({
+          sessionId: settingsSessionId,
+          permissionMode: value.permissionMode,
+          harmJudgeModel: value.harmJudgeModel,
+          harmJudgeVotes: value.harmJudgeVotes,
+          skipLogin: value.skipLogin,
+        })
+        if (saved?.model) onSavedRef.current(saved)
+        return value
+      },
+    })
+    settingsSaves.register(fourFieldKey, '登录与会话设置', channel)
+    fourChannelRef.current = { key: fourFieldKey, channel }
+  }
+  const fourChannel = fourChannelRef.current.channel
+  const four = useSyncExternalStore(fourChannel.subscribe, fourChannel.getSnapshot, fourChannel.getSnapshot)
+  const { permissionMode, harmJudgeModel, harmJudgeVotes, skipLogin } = four.draft
+  const [selectedCategoryId, setSelectedCategoryId] = useState<SettingsCategoryId>(
+    initialSection ? categoryForSection(initialSection).id : 'account',
+  )
+  const [expandedCategoryId, setExpandedCategoryId] = useState<SettingsCategoryId | null>(
+    initialSection ? categoryForSection(initialSection).id : 'account',
+  )
+  const [pendingTarget, setPendingTarget] = useState<SettingsSectionId | null>(null)
   // 审核能力：默认 false，真值只来自 ContextAuditSection 的单次读取。
   const [auditSupported, setAuditSupported] = useState(false)
   const onAuditAvailability = useCallback((supported: boolean) => setAuditSupported(supported), [])
@@ -95,14 +156,70 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   }), [auditSupported])
   const categories = useMemo(() => buildSettingsNavigation(caps), [caps])
   const visibleIds = useMemo(() => visibleSectionIds(categories), [categories])
-  const nav = useSettingsNavigation({ visibleIds })
+  const selectedCategory = categories.find((category) => category.id === selectedCategoryId) ?? categories[0]
+  const displayedIds = useMemo(
+    () => selectedCategory ? sectionsInCategory(categories, selectedCategory.id) : [],
+    [categories, selectedCategory],
+  )
+  const nav = useSettingsNavigation({ availableIds: visibleIds, displayedIds })
   const navigateTo = nav.navigateTo
+  const initialConsumed = useRef(false)
 
-  // 入口指定了目标节时，子锚点 ref 已挂上后再滚过去（layout），避免停在目录顶。
+  // 入口目标只消费一次；审核能力等异步更新不能把已手动切组的用户再拉回入口。
   useLayoutEffect(() => {
-    if (!initialSection || !visibleIds.includes(initialSection)) return
-    navigateTo(initialSection)
-  }, [initialSection, visibleIds, navigateTo])
+    if (!initialSection || initialConsumed.current) return
+    initialConsumed.current = true
+    if (!visibleIds.includes(initialSection)) return
+    const categoryId = categoryForSection(initialSection).id
+    setSelectedCategoryId(categoryId)
+    setExpandedCategoryId(categoryId)
+    setPendingTarget(initialSection)
+  }, [initialSection, visibleIds])
+
+  // 跨组导航必须等目标组提交 DOM 后再测量，隐藏元素的零几何不能参与定位。
+  useLayoutEffect(() => {
+    if (!pendingTarget || !displayedIds.includes(pendingTarget)) return
+    navigateTo(pendingTarget)
+    setPendingTarget(null)
+  }, [displayedIds, navigateTo, pendingTarget])
+
+  const navigateSection = useCallback((id: SettingsSectionId) => {
+    const categoryId = categoryForSection(id).id
+    setSelectedCategoryId(categoryId)
+    setExpandedCategoryId(categoryId)
+    setPendingTarget(id)
+  }, [])
+
+  const toggleCategory = useCallback((id: SettingsCategoryId) => {
+    const collapsing = expandedCategoryId === id
+    setSelectedCategoryId(id)
+    if (collapsing) {
+      setExpandedCategoryId(null)
+      return
+    }
+    setExpandedCategoryId(id)
+    const first = sectionsInCategory(categories, id)[0]
+    if (first) setPendingTarget(first)
+  }, [categories, expandedCategoryId])
+
+  useEffect(() => {
+    if (categories.some((category) => category.id === selectedCategoryId)) return
+    const fallback = defaultExpandedCategory(categories, nav.activeId)
+    setSelectedCategoryId(fallback ?? categories[0]?.id ?? 'account')
+    setExpandedCategoryId(fallback)
+  }, [categories, nav.activeId, selectedCategoryId])
+
+  // 外部会话/配置变化只刷新未编辑字段，用户刚输入的内容不会被迟到回读覆盖。
+  useEffect(() => {
+    fourChannel.rebase(authoritativeFour)
+  }, [authoritativeFour, fourChannel])
+  useEffect(() => {
+    fourChannel.setReady(!accountBusy && (!activeTenantId || accountReady))
+  }, [accountBusy, accountReady, activeTenantId, fourChannel])
+  const editFour = (patch: Partial<FourFieldDraft>) => {
+    // 同一事件循环里连续改两个字段时，以通道中的最新草稿为基线，避免后一次覆盖前一次。
+    fourChannel.edit({ ...fourChannel.getSnapshot().draft, ...patch }, 'immediate')
+  }
 
   // switchOpts drives the live 模型 switcher: platform + custom together, since
   // picking either now switches the connection in place (via SwitchModel). modelOpts
@@ -110,48 +227,45 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
   // engine resolves — a custom profile's display name is not such an id.
   const switchOpts = toModelOptions(platformModels, customModels)
   const modelOpts = toModelOptions(platformModels, [])
-  async function save() {
-    setSaving(true)
-    setSaved(false)
-    setError('')
-    try {
-      const i = await saveSettings({
-        permissionMode,
-        harmJudgeModel,
-        harmJudgeVotes,
-        skipLogin,
-      })
-      if (i && i.model) onSaved(i)
-      setSaved(true)
-      setTimeout(() => setSaved(false), 2200)
-    } catch (e) {
-      setError(errText(e))
-    } finally {
-      setSaving(false)
-    }
-  }
-
   const register = nav.registerSection
   const [accountCat, modelsCat, mediaCat, environmentCat, aboutCat] = SETTINGS_CATEGORIES
 
   return (
-    <PageShell
-      title="设置"
-      hint="按目录定位设置。模型选择即时生效，其他项目按各区说明保存与生效。"
-      width={864}
-      scrollRef={nav.scrollRef}
-      contentClassName="settings-shell"
-    >
-      <div ref={nav.layoutRef} className="settings-layout" data-narrow={nav.narrow ? 'true' : 'false'}>
-        <SettingsNavigation
-          categories={categories}
-          activeId={nav.activeId}
-          onNavigate={nav.navigateTo}
-          narrow={nav.narrow}
-          compactNavRef={nav.compactNavRef}
-        />
+    <div ref={nav.layoutRef} className="settings-layout" data-narrow={nav.narrow ? 'true' : 'false'}>
+      {!nav.narrow && (
+        <div className="settings-nav-column">
+          <h2 className="settings-nav-title">设置</h2>
+          <SettingsNavigation
+            categories={categories}
+            activeId={nav.activeId}
+              expandedCategoryId={expandedCategoryId}
+            onNavigate={navigateSection}
+              onToggleCategory={toggleCategory}
+            narrow={false}
+            compactNavRef={nav.compactNavRef}
+          />
+        </div>
+      )}
+      <div ref={nav.scrollRef} className="settings-content-scroll">
+        {nav.narrow && (
+          <SettingsNavigation
+            categories={categories}
+            activeId={nav.activeId}
+            expandedCategoryId={expandedCategoryId}
+            onNavigate={navigateSection}
+            onToggleCategory={toggleCategory}
+            narrow
+            compactNavRef={nav.compactNavRef}
+          />
+        )}
         <div ref={nav.contentRef} className="settings-content">
-          <SettingsGroup category={accountCat}>
+          {selectedCategory && (
+            <header className="settings-page-heading">
+              <h1>{selectedCategory.title}</h1>
+              <p>{selectedCategory.description}</p>
+            </header>
+          )}
+          <SettingsGroup category={accountCat} hidden={selectedCategoryId !== 'account'}>
             <SettingsAnchor section={sectionMeta('passport')} register={register}>
               <AccountSection
                 onAccount={(tenantId, platform, ready) => {
@@ -163,19 +277,20 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
               />
             </SettingsAnchor>
             <SettingsAnchor section={sectionMeta('login')} register={register}>
-              <Section title="登录" hint="保存后于下次启动/登出时生效">
+              <Section title="登录" hint="自动保存 · 下次启动/登出时生效">
                 <label className="flex items-center justify-between gap-3 cursor-pointer">
                   <span className="min-w-0">
                     <span className="text-[13px]">免登录</span>
                     <span className="block text-[12px] text-muted mt-0.5">关闭（默认）时启动强制登录通行证；开启后未登录也可直接进入并使用本地自定义模型。</span>
                   </span>
-                  <Toggle on={skipLogin} onChange={setSkipLogin} />
+                  <Toggle on={skipLogin} onChange={(next) => editFour({ skipLogin: next })} />
                 </label>
+                <AutoSaveStatus snapshot={four} />
               </Section>
             </SettingsAnchor>
           </SettingsGroup>
 
-          <SettingsGroup category={modelsCat}>
+          <SettingsGroup category={modelsCat} hidden={selectedCategoryId !== 'models'}>
             <SettingsAnchor section={sectionMeta('session')} register={register}>
               <div className="min-w-0">
                 <SessionSection
@@ -184,13 +299,14 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
                   onSwitchModel={onSwitchModel}
                   busy={busy}
                   permissionMode={permissionMode}
-                  onPermissionMode={setPermissionMode}
+                  onPermissionMode={(next) => editFour({ permissionMode: next })}
                   harmJudgeModel={harmJudgeModel}
-                  onHarmJudgeModel={setHarmJudgeModel}
+                  onHarmJudgeModel={(next) => editFour({ harmJudgeModel: next })}
                   harmJudgeVotes={harmJudgeVotes}
-                  onHarmJudgeVotes={setHarmJudgeVotes}
+                  onHarmJudgeVotes={(next) => editFour({ harmJudgeVotes: next })}
                   modelOpts={modelOpts}
                 />
+                <AutoSaveStatus snapshot={four} />
               </div>
             </SettingsAnchor>
             <SettingsAnchor section={sectionMeta('custom-models')} register={register}>
@@ -201,7 +317,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
             </SettingsAnchor>
           </SettingsGroup>
 
-          <SettingsGroup category={mediaCat}>
+          <SettingsGroup category={mediaCat} hidden={selectedCategoryId !== 'media'}>
             <SettingsAnchor section={sectionMeta('vision')} register={register}>
               <VisionSection tenantId={activeTenantId} platform={platformModels} custom={customModels} onPlatformChanged={setPlatformModels} />
             </SettingsAnchor>
@@ -217,7 +333,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
             )}
           </SettingsGroup>
 
-          <SettingsGroup category={environmentCat}>
+          <SettingsGroup category={environmentCat} hidden={selectedCategoryId !== 'environment'}>
             <SettingsAnchor section={sectionMeta('proxy')} register={register}>
               <ProxySection />
             </SettingsAnchor>
@@ -226,7 +342,7 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
             </SettingsAnchor>
           </SettingsGroup>
 
-          <SettingsGroup category={aboutCat}>
+          <SettingsGroup category={aboutCat} hidden={selectedCategoryId !== 'about'}>
             <SettingsAnchor section={sectionMeta('context-audit')} register={register} hidden={!auditSupported}>
               <ContextAuditSection onAvailabilityChange={onAuditAvailability} />
             </SettingsAnchor>
@@ -240,14 +356,8 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
             </SettingsAnchor>
           </SettingsGroup>
 
-          {error && <InlineError variant="text">{error}</InlineError>}
-          <div className="flex flex-wrap items-center gap-3 pb-2">
-            <button className={`${BTN} ${BTN_PRIMARY} px-7 py-2.5`} disabled={saving || accountBusy || (!!activeTenantId && !accountReady)} onClick={save}>{saving ? '保存中…' : accountBusy ? '正在同步租户…' : '保存设置'}</button>
-            <span className="text-[12px] text-muted">仅保存免登录、权限模式与判定设置；其他项目在各自区域保存。</span>
-            {saved && <span className="text-green text-[13px]">✓ 已保存</span>}
-          </div>
         </div>
       </div>
-    </PageShell>
+    </div>
   )
 }
