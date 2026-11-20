@@ -120,6 +120,26 @@ func TestImageGenerationArtifactSavesVerifiedFormats(t *testing.T) {
 	}
 }
 
+func TestImageGenerationArtifactSaveIgnoresCancelledTurnContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	ws := t.TempDir()
+	if _, err := saveGeneratedImage(ctx, ws, "gen_cancelled_b64", b64Item(fixturePNG(t))); err != nil {
+		t.Fatalf("cancelled turn lost already-received b64 image: %v", err)
+	}
+
+	allowLoopbackDownloads(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		_, _ = w.Write(fixturePNG(t))
+	}))
+	defer srv.Close()
+	if _, err := saveGeneratedImage(ctx, ws, "gen_cancelled_url", imageGenerationWireImage{URL: srv.URL + "/image.png"}); err != nil {
+		t.Fatalf("cancelled turn lost already-received url image: %v", err)
+	}
+}
+
 func TestGeneratedImageFileName(t *testing.T) {
 	if got := generatedImageFileName("gen_a4c50251ddeb890ef460e44f", "jpg"); got != "image_a4c50251ddeb890ef460e44f.jpg" {
 		t.Fatalf("got %q", got)

@@ -31,6 +31,7 @@ import (
 var (
 	imageGenerationMaxImageBytes int64 = 20 << 20
 	imageDownloadTimeout               = 60 * time.Second
+	imageSaveTimeout                   = 90 * time.Second
 	// imageDownloadAddrAllowed decides, per connected address, whether a
 	// download may proceed. Tests swap it to use a loopback test server.
 	imageDownloadAddrAllowed = publicImageAddr
@@ -188,6 +189,11 @@ func saveGeneratedImage(ctx context.Context, workspace, generationID string, ite
 	if !validImageGenerationID(generationID) || workspace == "" {
 		return appwire.ImageGenerationArtifact{}, errImageGenerationSave
 	}
+	// POST 已经成功时结果可能已计费；停止当前回合不能取消 b64 解码、URL 下载和落盘。
+	// 保存独立限时，只保留“结果已到达”这一事实。
+	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), imageSaveTimeout)
+	defer cancel()
+	ctx = saveCtx
 	var data []byte
 	var err error
 	switch {
