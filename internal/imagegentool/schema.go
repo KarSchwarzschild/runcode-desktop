@@ -30,15 +30,15 @@ func InputSchema() tool.Schema {
 		Properties: map[string]tool.Schema{
 			"prompt": {
 				Type:        tool.SchemaTypeString,
-				Description: "交给生图模型的画面描述（去除首尾空白后 1—2000 字）。只写画面内容，不要写操作指令。",
+				Description: "画面描述，1—2000 字；只写视觉内容，不写操作指令。",
 			},
 			"size": {
 				Type:        tool.SchemaTypeString,
-				Description: "可选：图片尺寸，形如 1024x1024。优先使用工具说明中的支持尺寸；用户指定了不支持的尺寸或比例时选最接近的一项，并在最终回复末尾说明该模型支持哪些尺寸与像素。仅支持一种尺寸的模型必须传该尺寸。多尺寸且设置未固定时：有尺寸／比例倾向必须传 size；省略则由客户端补最小正方形再请求。",
+				Description: "可选：图片尺寸，形如 1024x1024。优先使用工具说明中的支持尺寸；省略时由宿主按设置选择。",
 			},
 			"displayIntent": {
 				Type:        tool.SchemaTypeString,
-				Description: "可选：一句话描述将要生成的画面，不含路径和指令。用于对话卡片在出图前展示；不要复制完整 prompt。",
+				Description: "可选：一句话画面摘要，不含路径和指令，用于出图前卡片展示。",
 			},
 		},
 	}

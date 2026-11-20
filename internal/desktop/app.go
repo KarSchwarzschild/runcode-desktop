@@ -843,7 +843,6 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 	// Browser navigation is a user-visible external action, not a read-only preview.
 	opts.ExtraTools = append(opts.ExtraTools, browsertool.New(openBrowserContext))
 	appendSystemPrompt(cfg, localBrowserPrompt)
-	appendSystemPrompt(cfg, renderRoutePrompt)
 	// The desktop's Skill tool discloses exactly what the engine's does and
 	// additionally announces each load, so the chat can show which skill the model
 	// picked up and what it is for. Which skills exist stays the engine's business
@@ -867,13 +866,17 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 	}
 	// image_generate：通行证主会话常驻注册；是否可用由每回合冻结的快照描述，关闭时
 	// Run 本地拒绝、零请求。
-	if ig := a.imageGenerationTools(cfg, sctx.ID, sctx.Generation); len(ig) > 0 {
-		opts.ExtraTools = append(opts.ExtraTools, ig...)
+	imageGenerationTools := a.imageGenerationTools(cfg, sctx.ID, sctx.Generation)
+	hasImageGeneration := len(imageGenerationTools) > 0
+	if hasImageGeneration {
+		opts.ExtraTools = append(opts.ExtraTools, imageGenerationTools...)
 	} else {
 		a.mu.Lock()
 		a.pendingImageGeneration = nil
 		a.mu.Unlock()
 	}
+	// 通用格式分工所有会话都需要；带 image_generate 的规则只跟随工具注册。
+	appendRenderRoutePrompts(cfg, hasImageGeneration)
 
 	// 上下文审核观测器只在测试版接线;正式版连回调都不装,功能整体不存在。
 	// 回调内部查原子开关,所以运行中切换立即对当前会话生效,无需重建。

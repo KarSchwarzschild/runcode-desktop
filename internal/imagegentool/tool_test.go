@@ -400,37 +400,31 @@ func TestDescriptionStatesWhenToCallAndAvailability(t *testing.T) {
 	snap := readySnapshot()
 	tl := newTool(&fakeHost{}, &snap)
 	desc := tl.Description()
-	for _, want := range []string{"根据用户提示词判断是否实际生成", "明确要求", "不要生成", "支持尺寸", "image-model"} {
+	for _, want := range []string{"明确要求", "不要调用", "每回合最多一次", "支持尺寸", "image-model", "修改生图设置"} {
 		if !strings.Contains(desc, want) {
 			t.Fatalf("description missing %q: %s", want, desc)
 		}
+	}
+	if len([]rune(desc)) > 520 {
+		t.Fatalf("description too long (%d runes): %s", len([]rune(desc)), desc)
 	}
 	if strings.Contains(desc, "「+」") || strings.Contains(desc, "开启「生成图片」") {
 		t.Fatalf("description still mentions composer toggle: %s", desc)
 	}
 	snap.Enabled, snap.Available, snap.Reason = false, false, "尚未选择生图模型"
-	if d := tl.Description(); !strings.Contains(d, "请勿调用") || !strings.Contains(d, "修改生图设置") || !strings.Contains(d, "不要改用 SVG") || strings.Contains(d, "image-model") {
+	if d := tl.Description(); !strings.Contains(d, "请勿调用") || !strings.Contains(d, "修改生图设置") || strings.Contains(d, "image-model") {
 		t.Fatalf("unavailable description: %s", d)
 	}
 }
 
-// TestDescriptionSteersMultimodalRouting 锁定方案 A：仅靠 Description 区分
-// 「逻辑/网页/几何图走 Mermaid·SVG·HTML」与「写实/海报走本工具」，避免流程图误打生图。
-func TestDescriptionSteersMultimodalRouting(t *testing.T) {
+// 格式路由由 renderRoutePrompt 独占；工具说明只回答“这个工具什么时候调用”。
+func TestDescriptionDefersFormatRoutingToSystemPrompt(t *testing.T) {
 	snap := readySnapshot()
 	tl := newTool(&fakeHost{}, &snap)
 	desc := tl.Description()
-	for _, want := range []string{
-		"Mermaid", "SVG", "HTML",
-		"流程图", "时序图", "架构图",
-		"不要调用",
-		"海报", "写实", "插画",
-		"导出",
-		"不要改用 SVG",
-		"修改生图设置",
-	} {
-		if !strings.Contains(desc, want) {
-			t.Fatalf("available description missing routing cue %q: %s", want, desc)
+	for _, duplicate := range []string{"Mermaid", "SVG", "HTML", "流程图", "时序图", "架构图"} {
+		if strings.Contains(desc, duplicate) {
+			t.Fatalf("description duplicates system-prompt route %q: %s", duplicate, desc)
 		}
 	}
 	snap.Enabled, snap.Available, snap.Reason = false, false, "尚未选择生图模型"
@@ -438,8 +432,21 @@ func TestDescriptionSteersMultimodalRouting(t *testing.T) {
 	if !strings.Contains(d, "请勿调用") || !strings.Contains(d, "尚未选择生图模型") {
 		t.Fatalf("unavailable description must keep early exit: %s", d)
 	}
-	// 不可用时仍可保留路由提示，但不得丢掉既有“请勿调用”后缀语义。
 	if strings.Contains(d, "image-model") {
 		t.Fatalf("unavailable description must not list a ready model: %s", d)
+	}
+}
+
+func TestInputSchemaDescriptionsStayFieldFocused(t *testing.T) {
+	schema := InputSchema()
+	size := schema.Properties["size"].Description
+	if strings.Contains(size, "最接近") || strings.Contains(size, "最终回复") {
+		t.Fatalf("size schema repeats tool-level strategy: %s", size)
+	}
+	if !strings.Contains(size, "支持尺寸") || !strings.Contains(size, "省略") {
+		t.Fatalf("size schema missing field contract: %s", size)
+	}
+	if strings.Contains(schema.Properties["prompt"].Description, "Mermaid") {
+		t.Fatalf("prompt schema leaked routing policy: %s", schema.Properties["prompt"].Description)
 	}
 }
