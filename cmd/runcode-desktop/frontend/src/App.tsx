@@ -7,7 +7,7 @@ import { useQuestionRetry } from '@/session/use-question-retry'
 // session/ 下对应的 hook，需要改样子去 shell/ 或各页面。
 import { useEffect, useRef, useState } from 'react'
 import { usePersistentBool } from '@/hooks/use-persistent-state'
-import { errText, loadConfig, passportLogout, type SessionInfo } from '@/core/bridge'
+import { errText, loadConfig, onAutomationOpenManager, passportLogout, type SessionInfo } from '@/core/bridge'
 import { passportDisplayName } from '@/core/passport-account'
 import { BRAND } from '@/core/brand'
 import { isPreviewable, toWorkspaceRel } from '@/preview/classify'
@@ -55,6 +55,7 @@ export default function App() {
   // 而侧栏本身按此 prop 变宽窄。
   const [sidebarCollapsed, toggleSidebar] = usePersistentBool('sidebar.collapsed', false)
   const [automationOpen, setAutomationOpen] = useState(false)
+  useEffect(() => onAutomationOpenManager(() => setAutomationOpen(true)), [])
 
   // infoRef 是给事件回调读当前会话用的镜像：订阅只注册一次，闭包里不能直接读
   // info 这个 state。
@@ -182,7 +183,7 @@ export default function App() {
   if (!session.started) {
     return (
       <div className="flex flex-col h-screen">
-        <TitleBar />
+        <TitleBar onError={toast.show} />
         {session.initialReq ? (
           <StartForm onStart={session.start} starting={session.starting} error={session.startError} initial={session.initialReq} />
         ) : (
@@ -218,7 +219,7 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen">
-      <TitleBar />
+      <TitleBar onError={toast.show} />
       <div className="flex flex-1 min-h-0">
         <Sidebar
           collapsed={sidebarCollapsed}

@@ -122,6 +122,11 @@ export function onEnvelope<K extends keyof EventMap>(
   })
 }
 
+// 托盘“查看待处理任务”是宿主原生事件，不携带 Core Envelope。
+export function onAutomationOpenManager(handler: () => void): () => void {
+  return RuntimeEvents.On('automation:open_manager', () => handler())
+}
+
 // ---- commands (generated; same lowerCamel names the old helpers used) ---------
 export {
   getQuestion, forkQuestion, submitQuestion,
@@ -244,7 +249,7 @@ export {
   webProxy,
 } from './protocol/commands'
 
-import { Browser, Clipboard } from '@wailsio/runtime'
+import { Browser, Clipboard, Events as RuntimeEvents } from '@wailsio/runtime'
 import {
   savePastedFile as savePastedFileCmd,
   readArtifactBytes as readArtifactBytesCmd,
@@ -334,7 +339,7 @@ export {
   getAutomationDefaults, listAutomationTasks, createAutomationTask, updateAutomationTask,
   setAutomationTaskPaused, runAutomationTaskNow, deleteAutomationTask,
   listAutomationRuns, listSessionAutomationRuns, getAutomationConversation,
-  openAutomationSession,
+  openAutomationSession, closeMainWindow, requestAppExit,
 } from './protocol/commands'
 
 // ---- frontend-only data shapes and narrowing helpers --------------------------
