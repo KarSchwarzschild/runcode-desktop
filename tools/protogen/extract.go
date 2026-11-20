@@ -46,33 +46,37 @@ import (
 // 手工表的代价是会忘记改,所以 extractEvents 做**双向**核对:常量多了(漏加表行)报
 // missing,表行多了(常量已删)报 stale。表本身不是真理,与源码对上的表才是。
 var eventPayloads = map[string]string{
-	"EventDirectoryAccessChanged": "DirectoryAccessChanged",
-	"EventPreviewLifecycle":       "PreviewLifecycle",
-	"EventAssistantDelta":         "AssistantDelta",
-	"EventAssistantThinking":      "AssistantDelta",
-	"EventContextUsage":           "ContextUsage",
-	"EventContextCompaction":      "ContextCompaction",
-	"EventHarmAutoAllow":          "HarmAutoAllow",
-	"EventPassportChanged":        "PassportStatus",
-	"EventRecorderLevel":          "RecorderLevel",
-	"EventRecorderState":          "RecorderState",
-	"EventRecorderTranscript":     "RecorderTranscript",
-	"EventRetry":                  "RetryNotice",
-	"EventPermissionRequest":      "PermissionRequest",
-	"EventPlanUpdated":            "PlanRun",
-	"EventSessionRenamed":         "SessionRenamed",
-	"EventSessionStatus":          "SessionInfo",
-	"EventOABlocked":              "OABlocked",
-	"EventSkillInstall":           "SkillInstallProgress",
-	"EventUpdate":                 "UpdateInfo",
-	"EventRuntimes":               "RuntimeInfo",
-	"EventAskpassRequest":         "AskpassRequest",
-	"EventAskpassDone":            "AskpassDone",
-	"EventToolEvent":              "ToolEvent",
-	"EventTurnEnd":                "TurnEnd",
-	"EventTurnQueued":             "TurnQueued",
-	"EventTurnError":              "TurnError",
-	"EventWarning":                "Warning",
+	"EventDirectoryAccessChanged":   "DirectoryAccessChanged",
+	"EventPreviewLifecycle":         "PreviewLifecycle",
+	"EventAssistantDelta":           "AssistantDelta",
+	"EventAssistantThinking":        "AssistantDelta",
+	"EventContextUsage":             "ContextUsage",
+	"EventContextCompaction":        "ContextCompaction",
+	"EventHarmAutoAllow":            "HarmAutoAllow",
+	"EventPassportChanged":          "PassportStatus",
+	"EventRecorderLevel":            "RecorderLevel",
+	"EventRecorderState":            "RecorderState",
+	"EventRecorderTranscript":       "RecorderTranscript",
+	"EventRetry":                    "RetryNotice",
+	"EventPermissionRequest":        "PermissionRequest",
+	"EventPlanUpdated":              "PlanRun",
+	"EventSessionRenamed":           "SessionRenamed",
+	"EventSessionStatus":            "ConversationInfo",
+	"EventOABlocked":                "OABlocked",
+	"EventSkillInstall":             "SkillInstallProgress",
+	"EventUpdate":                   "UpdateInfo",
+	"EventRuntimes":                 "RuntimeInfo",
+	"EventAskpassRequest":           "AskpassRequest",
+	"EventAskpassDone":              "AskpassDone",
+	"EventToolEvent":                "ToolEvent",
+	"EventTurnEnd":                  "TurnEnd",
+	"EventTurnQueued":               "TurnQueued",
+	"EventTurnError":                "TurnError",
+	"EventWarning":                  "Warning",
+	"EventAutomationTaskChanged":    "AutomationTaskChanged",
+	"EventAutomationRunChanged":     "AutomationRunChanged",
+	"EventAutomationServiceChanged": "AutomationServiceChanged",
+	"EventAutomationContextChanged": "AutomationContextChanged",
 }
 
 // excludedMethods are App methods that are shell wiring, not wire commands.
@@ -85,12 +89,14 @@ var eventPayloads = map[string]string{
 // 里删掉**,否则 extractCommands 的交叉核对会把它判成 orphaned(登记了却没有对应方法)。
 // 这个连带关系是故意的:排除一个命令是件需要两处都点头的事。
 var excludedMethods = map[string]bool{
-	"PrepareExit": true, // native exit cleanup; time.Duration is not a wire parameter
-	"SetCapturer": true, // installs the system audio capturer; called by the Wails shell, never the frontend
-	"SetDialoger": true, // installs the native file-dialog provider; called by the Wails shell, never the frontend
-	"SetQuitter":  true, // installs the app-quit provider (版本更新装完要退出); called by the Wails shell, never the frontend
-	"Shutdown":    true, // once-per-run teardown; called by the Wails shell from OnShutdown, never the frontend
-	"Startup":     true, // once-per-run background work; called by the Wails shell from OnStartup, never the frontend
+	"PrepareExit":         true, // native exit cleanup; time.Duration is not a wire parameter
+	"SetCapturer":         true, // installs the system audio capturer; called by the Wails shell, never the frontend
+	"SetDialoger":         true, // installs the native file-dialog provider; called by the Wails shell, never the frontend
+	"SetQuitter":          true, // installs the app-quit provider (版本更新装完要退出); called by the Wails shell, never the frontend
+	"SetWindowController": true, // installs the native close/exit host; step 10 supplies Windows, never a frontend command
+	"AutomationRunner":    true, // in-process scheduler adapter; not a frontend command
+	"Shutdown":            true, // once-per-run teardown; called by the Wails shell from OnShutdown, never the frontend
+	"Startup":             true, // once-per-run background work; called by the Wails shell from OnStartup, never the frontend
 }
 
 // genericStructs declares protocol structs emitted as generic TS interfaces,

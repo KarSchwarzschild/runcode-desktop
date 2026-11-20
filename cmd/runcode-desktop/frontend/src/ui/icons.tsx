@@ -16,7 +16,7 @@ export const TOOL_ICON: Record<string, string> = {
   TodoWrite: 'grid', Analyze: 'sparkles', analyze_image: 'file-image', image_generate: 'image-plus',
   AskUser: 'chat', open_preview: 'file',
   Task: 'bot', Skill: 'book', Remember: 'sparkles',
-  Wait: 'clock', GetCurrentTime: 'clock', install_runtime: 'terminal',
+  Wait: 'clock', GetCurrentTime: 'clock', install_runtime: 'terminal', automation_task: 'clock',
   'general-purpose': 'bot', 'code-reviewer': 'shield', 'code-explorer': 'search',
   planner: 'grid', debugger: 'terminal',
 }
@@ -237,6 +237,21 @@ export function Icon({ name, size = 18, className }: Props) {
           <circle cx="5" cy="12" r="1.6" />
           <circle cx="12" cy="12" r="1.6" />
           <circle cx="19" cy="12" r="1.6" />
+        </svg>
+      )
+    case 'more-grid':
+      return (
+        <svg {...common} {...stroke}>
+          <rect x="4" y="4" width="6" height="6" rx="1" />
+          <path d="M17 4v6M14 7h6" />
+          <rect x="4" y="14" width="6" height="6" rx="1" />
+          <rect x="14" y="14" width="6" height="6" rx="1" />
+        </svg>
+      )
+    case 'close':
+      return (
+        <svg {...common} {...stroke}>
+          <path d="M6 6l12 12M18 6 6 18" />
         </svg>
       )
     case 'sparkles':

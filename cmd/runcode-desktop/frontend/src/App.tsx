@@ -7,7 +7,7 @@ import { useQuestionRetry } from '@/session/use-question-retry'
 // session/ 下对应的 hook，需要改样子去 shell/ 或各页面。
 import { useEffect, useRef, useState, type ComponentProps } from 'react'
 import { usePersistentBool } from '@/hooks/use-persistent-state'
-import { errText, getImageGenerationSettings, loadConfig, passportLogout, type SessionInfo } from '@/core/bridge'
+import { errText, getImageGenerationSettings, loadConfig, onAutomationOpenManager, passportLogout, type SessionInfo } from '@/core/bridge'
 import { formatImageGenerationNote, type AssistantImageGenerationNote } from '@/chat/image-generation-note'
 import { passportDisplayName } from '@/core/passport-account'
 import { BRAND } from '@/core/brand'
@@ -31,6 +31,7 @@ import { PermissionModal } from '@/shell/permission-modal'
 import { AskpassModal } from '@/shell/askpass-modal'
 import { PreviewSide } from '@/shell/preview-side'
 import { Sidebar } from '@/shell/sidebar'
+import { AutomationWorkspaceDialog } from '@/pages/automation/workspace-dialog'
 import { Composer } from '@/composer'
 import type { ComposerEditorHandle } from '@/composer/inline-editor'
 import { type BuiltinAction } from '@/composer/scenario-bar'
@@ -70,6 +71,8 @@ export default function App() {
   // 侧栏折叠态：上提到这里，让折叠开关能放到主栏顶部状态条（「空闲」前），
   // 而侧栏本身按此 prop 变宽窄。
   const [sidebarCollapsed, toggleSidebar] = usePersistentBool('sidebar.collapsed', false)
+  const [automationOpen, setAutomationOpen] = useState(false)
+  useEffect(() => onAutomationOpenManager(() => setAutomationOpen(true)), [])
 
   // infoRef 是给事件回调读当前会话用的镜像：订阅只注册一次，闭包里不能直接读
   // info 这个 state。
@@ -218,7 +221,7 @@ export default function App() {
     return (
       // 窗口只承载固定视口，首屏内容由自身滚动，避免溢出内容带动整个文档。
       <div className="relative flex flex-col h-screen overflow-hidden">
-        <TitleBar />
+        <TitleBar onError={toast.show} />
         {session.initialReq ? (
           <StartForm onStart={session.start} starting={session.starting} error={session.startError} initial={session.initialReq} />
         ) : (
@@ -245,17 +248,18 @@ export default function App() {
   const openRows = session.openList.map((s) => ({
     id: s.sessionId,
     title: session.titles[s.sessionId] || conversation.lastUserBySession[s.sessionId] || '新对话',
-    running: !!conversation.busyBySession[s.sessionId],
+    running: !!conversation.busyBySession[s.sessionId] || s.running || !!session.automationRunning[s.sessionId],
     waiting: permissions.waiting[s.sessionId] ?? 0,
     focused: s.sessionId === session.info?.sessionId,
     workspace: s.workspace,
+    automation: s.automation,
   }))
 
   return (
     <GeneratedImageViewerProvider suspended={imageViewerSuspended}>
     {/* 页面与侧栏各自滚动；窗口根截住越界内容，标题栏和底部用户区不能随文档移动。 */}
     <div id="app-background" className="relative flex flex-col h-screen overflow-hidden">
-      <TitleBar />
+      <TitleBar onError={toast.show} />
       <div className="flex flex-1 min-h-0">
         <Sidebar
           collapsed={sidebarCollapsed}
@@ -302,6 +306,7 @@ export default function App() {
           userName={userName}
           avatar={passport?.avatar}
           onLogout={() => void logout()}
+          onOpenAutomation={() => setAutomationOpen(true)}
         />
 
         <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-surface">
@@ -465,6 +470,12 @@ export default function App() {
           />
         )}
       </div>
+      <AutomationWorkspaceDialog
+        open={automationOpen}
+        onClose={() => setAutomationOpen(false)}
+        onOpenSettings={() => { setAutomationOpen(false); openSettings() }}
+        onOpenRun={session.openAutomationSession}
+      />
       {installing && <InstallOverlay state={installing} />}
       {askpass.current && (
         <AskpassModal

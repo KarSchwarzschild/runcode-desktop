@@ -1,7 +1,5 @@
 package protocol
 
-import hostproto "gitlab.ouc-online.com.cn/aibase/agentloop/protocol"
-
 // StartSessionRequest opens a session for a workspace. Empty fields fall back to
 // the environment (ANTHROPIC_MODEL/API key/etc.), mirroring the CLI's resolution
 // for the values the host does not yet surface in a settings form.
@@ -75,6 +73,8 @@ type OpenSessionInfo struct {
 	Running bool `json:"running"`
 	// Focused 表示它是当前看得见的那条。
 	Focused bool `json:"focused"`
+	// Automation 是可选的时钟来源。缺省表示普通会话，Kind 保持原值。
+	Automation *AutomationOrigin `json:"automation,omitempty"`
 }
 
 // SessionSummary describes a saved session for the sidebar's recent list.
@@ -84,6 +84,8 @@ type SessionSummary struct {
 	Title string `json:"title"`
 	When  string `json:"when"`
 	Turns int    `json:"turns"`
+	// Automation 是可选的时钟来源。缺省表示普通历史，Kind 保持原值。
+	Automation *AutomationOrigin `json:"automation,omitempty"`
 }
 
 // ResumedBlock is one rendered item of a reopened conversation. Its kinds mirror
@@ -120,9 +122,9 @@ type ResumedTool struct {
 // ResumedSession carries a reopened session's status plus its prior conversation
 // as rendered blocks so the frontend can repaint it.
 type ResumedSession struct {
-	Source *QuestionReference    `json:"source,omitempty"`
-	Info   hostproto.SessionInfo `json:"info"`
-	Blocks []ResumedBlock        `json:"blocks"`
+	Source *QuestionReference `json:"source,omitempty"`
+	Info   ConversationInfo   `json:"info"`
+	Blocks []ResumedBlock     `json:"blocks"`
 	// ContextTokens is an estimate of the reopened history's context occupancy, so
 	// the usage bar shows a sensible value immediately instead of 0 (no turn has run
 	// yet to report an exact count). The first turn replaces it with the real value.

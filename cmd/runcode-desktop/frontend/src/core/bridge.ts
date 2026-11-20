@@ -9,9 +9,13 @@
 // the Wails runtime directly, and runtime access stays here + in the generated
 // events module.
 
+import { onEnvelope as onCoreEnvelope, type EventMap } from './protocol/events'
+import type { AutomationEventSource, Envelope as WireEnvelope } from './protocol/types'
+import { Events as RuntimeEvents } from '@wailsio/runtime'
+
 // ---- wire types (generated single source of truth) ----------------------------
 export type {
-  SessionInfo,
+  ConversationInfo as SessionInfo,
  ArtifactReference, DirectoryAccessRequest, DirectoryAccessGrant, DirectoryAccessView,
   ModelContextValues, ModelContextOverride, ModelContextView, SaveModelContextSettingsRequest,
   QuestionReference, QuestionImage, QuestionDraft, QuestionReceipt, SubmitQuestionRequest,
@@ -105,8 +109,27 @@ export { Events, ToolEventTypes, Decisions, ErrCodes, PlanStages, PlanStates, Sk
 export type { PassportTenant } from './protocol/types'
 
 // ---- events (generated; unwraps the Envelope exactly like the old helpers) ----
-export { onEvent, onEnvelope } from './protocol/events'
-export type { EventMap } from './protocol/events'
+// onEnvelope is wrapped so automation runs can carry AutomationEventSource
+// beside the Core envelope. sessionId, seq, and payload stay the generated wire.
+export { onEvent } from './protocol/events'
+export type { EventMap }
+
+export type DesktopEnvelope<P> = WireEnvelope<P> & { automationSource?: AutomationEventSource }
+
+export function onEnvelope<K extends keyof EventMap>(
+  event: K,
+  handler: (data: DesktopEnvelope<EventMap[K]>) => void,
+): () => void {
+  return onCoreEnvelope(event, (data) => {
+    handler(data as DesktopEnvelope<EventMap[K]>)
+  })
+}
+
+// 托盘“查看待处理任务”是宿主原生事件，不携带 Core Envelope；这里集中封装，
+// 页面组件仍只依赖 bridge，不直接访问 Wails runtime。
+export function onAutomationOpenManager(handler: () => void): () => void {
+  return RuntimeEvents.On('automation:open_manager', () => handler())
+}
 
 // ---- commands (generated; same lowerCamel names the old helpers used) ---------
 export {
@@ -237,7 +260,7 @@ import {
   readArtifactBytes as readArtifactBytesCmd,
   switchModel as switchModelCmd,
 } from './protocol/commands'
-import type { EditRecord, SessionInfo } from './protocol/types'
+import type { EditRecord, ConversationInfo as SessionInfo } from './protocol/types'
 
 // switchModel spans platform (passport) and custom direct-connection models: a
 // same-connection platform swap is in place, any connection change rebuilds the
@@ -375,3 +398,20 @@ export type {
   UsageRowQuality, UsageRequestRow, UsageRequestsPage, UsageDimensionRow, UsageDimensionsPage,
 } from './protocol/types'
 export { getUsageOverview, getUsageRequests, getUsageDimensions, resetLocalUsageStore } from './protocol/commands'
+
+// ---- 自动化任务：命令与类型都来自生成协议；页面只从这里调用 ----------------------
+export type {
+  AutomationBindingSummary, AutomationContext, AutomationContextChanged, AutomationConversationResult,
+  AutomationDefaults, AutomationEventSource, AutomationModelSummary, AutomationOrigin, AutomationRun,
+  AutomationRunChanged, AutomationRunPage, AutomationSchedule, AutomationServiceChanged, AutomationSessionResult,
+  AutomationTask, AutomationTaskChanged, AutomationTaskDraft, AutomationTaskPage, AutomationTaskResult,
+  AutomationRunResult, DeleteAutomationTaskRequest, DeleteAutomationTaskResult,
+  CreateAutomationTaskRequest, ListAutomationRunsRequest, ListAutomationTasksRequest, OpenAutomationSessionRequest,
+  RunAutomationTaskNowRequest, SessionAutomationRunsRequest, SetAutomationTaskPausedRequest, UpdateAutomationTaskRequest,
+} from './protocol/types'
+export {
+  getAutomationDefaults, listAutomationTasks, createAutomationTask, updateAutomationTask,
+  setAutomationTaskPaused, runAutomationTaskNow, deleteAutomationTask,
+  listAutomationRuns, listSessionAutomationRuns, getAutomationConversation,
+  openAutomationSession, closeMainWindow, requestAppExit,
+} from './protocol/commands'

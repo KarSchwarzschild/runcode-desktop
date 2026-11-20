@@ -9,13 +9,19 @@ import {
   compact as compactSession,
   Events,
   errText,
+  getAutomationConversation,
+  getAutomationDefaults,
   interrupt,
   listEdits,
+  listSessionAutomationRuns,
   onEnvelope,
   revertEdit,
   releaseArtifact,
+  type AutomationContext,
+  type AutomationRun,
   type PermissionRequest,
   type PlanSnapshot,
+  type ResumedBlock,
   type ResumedSession,
   type ResumedTool,
   type SessionInfo,
@@ -41,6 +47,17 @@ import {
   stampTurnAssistantNote,
   type AssistantImageGenerationNote,
 } from '@/chat/image-generation-note'
+import {
+  AUTOMATION_HISTORY_NOTE,
+  automationRunActive,
+  clearAutomationProjection,
+  ensureSubmittingNote,
+  isAutomationTerminal,
+  mergeAutomationRun,
+  mergeRunList,
+  projectSessionAutomationRuns,
+} from '@/chat/automation-run'
+import { loadSessionAutomationRuns, mergeResumedBlocks } from './automation-turns'
 import { basename } from '@/core/paths'
 import { IMAGE_GENERATION_TOOL, isGeneratedImageRel } from '@/core/image-generation'
 import { digestDisplayText, docDisplayText, minutesDisplayText, parseRecordingMarker, type RecordingMark } from '@/recorder/minutes'
@@ -53,6 +70,56 @@ let seq = 0
 const nextID = () => `b${++seq}`
 const now = () =>
   new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })
+
+function acceptAutomationContext(slot: { current: AutomationContext | null }, ctx?: AutomationContext): boolean {
+  if (!ctx?.viewId) return false
+  const cur = slot.current
+  if (!cur) {
+    slot.current = ctx
+    return true
+  }
+  return cur.viewId === ctx.viewId && cur.epoch === ctx.epoch
+}
+
+function blocksFromResumed(items: ResumedBlock[] | null | undefined, sid: string): Block[] {
+  return (items ?? []).flatMap((b): Block[] => {
+    if (b.kind === 'user') {
+      const found = parseRecordingMarker(b.text ?? '')
+      if (found) {
+        const { mark, stage } = found
+        const text = stage === 'digest' ? digestDisplayText(mark.title)
+          : stage === 'doc' ? docDisplayText(mark.title)
+            : minutesDisplayText(mark.title)
+        const user: Block = { kind: 'user', id: nextID(), questionId: b.questionId, text, ts: '', attachments: b.images?.map((i) => i.name) }
+        if (stage === 'doc') return [user]
+        return [{ kind: 'recording', id: nextID(), mark }, user]
+      }
+      return [{ kind: 'user', id: nextID(), questionId: b.questionId, text: b.text ?? '', ts: '', attachments: b.images?.map((i) => i.name) }]
+    }
+    if (b.kind === 'assistant') return [{ kind: 'assistant', id: nextID(), text: b.text ?? '', thinking: b.thinking, streaming: false, ts: '' }]
+    const t: Partial<ResumedTool> = b.tool ?? {}
+    const out = (t.output ?? '').trim()
+    const lines = out ? out.split('\n').map((text) => ({ stream: t.isError ? 'stderr' : 'stdout', text })) : []
+    const matched = t.isError ? null : resumedMatchedFiles(t.toolName, t.input, out)
+    return [{
+      kind: 'tool',
+      id: nextID(),
+      sessionId: sid,
+      tool: {
+        type: t.isError ? 'failed' : 'completed',
+        toolName: t.toolName,
+        toolUseID: t.toolUseId,
+        inputTokens: t.inputTokens,
+        outputTokens: t.outputTokens,
+        input: t.input,
+        message: t.isError ? 'completed with error' : 'completed',
+        files: matched ?? (t.path ? [{ path: t.path }] : undefined),
+        output: matched ? [] : lines,
+        data: t.imageGeneration,
+      },
+    }]
+  })
+}
 
 export type Conversation = ReturnType<typeof useConversation>
 
@@ -85,7 +152,30 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   const [convs, setConvs] = useState<ConvMap>({})
   const [planOpen, setPlanOpen] = useState(false)
   const cur = convOf(convs, focusedId)
-  const { blocks, harmAllows, oaBlocked, busy, plan, ctxTokens, ctxEstimated, compacting, revertedEdits } = cur
+  const { blocks: rawBlocks, harmAllows, oaBlocked, busy, plan, ctxTokens, ctxEstimated, compacting, revertedEdits } = cur
+  const [autoRuns, setAutoRuns] = useState<Record<string, AutomationRun[]>>({})
+  const [historyHint, setHistoryHint] = useState<Record<string, boolean>>({})
+  const [autoNonce, setAutoNonce] = useState(0)
+  const automationCtx = useRef<AutomationContext | null>(null)
+  const ctxGen = useRef(0)
+  const sessionGen = useRef(0)
+  const settledRuns = useRef(new Set<string>())
+  const historyLoaded = useRef(new Set<string>())
+  const seenFocus = useRef(focusedId)
+  if (seenFocus.current !== focusedId) {
+    seenFocus.current = focusedId
+    sessionGen.current += 1
+  }
+  const convsRef = useRef(convs)
+  convsRef.current = convs
+  const blocks = useMemo(() => {
+    const runs = autoRuns[focusedId] ?? []
+    const projected = runs.length === 0 ? rawBlocks : projectSessionAutomationRuns(rawBlocks, runs)
+    if (!historyHint[focusedId]) return projected
+    const id = 'automation-history:' + focusedId
+    if (projected.some((b) => b.kind === 'notice' && b.id === id)) return projected
+    return [{ kind: 'notice' as const, id, text: AUTOMATION_HISTORY_NOTE }, ...projected]
+  }, [rawBlocks, autoRuns, focusedId, historyHint])
 
   // focusedRef 让"只注册一次"的事件处理器读得到最新的聚焦会话 id（闭包里不能直接
   // 读 focusedId）。事件本身按信封里的 id 落，这个只用于判断"要不要动界面"。
@@ -179,8 +269,24 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
   cb.current = { permissions, onFilesChanged, onOpenPreview }
 
   useEffect(() => {
+    const boundary = (env: { sessionId?: string; automationSource?: { context: AutomationContext; runId: string } }) => {
+      const src = env.automationSource
+      if (!src?.runId) return 'plain' as const
+      if (!acceptAutomationContext(automationCtx, src.context)) return 'drop' as const
+      const sid = env.sessionId ?? ''
+      if (sid) {
+        blocksOf(sid, (prev) => ensureSubmittingNote(prev, src.runId))
+        if (!settledRuns.current.has(src.runId)) patch(sid, (s) => (s.busy ? s : { ...s, busy: true }))
+      }
+      return 'apply' as const
+    }
+    const settle = (env: { automationSource?: { context: AutomationContext; runId: string } }) => {
+      const src = env.automationSource
+      if (src?.runId && acceptAutomationContext(automationCtx, src.context)) settledRuns.current.add(src.runId)
+    }
     const offs = [
       onEnvelope(Events.AssistantDelta, (env) => {
+        if (boundary(env) === 'drop') return
         const { text } = env.payload
         blocksOf(sessionOf(env), (prev) => {
           const last = prev[prev.length - 1]
@@ -194,6 +300,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
       // streaming assistant block (creating one if the model thinks before speaking)
       // so the UI can show the chain of thought above the answer.
       onEnvelope(Events.AssistantThinking, (env) => {
+        if (boundary(env) === 'drop') return
         const { text } = env.payload
         blocksOf(sessionOf(env), (prev) => {
           const last = prev[prev.length - 1]
@@ -207,6 +314,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
       // output (the retry re-streams from scratch) and mark the break with a
       // divider carrying the reason and attempt number.
       onEnvelope(Events.Retry, (env) => {
+        if (boundary(env) === 'drop') return
         const { reason, attempt, maxAttempts } = env.payload
         blocksOf(sessionOf(env), (prev) => {
           const divider = { kind: 'retry' as const, id: nextID(), reason, attempt, maxAttempts }
@@ -218,6 +326,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         })
       }),
       onEnvelope(Events.ToolEvent, (env) => {
+        if (boundary(env) === 'drop') return
         const ev = env.payload
         // The main agent's TodoWrite plan drives the right-rail progress board, not a
         // stream row, so intercept it here (all of its started/progress/completed
@@ -295,6 +404,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         patch(sessionOf(env), (s) => ({ ...s, ctxTokens: env.payload.contextTokens, ctxEstimated: true }))
       }),
       onEnvelope(Events.TurnEnd, (env) => {
+        settle(env)
         const end = env.payload
         const sid = sessionOf(env)
         patch(sid, (s) => ({
@@ -381,6 +491,7 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
         })
       }),
       onEnvelope(Events.TurnError, (env) => {
+        settle(env)
         const { error } = env.payload
         const sid = sessionOf(env)
         patch(sid, (s) => ({ ...s, busy: false, compacting: false, compactionNoticeID: undefined }))
@@ -436,6 +547,91 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
     // 都是稳定引用(infoRef 是 ref;patch/blocksOf 经 useCallback 固定),所以这条
     // 依赖数组不会导致重订阅;其余外部回调经上面的 cb ref 取最新值。
   }, [infoRef, patch, blocksOf, observeImageGeneration, discardImageGenerationTurn])
+
+  useEffect(() => {
+    let dead = false
+    void getAutomationDefaults().then((defaults) => {
+      if (dead || !defaults?.available || !defaults.context?.viewId || automationCtx.current) return
+      automationCtx.current = defaults.context
+      setAutoNonce((n) => n + 1)
+    }).catch(() => {})
+    return () => { dead = true }
+  }, [])
+
+  useEffect(() => onEnvelope(Events.AutomationContextChanged, (env) => {
+    const next = env.payload?.context
+    if (next?.viewId) automationCtx.current = next
+    ctxGen.current += 1
+    settledRuns.current = new Set()
+    historyLoaded.current = new Set()
+    setAutoRuns({})
+    setHistoryHint({})
+    setConvs((prev) => {
+      let changed = false
+      const out: ConvMap = {}
+      for (const [id, state] of Object.entries(prev)) {
+        const cleared = clearAutomationProjection(state.blocks)
+        if (cleared !== state.blocks) changed = true
+        out[id] = cleared === state.blocks ? state : { ...state, blocks: cleared }
+      }
+      return changed ? out : prev
+    })
+  }), [])
+
+  useEffect(() => onEnvelope(Events.AutomationRunChanged, (env) => {
+    const run = env.payload?.run
+    if (!run?.id || !acceptAutomationContext(automationCtx, env.payload?.context)) return
+    const sid = run.sessionId || env.sessionId || ''
+    if (!sid) return
+    setAutoRuns((prev) => {
+      const current = prev[sid] ?? []
+      const merged = mergeAutomationRun(current.find((item) => item.id === run.id), run)
+      return { ...prev, [sid]: mergeRunList(current, [merged]) }
+    })
+    if (isAutomationTerminal(run.status)) settledRuns.current.add(run.id)
+    else if (!settledRuns.current.has(run.id) && automationRunActive(run.status)) {
+      patch(sid, (state) => (state.busy ? state : { ...state, busy: true }))
+    }
+    if (sid === focusedRef.current) setAutoNonce((n) => n + 1)
+  }), [patch])
+
+  useEffect(() => {
+    const sid = focusedId
+    const info = infoRef.current
+    const ctx = automationCtx.current
+    if (!sid || !ctx?.viewId || !info || info.sessionId !== sid || !info.cwd) return
+    const gen = sessionGen.current
+    const epoch = ctxGen.current
+    let dead = false
+    const accept = () => !dead && sessionGen.current === gen && ctxGen.current === epoch
+      && !!automationCtx.current && automationCtx.current.viewId === ctx.viewId && automationCtx.current.epoch === ctx.epoch
+    void (async () => {
+      try {
+        const runs = await loadSessionAutomationRuns(
+          (cursor) => listSessionAutomationRuns({ context: ctx, workspace: info.cwd, sessionId: sid, cursor, limit: 100 }),
+          accept,
+        )
+        if (!runs || !accept()) return
+        setAutoRuns((prev) => ({ ...prev, [sid]: mergeRunList(prev[sid] ?? [], runs) }))
+        const ordered = [...runs].sort((a, b) => (a.scheduledAtUTC || '').localeCompare(b.scheduledAtUTC || '') || a.id.localeCompare(b.id))
+        const newest = ordered[ordered.length - 1]
+        if (!newest) return
+        const conv = await getAutomationConversation({ context: ctx, taskId: newest.taskId, runId: newest.id })
+        if (!accept() || !conv || conv.context.viewId !== ctx.viewId || conv.context.epoch !== ctx.epoch) return
+        if (conv.historyPending) {
+          if (!historyLoaded.current.has(sid)) setHistoryHint((prev) => ({ ...prev, [sid]: true }))
+          return
+        }
+        historyLoaded.current.add(sid)
+        setHistoryHint((prev) => ({ ...prev, [sid]: false }))
+        const resumed = blocksFromResumed(conv.blocks, sid)
+        blocksOf(sid, (prev) => (prev.length === 0 ? prev : mergeResumedBlocks(prev, resumed)))
+      } catch {
+        // A failed page keeps the cards already projected from run events.
+      }
+    })()
+    return () => { dead = true }
+  }, [focusedId, autoNonce, infoRef, blocksOf])
 
   // Pin the conversation to the bottom while output streams, but only if the user
   // is already at (or near) the bottom — once they scroll up to read, streaming
@@ -594,60 +790,9 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
     const setCtxTokens = (v: number) => patch(sid, (st) => ({ ...st, ctxTokens: v }))
     const setCtxEstimated = (v: boolean) => patch(sid, (st) => ({ ...st, ctxEstimated: v }))
 
-    setBlocks(
-      (r.blocks ?? []).flatMap((b): Block[] => {
-        if (b.kind === 'user') {
-          // 录音请求：把末尾那行标记还原成录音卡片，正文换回那一句短的。
-          // 不做这一步，恢复出来的历史里会是几千字的提示词原文，而卡片没了。
-          //
-          // 按 stage 分流，三种消息各有各的还原方式：
-          //  - digest（速览）：补卡片。它是两段式里第一条，卡片属于它；
-          //  - doc（正式文档）：**不补卡片**。同一场录音只该有一张卡，而用户每点一次
-          //    「生成纪要文档」就多一条 doc 消息，补的话卡片会越堆越多；
-          //  - 无 stage：两段式之前那条一步到位的老消息，卡片和纪要都在它身上。
-          const found = parseRecordingMarker(b.text ?? '')
-          if (found) {
-            const { mark, stage } = found
-            const text = stage === 'digest' ? digestDisplayText(mark.title)
-              : stage === 'doc' ? docDisplayText(mark.title)
-                : minutesDisplayText(mark.title)
-            const user: Block = { kind: 'user', id: nextID(), questionId: b.questionId, text, ts: '', attachments: b.images?.map((i) => i.name) }
-            if (stage === 'doc') return [user]
-            return [{ kind: 'recording', id: nextID(), mark }, user]
-          }
-          return [{ kind: 'user', id: nextID(), questionId: b.questionId, text: b.text ?? '', ts: '', attachments: b.images?.map((i) => i.name) }]
-        }
-        if (b.kind === 'assistant') return [{ kind: 'assistant', id: nextID(), text: b.text ?? '', thinking: b.thinking, streaming: false, ts: '' }]
-        // Rebuild a tool execution card from the persisted result. Live-only
-        // details (colored diffs, file chips) aren't stored, so the card shows the
-        // tool, its target, and the result text. (Partial: a malformed block may
-        // arrive without its tool payload — treat every field as optional.)
-        const t: Partial<ResumedTool> = b.tool ?? {}
-        const out = (t.output ?? '').trim()
-        const lines = out ? out.split('\n').map((text) => ({ stream: t.isError ? 'stderr' : 'stdout', text })) : []
-        // 查找/搜索(文件列表模式)的结果文本重建成 matched 文件引用——实时的
-        // 文件事件不落盘,重建后恢复的卡片与实时共用同一个可折叠结构树渲染。
-        const matched = t.isError ? null : resumedMatchedFiles(t.toolName, t.input, out)
-        return [{
-          kind: 'tool',
-          id: nextID(),
-          sessionId: sid,
-          tool: {
-            type: t.isError ? 'failed' : 'completed',
-            toolName: t.toolName,
-            toolUseID: t.toolUseId,
-            inputTokens: t.inputTokens,
-            outputTokens: t.outputTokens,
-            input: t.input,
-            message: t.isError ? 'completed with error' : 'completed',
-            files: matched ?? (t.path ? [{ path: t.path }] : undefined),
-            output: matched ? [] : lines,
-            // 生图结果在历史里单独字段；卡片读的是 tool.data，恢复时要接回去。
-            data: t.imageGeneration,
-          },
-        }]
-      }),
-    )
+    // 录音标记、工具卡和生图结果的还原在 blocksFromResumed。这里仍整段替换空对话；
+    // 已经有直播流时不走这条，避免把后到的历史盖掉正在增长的回答。
+    setBlocks(blocksFromResumed(r.blocks, sid))
     // 引擎恢复会换掉助手块 id；按 questionId 从本机尾注映射贴回去。
     if (sid) {
       setBlocks((prev) => rehydrateAssistantNotes(prev, loadImageGenerationNoteMap(sid)))
@@ -711,10 +856,25 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
     setConvs((m) => dropConv(m, id))
   }
 
+  const hasLiveBlocks = (id: string) => (convsRef.current[id]?.blocks.length ?? 0) > 0
+  const noteAutomationPending = (id: string) => {
+    if (!id || historyLoaded.current.has(id)) return
+    setHistoryHint((prev) => ({ ...prev, [id]: true }))
+  }
+  const mergeAutomationHistory = (r: ResumedSession, isStale: () => boolean) => {
+    const sid = r.info?.sessionId ?? ''
+    if (!sid || isStale()) return
+    historyLoaded.current.add(sid)
+    setHistoryHint((prev) => ({ ...prev, [sid]: false }))
+    const resumed = blocksFromResumed(r.blocks, sid)
+    blocksOf(sid, (prev) => (prev.length === 0 ? prev : mergeResumedBlocks(prev, resumed)))
+  }
+
   return {
     blocks, harmAllows, oaBlocked, busy, plan, planOpen, setPlanOpen, busyBySession, lastUserBySession, dropSession,
     ctxTokens, ctxEstimated, compacting, revertedEdits,
     scrollRef, onChatScroll,
     send, submitFor, stop, compact, undo, pushError, reset, applyResumed, pushRecording,
+    hasLiveBlocks, noteAutomationPending, mergeAutomationHistory,
   }
 }

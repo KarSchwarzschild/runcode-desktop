@@ -80,6 +80,14 @@ function ToolInputView({ tool }: { tool: ToolEvent }) {
     case 'WebFetch':
       if (s('url')) return kvRows([['URL', s('url')], ['路线', networkRouteLabel(o.proxy)], o.diagnose_only === true && ['方式', '仅诊断，不抓取正文']])
       break
+    case 'automation_task':
+      return kvRows([
+        ['任务', s('name')],
+        ['计划时刻', s('scheduledAtUTC')],
+        ['工作区', s('workspace')],
+        ['执行位置', s('executionMode')],
+        !!s('prompt') && ['本次任务内容', s('prompt')],
+      ])
     case 'image_generate': {
       const data = tool.data && typeof tool.data === 'object' ? tool.data as Record<string, unknown> : null
       const intent = typeof data?.displayIntent === 'string' ? data.displayIntent : (tool.message || s('displayIntent') || s('prompt'))

@@ -39,6 +39,9 @@ func (a *App) PrepareExit(limit time.Duration) bool {
 			defer close(a.exit.done)
 			ctx, cancel := context.WithDeadline(context.Background(), a.exit.deadline)
 			defer cancel()
+			// Stop admitting new automation runs before waiting on recorder/session
+			// teardown. The DB stays open until those sessions and terminal facts are done.
+			automationErr := a.prepareAutomationShutdown(ctx)
 			var wg sync.WaitGroup
 			wg.Add(1)
 			go func() {
@@ -50,10 +53,11 @@ func (a *App) PrepareExit(limit time.Duration) bool {
 				debugLog("exit: close sessions: %v", err)
 			}
 			wg.Wait()
-			if err == nil {
+			a.stopAutomation(ctx)
+			if err == nil && automationErr == nil {
 				a.closeLocalUsage()
 			}
-			a.exit.complete = err == nil && !time.Now().After(a.exit.deadline)
+			a.exit.complete = err == nil && automationErr == nil && !time.Now().After(a.exit.deadline)
 		}()
 	})
 	timer := time.NewTimer(time.Until(a.exit.deadline))

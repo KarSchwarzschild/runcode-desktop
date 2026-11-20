@@ -24,19 +24,23 @@ import (
 
 // Event names emitted to the frontend.
 const (
-	EventAssistantDelta    = hostproto.EventAssistantDelta
-	EventAssistantThinking = hostproto.EventAssistantThinking
-	EventToolEvent         = hostproto.EventToolEvent
-	EventPermissionRequest = hostproto.EventPermissionRequest
-	EventTurnEnd           = hostproto.EventTurnEnd
-	EventTurnError         = hostproto.EventTurnError
-	EventWarning           = hostproto.EventWarning
-	EventSessionRenamed    = protocol.EventSessionRenamed
-	EventSessionStatus     = protocol.EventSessionStatus
-	EventOABlocked         = protocol.EventOABlocked
-	EventHarmAutoAllow     = protocol.EventHarmAutoAllow
-	EventPlanUpdated       = protocol.EventPlanUpdated
-	EventPassportChanged   = protocol.EventPassportChanged
+	EventAssistantDelta           = hostproto.EventAssistantDelta
+	EventAssistantThinking        = hostproto.EventAssistantThinking
+	EventToolEvent                = hostproto.EventToolEvent
+	EventPermissionRequest        = hostproto.EventPermissionRequest
+	EventTurnEnd                  = hostproto.EventTurnEnd
+	EventTurnError                = hostproto.EventTurnError
+	EventWarning                  = hostproto.EventWarning
+	EventSessionRenamed           = protocol.EventSessionRenamed
+	EventSessionStatus            = protocol.EventSessionStatus
+	EventOABlocked                = protocol.EventOABlocked
+	EventHarmAutoAllow            = protocol.EventHarmAutoAllow
+	EventAutomationTaskChanged    = protocol.EventAutomationTaskChanged
+	EventAutomationRunChanged     = protocol.EventAutomationRunChanged
+	EventAutomationServiceChanged = protocol.EventAutomationServiceChanged
+	EventAutomationContextChanged = protocol.EventAutomationContextChanged
+	EventPlanUpdated              = protocol.EventPlanUpdated
+	EventPassportChanged          = protocol.EventPassportChanged
 )
 
 // 阶段化计划模式的阶段与运行状态值,同样再导出(文档在 protocol 包)。
@@ -71,7 +75,7 @@ type (
 	SubmitQuestionRequest           = protocol.SubmitQuestionRequest
 	QuestionReceipt                 = hostproto.QuestionReceipt
 	// Turn stream, session state and approval — the engine host's contract.
-	SessionInfo       = hostproto.SessionInfo
+	SessionInfo       = protocol.ConversationInfo
 	AssistantDelta    = hostproto.AssistantDelta
 	Warning           = hostproto.Warning
 	TurnError         = hostproto.TurnError
@@ -146,4 +150,36 @@ type (
 
 	// Context audit (测试版专属).
 	ContextAuditInfo = protocol.ContextAuditInfo
+
+	// 自动化任务命令。
+	AutomationDefaults             = protocol.AutomationDefaults
+	ListAutomationTasksRequest     = protocol.ListAutomationTasksRequest
+	AutomationTaskPage             = protocol.AutomationTaskPage
+	CreateAutomationTaskRequest    = protocol.CreateAutomationTaskRequest
+	UpdateAutomationTaskRequest    = protocol.UpdateAutomationTaskRequest
+	SetAutomationTaskPausedRequest = protocol.SetAutomationTaskPausedRequest
+	RunAutomationTaskNowRequest    = protocol.RunAutomationTaskNowRequest
+	DeleteAutomationTaskRequest    = protocol.DeleteAutomationTaskRequest
+	AutomationTaskResult           = protocol.AutomationTaskResult
+	AutomationRunResult            = protocol.AutomationRunResult
+	DeleteAutomationTaskResult     = protocol.DeleteAutomationTaskResult
+	ListAutomationRunsRequest      = protocol.ListAutomationRunsRequest
+	SessionAutomationRunsRequest   = protocol.SessionAutomationRunsRequest
+	AutomationRunPage              = protocol.AutomationRunPage
+	OpenAutomationSessionRequest   = protocol.OpenAutomationSessionRequest
+	AutomationSessionResult        = protocol.AutomationSessionResult
+	AutomationConversationResult   = protocol.AutomationConversationResult
+	AutomationTaskChanged          = protocol.AutomationTaskChanged
+	AutomationRunChanged           = protocol.AutomationRunChanged
+	AutomationServiceChanged       = protocol.AutomationServiceChanged
+	AutomationContextChanged       = protocol.AutomationContextChanged
+	AutomationContext              = protocol.AutomationContext
+	AutomationEventSource          = protocol.AutomationEventSource
+	AutomationModelSummary         = protocol.AutomationModelSummary
+	AutomationTask                 = protocol.AutomationTask
+	AutomationTaskDraft            = protocol.AutomationTaskDraft
+	AutomationSchedule             = protocol.AutomationSchedule
+	AutomationRun                  = protocol.AutomationRun
+	AutomationOrigin               = protocol.AutomationOrigin
+	AutomationBindingSummary       = protocol.AutomationBindingSummary
 )

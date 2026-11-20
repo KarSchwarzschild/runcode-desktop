@@ -185,6 +185,7 @@ func (a *App) PassportLogin(scheme string) (PassportStatus, error) {
 		a.mu.Unlock()
 	}
 	// 失败：返回临时占位（LoggedIn=true 无档案），不缓存 —— 下次调用会重试 fetchMe
+	a.noteAutomationIdentity()
 	a.sink.Emit(EventPassportChanged, st)
 	// 首次登录（冷启动时无令牌，启动那次同步取不到）在此补上，之后本次运行不再拉。
 	go a.syncMarketOnce()
@@ -212,6 +213,7 @@ func (a *App) PassportLogout() {
 	a.mu.Lock()
 	a.passportUser = nil
 	a.mu.Unlock()
+	a.noteAutomationIdentity()
 	a.sink.Emit(EventPassportChanged, PassportStatus{})
 }
 
@@ -247,6 +249,7 @@ func (a *App) SetActiveTenant(tenantID string) error {
 		a.config.BaseURL = pc.BridgeBaseURL + tenantPathPrefix(tenantID) + "/v1"
 	}
 	a.mu.Unlock()
+	a.noteAutomationIdentity()
 	return nil
 }
 

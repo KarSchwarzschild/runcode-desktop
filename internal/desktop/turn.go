@@ -36,6 +36,9 @@ func (a *App) InjectMessage(sessionID, text string) (bool, error) {
 // the message as a fresh turn instead. Shared by InjectMessage and
 // InjectMessageWithImages.
 func (a *App) injectOrSend(sessionID, text string, images []llm.ImageSource, withImages bool) (bool, error) {
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return false, wireError(err)
+	}
 	e, err := a.entryOf(sessionID)
 	if err != nil {
 		return false, wireError(err)
@@ -58,6 +61,9 @@ func (a *App) injectOrSend(sessionID, text string, images []llm.ImageSource, wit
 // maintaining the desktop-side turn bookkeeping: the in-flight mirror, the
 // auto-title text, and the per-turn edit baseline reset.
 func (a *App) sendUserTurn(sessionID, text string, images []llm.ImageSource, withImages bool) error {
+	if err := a.rejectIfAutomationLeased(sessionID); err != nil {
+		return err
+	}
 	e, err := a.entryOf(sessionID)
 	if err != nil {
 		return err
