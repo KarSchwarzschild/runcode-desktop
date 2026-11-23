@@ -44,6 +44,11 @@ type CloseConfirmation struct {
 	Message         string
 }
 
+// MailExitSummary 是邮件独立退出摘要；不复用 automation.ExitSummary 字段。
+type MailExitSummary struct {
+	PendingCount int
+}
+
 // WindowLifecycleOptions are the platform-neutral lifecycle seams. The Wails
 // shell supplies window operations, native confirmation and process quit; the
 // scheduler/exit callbacks stay testable without a GUI.
@@ -56,12 +61,14 @@ type WindowLifecycleOptions struct {
 	ConfirmExit         func(ExitConfirmation, func(bool))
 	ConfirmClose        func(CloseConfirmation, func(CloseChoice))
 	ExitSummary         func(context.Context) (automation.ExitSummary, error)
-	HoldAdmission       func(reason string) (release func(), err error)
-	PrepareExit         func(time.Duration) bool
-	Quit                func()
-	ForceQuit           func()
-	QuitFallbackDelay   time.Duration
-	ReportError         func(error)
+	// MailExitSummary 可选；nil 保持原 automation-only 行为。
+	MailExitSummary   func(context.Context) (MailExitSummary, error)
+	HoldAdmission     func(reason string) (release func(), err error)
+	PrepareExit       func(time.Duration) bool
+	Quit              func()
+	ForceQuit         func()
+	QuitFallbackDelay time.Duration
+	ReportError       func(error)
 }
 
 // WindowHostOptions are the host-only half used by NewAppWindowLifecycle.
@@ -110,11 +117,29 @@ func NewAppWindowLifecycle(app *App, host WindowHostOptions) *WindowLifecycle {
 		ConfirmExit:         host.ConfirmExit,
 		ConfirmClose:        host.ConfirmClose,
 		ExitSummary:         app.automationExitSummary,
-		HoldAdmission:       app.holdAutomationAdmission,
-		PrepareExit:         func(limit time.Duration) bool { return app.PrepareExit(limit) },
-		Quit:                host.Quit,
-		ForceQuit:           host.ForceQuit,
-		ReportError:         host.ReportError,
+		MailExitSummary:     app.mailExitSummary,
+		HoldAdmission: func(reason string) (func(), error) {
+			autoRel, autoErr := app.holdAutomationAdmission(reason)
+			mailRel := app.holdMailAdmission(reason)
+			if autoErr != nil {
+				if mailRel != nil {
+					mailRel()
+				}
+				return nil, autoErr
+			}
+			return func() {
+				if autoRel != nil {
+					autoRel()
+				}
+				if mailRel != nil {
+					mailRel()
+				}
+			}, nil
+		},
+		PrepareExit: func(limit time.Duration) bool { return app.PrepareExit(limit) },
+		Quit:        host.Quit,
+		ForceQuit:   host.ForceQuit,
+		ReportError: host.ReportError,
 	})
 }
 
@@ -153,23 +178,27 @@ func (l *WindowLifecycle) CloseMainWindow() error {
 	if l.opts.ExitSummary != nil {
 		summary, summaryErr = l.opts.ExitSummary(ctx)
 	}
+	mailSum, mailErr := MailExitSummary{}, error(nil)
+	if l.opts.MailExitSummary != nil {
+		mailSum, mailErr = l.opts.MailExitSummary(ctx)
+	}
 	cancel()
 	if l.opts.ConfirmClose == nil {
 		l.cancelConfirmation()
 		return errors.New("原生关闭确认不可用")
 	}
-	l.opts.ConfirmClose(closeConfirmation(summary, summaryErr), l.finishClose)
+	l.opts.ConfirmClose(closeConfirmation(summary, summaryErr, mailSum, mailErr), l.finishClose)
 	return nil
 }
 
-func closeConfirmation(summary automation.ExitSummary, summaryErr error) CloseConfirmation {
-	known := summaryErr == nil
+func closeConfirmation(summary automation.ExitSummary, summaryErr error, mailSum MailExitSummary, mailErr error) CloseConfirmation {
+	known := summaryErr == nil && mailErr == nil
 	message := "请选择关闭方式：\n\n" +
 		"“隐藏主窗/是”：隐藏主窗口，后台自动化任务继续运行。\n" +
 		"“直接退出/否”：结束客户端，并停止后台自动化任务。\n" +
 		"“取消”、Esc 或关闭提示框：取消本次操作，继续使用客户端。"
 	switch {
-	case !known:
+	case summaryErr != nil:
 		message += "\n\n无法确认后台任务状态；直接退出可能中断正在执行的自动化任务。"
 	case summary.UnfinishedCount > 0:
 		message += fmt.Sprintf(
@@ -184,9 +213,21 @@ func closeConfirmation(summary automation.ExitSummary, summaryErr error) CloseCo
 	default:
 		message += "\n\n当前没有正在执行或等待执行的自动化任务。"
 	}
+	message += mailExitHint(mailSum, mailErr)
 	return CloseConfirmation{
 		EnabledCount: summary.EnabledCount, UnfinishedCount: summary.UnfinishedCount,
 		SummaryKnown: known, Message: message,
+	}
+}
+
+func mailExitHint(mailSum MailExitSummary, mailErr error) string {
+	switch {
+	case mailErr != nil:
+		return "\n\n无法确认待发邮件状态；直接退出可能中断邮件投递。"
+	case mailSum.PendingCount > 0:
+		return fmt.Sprintf("\n\n待发邮件：%d 封；直接退出会停止投递。", mailSum.PendingCount)
+	default:
+		return ""
 	}
 }
 
@@ -263,8 +304,13 @@ func (l *WindowLifecycle) RequestAppExit() error {
 	if l.opts.ExitSummary != nil {
 		summary, summaryErr = l.opts.ExitSummary(ctx)
 	}
+	mailSum, mailErr := MailExitSummary{}, error(nil)
+	if l.opts.MailExitSummary != nil {
+		mailSum, mailErr = l.opts.MailExitSummary(ctx)
+	}
 	cancel()
-	needsConfirmation := summaryErr != nil || summary.EnabledCount > 0 || summary.UnfinishedCount > 0
+	needsConfirmation := summaryErr != nil || summary.EnabledCount > 0 || summary.UnfinishedCount > 0 ||
+		mailErr != nil || mailSum.PendingCount > 0
 	if !needsConfirmation {
 		l.finishExit(true)
 		return nil
@@ -273,16 +319,16 @@ func (l *WindowLifecycle) RequestAppExit() error {
 		l.cancelConfirmation()
 		return errors.New("原生退出确认不可用")
 	}
-	l.opts.ConfirmExit(exitConfirmation(summary, summaryErr), l.finishExit)
+	l.opts.ConfirmExit(exitConfirmation(summary, summaryErr, mailSum, mailErr), l.finishExit)
 	return nil
 }
 
-func exitConfirmation(summary automation.ExitSummary, summaryErr error) ExitConfirmation {
-	known := summaryErr == nil
+func exitConfirmation(summary automation.ExitSummary, summaryErr error, mailSum MailExitSummary, mailErr error) ExitConfirmation {
+	known := summaryErr == nil && mailErr == nil
 	message := "请选择退出方式：\n\n" +
 		"“退出/是”：结束客户端并停止后台自动化任务。\n" +
 		"“取消/否”、Esc 或关闭窗口：取消退出，后台任务继续运行。"
-	if known {
+	if summaryErr == nil {
 		message += fmt.Sprintf(
 			"\n\n已开启任务：%d 个；未完成运行：%d 个。",
 			summary.EnabledCount, summary.UnfinishedCount,
@@ -290,6 +336,7 @@ func exitConfirmation(summary automation.ExitSummary, summaryErr error) ExitConf
 	} else {
 		message += "\n\n无法确认后台任务状态；退出可能中断正在执行的自动化任务。"
 	}
+	message += mailExitHint(mailSum, mailErr)
 	return ExitConfirmation{
 		EnabledCount: summary.EnabledCount, UnfinishedCount: summary.UnfinishedCount,
 		SummaryKnown: known, Message: message,

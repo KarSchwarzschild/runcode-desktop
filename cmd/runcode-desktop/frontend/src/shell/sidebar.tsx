@@ -24,7 +24,7 @@ export interface OpenSessionRow {
   automation?: { taskId: string; taskName: string }
 }
 
-type NavView = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
+type NavView = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage' | 'mail'
 
 // PROFILE_NAV 是收在底部用户区菜单里的几个入口：配置类的，配好之后很少再动。
 //
@@ -55,6 +55,7 @@ export function Sidebar({
   onNew,
   onResume,
   onOpenAutomation,
+  onOpenMail,
   userName,
   avatar,
   onLogout,
@@ -75,6 +76,7 @@ export function Sidebar({
   onNew: () => void
   onResume: (id: string) => void
   onOpenAutomation: () => void
+  onOpenMail: () => void
   // 已登录用户的展示名与头像;未登录为空——此时用户区照样渲染(里面装着设置/权限/
   // 记忆),只是不显示头像与「退出登录」。
   userName?: string
@@ -139,7 +141,7 @@ export function Sidebar({
             {!collapsed && n.label}
           </div>
         ))}
-        <MoreMenu collapsed={collapsed} onOpenAutomation={onOpenAutomation} />
+        <MoreMenu collapsed={collapsed} onOpenAutomation={onOpenAutomation} onOpenMail={onOpenMail} />
       </nav>
       {collapsed ? (
         // 撑开中间，让工作区按钮保持贴底（展开态由最近对话列表的 flex-1 承担）。

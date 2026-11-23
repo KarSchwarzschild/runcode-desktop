@@ -495,6 +495,11 @@ export interface CodexStatus {
   accountId?: string;
 }
 
+// Mirrors protocol.CommitMailContactImportRequest. CommitMailContactImportRequest 提交预览可接受行。
+export interface CommitMailContactImportRequest {
+  rows: MailContactImportRow[] | null;
+}
+
 // Mirrors protocol.CompactResult. CompactResult reports the in-memory message counts before and after an explicit compaction.
 export interface CompactResult {
   before: number;
@@ -502,6 +507,19 @@ export interface CompactResult {
   contextTokens: number;
   inputTokens: number;
   outputTokens: number;
+}
+
+// Mirrors protocol.ConfirmMailSendRequest. ConfirmMailSendRequest 消耗 confirmationId，入队 queued/scheduled。
+export interface ConfirmMailSendRequest {
+  confirmationId: string;
+}
+
+// Mirrors protocol.ConfirmMailSendResult. ConfirmMailSendResult 报告投递意图已入队；真实 SMTP 由独立 dispatcher 异步执行。
+export interface ConfirmMailSendResult {
+  submissionId: string;
+  status: string;
+  draftId: string;
+  revision: number;
 }
 
 // Mirrors protocol.ConfirmMailTestReceiptRequest. ConfirmMailTestReceiptRequest 记录本人在网页核实收到测试信。
@@ -543,6 +561,11 @@ export interface CreateAutomationTaskRequest {
   ownerScope?: string;
 }
 
+// Mirrors protocol.CreateMailDraftRequest. CreateMailDraftRequest 新建空白用户草稿。
+export interface CreateMailDraftRequest {
+  accountId?: string;
+}
+
 // Mirrors protocol.CustomModel. CustomModel 是用户自定义的直连模型接入点，与通行证平台模型并列显示在模型 选择器里。Provider 通常是引擎 provider registry 的名称（openai/ openai-responses/anthropic），由 llm.IsRegistered 校验而非本仓库的名单；旧配置 没有该字段时由桌面端按 openai 兼容处理。 唯一的例外是 "codex"：它是**外壳层**的服务商，引擎注册表里没有这个名字。 桌面端在解析时把它翻译成 openai-responses（Codex 说的就是 Responses 协议）， 并把 Base URL 指向本地那个负责补凭据与指纹头的小代理，见 internal/codexproxy。密钥字段仅用于桌面端持久化， ListCustomModels 对外返回时必须清空，只通过 HasAPIKey 暴露是否已配置。
 export interface CustomModel {
   supportsImages?: boolean;
@@ -569,6 +592,18 @@ export interface DeleteAutomationTaskRequest {
 export interface DeleteAutomationTaskResult {
   context: AutomationContext;
   taskId: string;
+}
+
+// Mirrors protocol.DeleteMailContactRequest. DeleteMailContactRequest 删除联系人。
+export interface DeleteMailContactRequest {
+  id: string;
+  expectedRevision: number;
+}
+
+// Mirrors protocol.DeleteMailGroupRequest. DeleteMailGroupRequest 删除分组。
+export interface DeleteMailGroupRequest {
+  id: string;
+  expectedRevision: number;
 }
 
 // Mirrors protocol.DirectoryAccessChanged. DirectoryAccessChanged 使某一工作区的目录视图失效。
@@ -644,6 +679,11 @@ export interface Error {
 export interface FileReference {
   path: string;
   kind?: string;
+}
+
+// Mirrors protocol.GetMailDraftRequest. GetMailDraftRequest 读取单草稿。
+export interface GetMailDraftRequest {
+  id: string;
 }
 
 // Mirrors protocol.HarmAutoAllow. HarmAutoAllow is the payload of EventHarmAutoAllow: a sanitized record of a harm-gate decision (no raw command or path).
@@ -737,6 +777,25 @@ export interface ListAutomationTasksRequest {
   ownerScope?: string;
 }
 
+// Mirrors protocol.ListMailContactsRequest. ListMailContactsRequest 搜索/分页通信录。
+export interface ListMailContactsRequest {
+  query?: string;
+  limit?: number;
+  offset?: number;
+}
+
+// Mirrors protocol.ListMailDraftsRequest. ListMailDraftsRequest 分页草稿。
+export interface ListMailDraftsRequest {
+  limit?: number;
+  offset?: number;
+}
+
+// Mirrors protocol.ListMailGroupsRequest. ListMailGroupsRequest 分页分组。
+export interface ListMailGroupsRequest {
+  limit?: number;
+  offset?: number;
+}
+
 // Mirrors protocol.MCPServerInfo. MCPServerInfo is one configured MCP server plus its live connection state, for the UI's MCP management page.
 export interface MCPServerInfo {
   name: string;
@@ -795,6 +854,19 @@ export interface MailAccountView {
   lastTestSubmissionId?: string;
 }
 
+// Mirrors protocol.MailAddressView. MailAddressView 是可编辑地址芯片。
+export interface MailAddressView {
+  name?: string;
+  address: string;
+}
+
+// Mirrors protocol.MailAttachmentPreview. MailAttachmentPreview 是确认框里展示的已冻结附件。
+export interface MailAttachmentPreview {
+  name: string;
+  bytes: number;
+  sha256: string;
+}
+
 // Mirrors protocol.MailConnectionTestResult. MailConnectionTestResult 是连接测试结果；成功时带 ConfigFingerprint 供保存校验。
 export interface MailConnectionTestResult {
   ok: boolean;
@@ -803,6 +875,77 @@ export interface MailConnectionTestResult {
   configFingerprint?: string;
   errorCategory?: string;
   message: string;
+}
+
+// Mirrors protocol.MailContactImportPreview.
+export interface MailContactImportPreview {
+  accept: MailContactImportRow[] | null;
+  skip: string[] | null;
+}
+
+// Mirrors protocol.MailContactImportRow. MailContactImportRow 是 CSV 预览/提交的一行。
+export interface MailContactImportRow {
+  name: string;
+  emails: string[] | null;
+}
+
+// Mirrors protocol.MailContactView. MailContactView 是通信录条目。
+export interface MailContactView {
+  id: string;
+  revision: number;
+  name: string;
+  emails: string[] | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+// Mirrors protocol.MailDraftView. MailDraftView 是草稿编辑视图；含模型提案原文供对照，预览用用户修订字段。
+export interface MailDraftView {
+  id: string;
+  revision: number;
+  status: string;
+  accountId: string;
+  subject: string;
+  bodyMarkdown: string;
+  to: MailAddressView[] | null;
+  cc: MailAddressView[] | null;
+  bcc: MailAddressView[] | null;
+  sendMode: string;
+  dispatchMode: string;
+  scheduledLocal?: string;
+  timeZone?: string;
+  proposalMd?: string;
+  updatedAtUtc: string;
+  createdAtUtc: string;
+}
+
+// Mirrors protocol.MailGroupView. MailGroupView 是分组。
+export interface MailGroupView {
+  id: string;
+  revision: number;
+  name: string;
+  memberIds: string[] | null;
+  createdAtUtc: string;
+  updatedAtUtc: string;
+}
+
+// Mirrors protocol.MailSendPreview. MailSendPreview 是本人确认前的只读定稿摘要。
+export interface MailSendPreview {
+  draftId: string;
+  revision: number;
+  accountId: string;
+  subject: string;
+  bodyMarkdown: string;
+  to: MailAddressView[] | null;
+  cc: MailAddressView[] | null;
+  bcc: MailAddressView[] | null;
+  attachments: MailAttachmentPreview[] | null;
+  sendMode: string;
+  dispatchMode: string;
+  scheduledLocal?: string;
+  timeZone?: string;
+  scheduledAtUtc?: string;
+  digest: string;
 }
 
 // Mirrors protocol.MailSettings. MailSettings 是设置页加载的脱敏视图。
@@ -1018,11 +1161,29 @@ export interface PlatformImageCapability {
   supportsImages: boolean;
 }
 
+// Mirrors protocol.PrepareMailSendRequest. PrepareMailSendRequest 校验并冻结当前修订，返回一次性确认令牌与只读预览。
+export interface PrepareMailSendRequest {
+  draftId: string;
+  expectedRevision: number;
+}
+
+// Mirrors protocol.PrepareMailSendResult. PrepareMailSendResult 含 confirmationId 与只读预览；不发信。
+export interface PrepareMailSendResult {
+  confirmationId: string;
+  expiresAtUtc: string;
+  preview: MailSendPreview;
+}
+
 // Mirrors protocol.PreviewLifecycle. PreviewLifecycle 让桌面文件预览缓存与会话实例重建对齐。 Phase 为 invalidating／ready／closed。ready 携带新的 host generation； invalidating／closed 可将 Generation 留空。不覆盖聊天内静态 HTML 预览预算。
 export interface PreviewLifecycle {
   sessionId: string;
   phase: string;
   generation?: string;
+}
+
+// Mirrors protocol.PreviewMailContactImportRequest. PreviewMailContactImportRequest / Result。
+export interface PreviewMailContactImportRequest {
+  rows: MailContactImportRow[] | null;
 }
 
 // Mirrors protocol.ProjectContextInfo. ProjectContextInfo is the workspace's project-instructions file (RUNCODE.md or AGENT.md), for viewing and editing.
@@ -1321,6 +1482,38 @@ export interface SaveMailAccountRequest {
   configFingerprint: string;
   expectedRevision: number;
   enabled: boolean;
+}
+
+// Mirrors protocol.SaveMailContactRequest. SaveMailContactRequest 新建或 CAS 更新联系人。
+export interface SaveMailContactRequest {
+  id?: string;
+  name: string;
+  emails: string[] | null;
+  expectedRevision: number;
+}
+
+// Mirrors protocol.SaveMailDraftRequest. SaveMailDraftRequest 保存用户修订（CAS）。
+export interface SaveMailDraftRequest {
+  id: string;
+  expectedRevision: number;
+  accountId: string;
+  subject: string;
+  bodyMarkdown: string;
+  to: MailAddressView[] | null;
+  cc: MailAddressView[] | null;
+  bcc: MailAddressView[] | null;
+  sendMode: string;
+  dispatchMode: string;
+  scheduledLocal?: string;
+  timeZone?: string;
+}
+
+// Mirrors protocol.SaveMailGroupRequest. SaveMailGroupRequest 新建或 CAS 更新分组。
+export interface SaveMailGroupRequest {
+  id?: string;
+  name: string;
+  memberIds: string[] | null;
+  expectedRevision: number;
 }
 
 // Mirrors protocol.SaveModelContextSettingsRequest. SaveModelContextSettingsRequest replaces or clears one model preference.
@@ -1821,4 +2014,10 @@ export interface VisionSettings {
 // Mirrors protocol.Warning. Warning is a non-fatal diagnostic surfaced to the UI.
 export interface Warning {
   message: string;
+}
+
+// Mirrors protocol.WindowCapabilitiesView. WindowCapabilitiesView 是宿主窗口能力只读快照；不查自动化任务库。
+export interface WindowCapabilitiesView {
+  available: boolean;
+  backgroundSupported: boolean;
 }

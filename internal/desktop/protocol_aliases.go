@@ -129,17 +129,41 @@ type (
 	SaveCustomModelRequest = protocol.SaveCustomModelRequest
 
 	// 邮箱账号设置。
-	MailSettings                  = protocol.MailSettings
-	MailAccountView               = protocol.MailAccountView
-	SaveMailAccountRequest        = protocol.SaveMailAccountRequest
-	DisableMailAccountRequest     = protocol.DisableMailAccountRequest
-	RemoveMailAccountRequest      = protocol.RemoveMailAccountRequest
-	TestMailConnectionRequest     = protocol.TestMailConnectionRequest
-	MailConnectionTestResult      = protocol.MailConnectionTestResult
-	SendMailTestToSelfRequest     = protocol.SendMailTestToSelfRequest
-	MailTestSendResult            = protocol.MailTestSendResult
-	ConfirmMailTestReceiptRequest = protocol.ConfirmMailTestReceiptRequest
-	OpenMailOfficialURLRequest    = protocol.OpenMailOfficialURLRequest
+	MailSettings                    = protocol.MailSettings
+	MailAccountView                 = protocol.MailAccountView
+	SaveMailAccountRequest          = protocol.SaveMailAccountRequest
+	DisableMailAccountRequest       = protocol.DisableMailAccountRequest
+	RemoveMailAccountRequest        = protocol.RemoveMailAccountRequest
+	TestMailConnectionRequest       = protocol.TestMailConnectionRequest
+	MailConnectionTestResult        = protocol.MailConnectionTestResult
+	SendMailTestToSelfRequest       = protocol.SendMailTestToSelfRequest
+	MailTestSendResult              = protocol.MailTestSendResult
+	ConfirmMailTestReceiptRequest   = protocol.ConfirmMailTestReceiptRequest
+	OpenMailOfficialURLRequest      = protocol.OpenMailOfficialURLRequest
+	MailAddressView                 = protocol.MailAddressView
+	MailContactView                 = protocol.MailContactView
+	MailGroupView                   = protocol.MailGroupView
+	MailDraftView                   = protocol.MailDraftView
+	ListMailContactsRequest         = protocol.ListMailContactsRequest
+	SaveMailContactRequest          = protocol.SaveMailContactRequest
+	DeleteMailContactRequest        = protocol.DeleteMailContactRequest
+	ListMailGroupsRequest           = protocol.ListMailGroupsRequest
+	SaveMailGroupRequest            = protocol.SaveMailGroupRequest
+	DeleteMailGroupRequest          = protocol.DeleteMailGroupRequest
+	MailContactImportRow            = protocol.MailContactImportRow
+	PreviewMailContactImportRequest = protocol.PreviewMailContactImportRequest
+	MailContactImportPreview        = protocol.MailContactImportPreview
+	CommitMailContactImportRequest  = protocol.CommitMailContactImportRequest
+	ListMailDraftsRequest           = protocol.ListMailDraftsRequest
+	GetMailDraftRequest             = protocol.GetMailDraftRequest
+	SaveMailDraftRequest            = protocol.SaveMailDraftRequest
+	CreateMailDraftRequest          = protocol.CreateMailDraftRequest
+	PrepareMailSendRequest          = protocol.PrepareMailSendRequest
+	PrepareMailSendResult           = protocol.PrepareMailSendResult
+	MailSendPreview                 = protocol.MailSendPreview
+	MailAttachmentPreview           = protocol.MailAttachmentPreview
+	ConfirmMailSendRequest          = protocol.ConfirmMailSendRequest
+	ConfirmMailSendResult           = protocol.ConfirmMailSendResult
 
 	// ChatGPT(Codex)登录。
 	CodexDeviceCode = protocol.CodexDeviceCode

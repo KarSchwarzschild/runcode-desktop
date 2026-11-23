@@ -86,6 +86,17 @@ describe('toolVerbTarget', () => {
     expect(toolVerbTarget(ev({ toolName: 'CustomTool' })).verb).toBe('CustomTool')
     expect(toolVerbTarget(ev({})).verb).toBe('工具')
   })
+
+  it('maps send_email to 准备邮件 + subject', () => {
+    expect(toolVerbTarget(ev({ toolName: 'send_email', input: { subject: '本周教学周报' } }))).toEqual({
+      verb: '准备邮件',
+      target: '本周教学周报',
+    })
+  })
+
+  it('maps search_contacts to query', () => {
+    expect(toolVerbTarget(ev({ toolName: 'search_contacts', input: { query: '王老师' } })).target).toBe('王老师')
+  })
   it('shows an MCP tool by its Chinese name, or at least without the mcp__ plumbing', () => {
     expect(toolVerbTarget(ev({ toolName: 'mcp__oa__my_todo' })).verb).toBe('待办事项')
     expect(toolVerbTarget(ev({ toolName: 'mcp__x__y' })).verb).toBe('y')

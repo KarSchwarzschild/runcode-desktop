@@ -17,6 +17,7 @@ export const TOOL_ICON: Record<string, string> = {
   AskUser: 'chat', open_preview: 'file',
   Task: 'bot', Skill: 'book', Remember: 'sparkles',
   Wait: 'clock', GetCurrentTime: 'clock', install_runtime: 'terminal', automation_task: 'clock',
+  search_contacts: 'search', send_email: 'send',
   'general-purpose': 'bot', 'code-reviewer': 'shield', 'code-explorer': 'search',
   planner: 'grid', debugger: 'terminal',
 }

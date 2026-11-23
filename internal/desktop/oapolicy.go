@@ -23,12 +23,14 @@ package desktop
 //
 // Bash 本来就要逐次审批,用户点了确认就是用户自己的决定,那是知情的授权而不是模型
 // 的自作主张。而且这是一个办公助手,封掉 Bash 等于让它在锁定后基本不能干活。这里
-// 封的是**不需要用户点头就能出网**的 WebSearch、WebFetch 与 image_generate。
+// 封的是**不需要用户点头就能出网**的 WebSearch、WebFetch、image_generate，
+// 以及会把 OA 内容带进外发草稿/SMTP 链路的 send_email。search_contacts 只读本地库，不封。
 
 import (
 	"context"
 
 	"github.com/wt68/runcode/internal/imagegentool"
+	"github.com/wt68/runcode/internal/mailtool"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tools/webfetch"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tools/websearch"
@@ -45,9 +47,10 @@ const reasonOALocked permissions.Reason = "oa_locked"
 // 引用它会让整个发布链路(GOWORK=off,引擎按 go.mod 的 tag 解析)编不过——而 OA 这条
 // 功能本身并不需要那次引擎改动。零值实例上的 Name() 两个版本都有,耦合强度一样。
 var oaEgressTools = map[string]bool{
-	websearch.Tool{}.Name(): true,
-	webfetch.Tool{}.Name():  true,
-	imagegentool.Name:       true,
+	websearch.Tool{}.Name():  true,
+	webfetch.Tool{}.Name():   true,
+	imagegentool.Name:        true,
+	mailtool.SendEmailName:   true, // 外发草稿/SMTP；search_contacts 故意不在此列
 }
 
 // oaLockPolicy 在会话被 OA 锁定后拒绝出网工具,其余一律透传给内层策略。

@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"testing"
 
+	"github.com/wt68/runcode/internal/mail"
 	"github.com/wt68/runcode/internal/protocol"
 )
 
@@ -37,6 +38,18 @@ func (m *mockMailSMTP) SendSelfTest(_ context.Context, _ string, _ int, username
 		m.sendStatus = "accepted"
 	}
 	return m.sendStatus, m.sendDetail, m.sendErr
+}
+
+func (m *mockMailSMTP) SendMessage(_ context.Context, _ string, _ int, username, _ string, msg mail.OutboundMessage) (mailDeliveryResult, error) {
+	m.sends.Add(1)
+	m.lastUser = username
+	if len(msg.To) > 0 {
+		m.lastToHint = msg.To[0]
+	}
+	if m.sendStatus == "" {
+		m.sendStatus = "accepted"
+	}
+	return mailDeliveryResult{Status: m.sendStatus, Detail: m.sendDetail, MessageID: msg.MessageID}, m.sendErr
 }
 
 func withMockMailSMTP(t *testing.T, m mailSMTPClient) {

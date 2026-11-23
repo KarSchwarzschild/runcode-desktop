@@ -103,11 +103,29 @@ type automationCursor struct {
 }
 
 // SetWindowController installs the native close/exit host. It is shell wiring,
-// not a frontend command.
+// not a frontend command. Also mirrors into the independent windowCtrl used by
+// GetWindowCapabilities（mail 不得读 autoCtl.window）。
 func (a *App) SetWindowController(w WindowController) {
 	a.autoCtl.mu.Lock()
 	a.autoCtl.window = w
 	a.autoCtl.mu.Unlock()
+	a.windowMu.Lock()
+	a.windowCtrl = w
+	a.windowMu.Unlock()
+}
+
+// GetWindowCapabilities 只读独立窗口引用；不初始化自动化、不查任务库。
+func (a *App) GetWindowCapabilities() (appwire.WindowCapabilitiesView, error) {
+	a.windowMu.Lock()
+	w := a.windowCtrl
+	a.windowMu.Unlock()
+	if w == nil {
+		return appwire.WindowCapabilitiesView{Available: false, BackgroundSupported: false}, nil
+	}
+	return appwire.WindowCapabilitiesView{
+		Available:           true,
+		BackgroundSupported: w.BackgroundSupported(),
+	}, nil
 }
 
 // GetAutomationDefaults returns the context bootstrap. A missing task store

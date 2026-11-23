@@ -182,6 +182,22 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"SendMailTestToSelf":     hostproto.CommandTrigger,
 	"OpenMailOfficialURL":    hostproto.CommandTrigger,
 
+	// 通信录 / 草稿业务页。
+	"ListMailContacts":         hostproto.CommandQuery,
+	"SaveMailContact":          hostproto.CommandIdempotentSet,
+	"DeleteMailContact":        hostproto.CommandIdempotentSet,
+	"ListMailGroups":           hostproto.CommandQuery,
+	"SaveMailGroup":            hostproto.CommandIdempotentSet,
+	"DeleteMailGroup":          hostproto.CommandIdempotentSet,
+	"PreviewMailContactImport": hostproto.CommandQuery,
+	"CommitMailContactImport":  hostproto.CommandTrigger,
+	"ListMailDrafts":           hostproto.CommandQuery,
+	"GetMailDraft":             hostproto.CommandQuery,
+	"CreateMailDraft":          hostproto.CommandTrigger,
+	"SaveMailDraft":            hostproto.CommandIdempotentSet,
+	"PrepareMailSend":          hostproto.CommandTrigger,
+	"ConfirmMailSend":          hostproto.CommandTrigger,
+
 	// 自动化任务。查询可重试；暂停是幂等目标态；创建靠 clientRequestId 去重，
 	// 但仍是一次会落库的变更。关闭和退出交给宿主，没有注入时明确失败。
 	"GetAutomationDefaults":     hostproto.CommandQuery,
@@ -197,4 +213,5 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"OpenAutomationSession":     hostproto.CommandTrigger,
 	"CloseMainWindow":           hostproto.CommandTrigger,
 	"RequestAppExit":            hostproto.CommandTrigger,
+	"GetWindowCapabilities":     hostproto.CommandQuery,
 }

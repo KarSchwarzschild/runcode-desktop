@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationRunResult, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ConfirmMailTestReceiptRequest, ContextAuditInfo, CreateAutomationTaskRequest, CustomModel, DeleteAutomationTaskRequest, DeleteAutomationTaskResult, DirectoryAccessRequest, DirectoryAccessView, DisableMailAccountRequest, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, MCPServerInfo, MCPServerInput, MailConnectionTestResult, MailSettings, MailTestSendResult, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenMailOfficialURLRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecorderSettingsPatch, RecordingInfo, RemoveMailAccountRequest, ResumedSession, RunAutomationTaskNowRequest, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveMailAccountRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SendMailTestToSelfRequest, SessionAutomationRunsRequest, SessionInfo, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, TestMailConnectionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationRunResult, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CommitMailContactImportRequest, CompactResult, ConfirmMailSendRequest, ConfirmMailSendResult, ConfirmMailTestReceiptRequest, ContextAuditInfo, CreateAutomationTaskRequest, CreateMailDraftRequest, CustomModel, DeleteAutomationTaskRequest, DeleteAutomationTaskResult, DeleteMailContactRequest, DeleteMailGroupRequest, DirectoryAccessRequest, DirectoryAccessView, DisableMailAccountRequest, EditDiff, EditRecord, GetMailDraftRequest, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, ListMailContactsRequest, ListMailDraftsRequest, ListMailGroupsRequest, MCPServerInfo, MCPServerInput, MailConnectionTestResult, MailContactImportPreview, MailContactView, MailDraftView, MailGroupView, MailSettings, MailTestSendResult, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenMailOfficialURLRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, PrepareMailSendRequest, PrepareMailSendResult, PreviewMailContactImportRequest, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecorderSettingsPatch, RecordingInfo, RemoveMailAccountRequest, ResumedSession, RunAutomationTaskNowRequest, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveMailAccountRequest, SaveMailContactRequest, SaveMailDraftRequest, SaveMailGroupRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SendMailTestToSelfRequest, SessionAutomationRunsRequest, SessionInfo, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, TestMailConnectionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings, WindowCapabilitiesView } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -121,10 +121,22 @@ export function codexStatus(): Promise<CodexStatus> {
   return call<CodexStatus>('CodexStatus');
 }
 
+// CommitMailContactImport 提交导入。
+// kind: trigger
+export function commitMailContactImport(req: CommitMailContactImportRequest): Promise<MailContactView[] | null> {
+  return call<MailContactView[] | null>('CommitMailContactImport', req);
+}
+
 // Compact summarizes the oldest turns now and reports the message counts.
 // kind: trigger
 export function compact(sessionID: string): Promise<CompactResult> {
   return call<CompactResult>('Compact', sessionID);
+}
+
+// ConfirmMailSend 校验令牌后写入 queued/scheduled 投递意图；SMTP 由独立 dispatcher 执行。
+// kind: trigger
+export function confirmMailSend(req: ConfirmMailSendRequest): Promise<ConfirmMailSendResult> {
+  return call<ConfirmMailSendResult>('ConfirmMailSend', req);
 }
 
 // ConfirmMailTestReceipt 记录本人核实收到测试信。
@@ -143,6 +155,12 @@ export function contextAuditStatus(): Promise<ContextAuditInfo> {
 // kind: trigger
 export function createAutomationTask(req: CreateAutomationTaskRequest): Promise<AutomationTaskResult> {
   return call<AutomationTaskResult>('CreateAutomationTask', req);
+}
+
+// CreateMailDraft 新建空白用户草稿。
+// kind: trigger
+export function createMailDraft(req: CreateMailDraftRequest): Promise<MailDraftView> {
+  return call<MailDraftView>('CreateMailDraft', req);
 }
 
 // DeleteAgent removes a sub-agent file in the given scope and returns the list.
@@ -167,6 +185,18 @@ export function deleteCustomModel(name: string): Promise<CustomModel[] | null> {
 // kind: idempotent-set
 export function deleteMCPServer(name: string): Promise<void> {
   return call<void>('DeleteMCPServer', name);
+}
+
+// DeleteMailContact 删除联系人。
+// kind: idempotent-set
+export function deleteMailContact(req: DeleteMailContactRequest): Promise<void> {
+  return call<void>('DeleteMailContact', req);
+}
+
+// DeleteMailGroup 删除分组。
+// kind: idempotent-set
+export function deleteMailGroup(req: DeleteMailGroupRequest): Promise<void> {
+  return call<void>('DeleteMailGroup', req);
 }
 
 // DeleteRecording 删掉一场录音（连同音频）。未知 id 是幂等 no-op。
@@ -241,6 +271,12 @@ export function getLocalUsageTenants(): Promise<PassportTenant[] | null> {
   return call<PassportTenant[] | null>('GetLocalUsageTenants');
 }
 
+// GetMailDraft 读取草稿。
+// kind: query
+export function getMailDraft(req: GetMailDraftRequest): Promise<MailDraftView> {
+  return call<MailDraftView>('GetMailDraft', req);
+}
+
 // GetMailSettings 返回脱敏邮箱设置；不含密码。
 // kind: query
 export function getMailSettings(): Promise<MailSettings> {
@@ -287,6 +323,12 @@ export function getUsageRequests(req: UsageRequestsQuery): Promise<UsageRequests
 // kind: query
 export function getVisionSettings(): Promise<VisionSettings> {
   return call<VisionSettings>('GetVisionSettings');
+}
+
+// GetWindowCapabilities 只读独立窗口引用；不初始化自动化、不查任务库。
+// kind: query
+export function getWindowCapabilities(): Promise<WindowCapabilitiesView> {
+  return call<WindowCapabilitiesView>('GetWindowCapabilities');
 }
 
 // GrantDirectoryAccess grants the explicitly selected directory and scope.
@@ -395,6 +437,24 @@ export function listImageGenerationModels(tenantID: string): Promise<ImageGenera
 // kind: query
 export function listMCPServers(): Promise<MCPServerInfo[] | null> {
   return call<MCPServerInfo[] | null>('ListMCPServers');
+}
+
+// ListMailContacts 列出通信录。
+// kind: query
+export function listMailContacts(req: ListMailContactsRequest): Promise<MailContactView[] | null> {
+  return call<MailContactView[] | null>('ListMailContacts', req);
+}
+
+// ListMailDrafts 列出草稿。
+// kind: query
+export function listMailDrafts(req: ListMailDraftsRequest): Promise<MailDraftView[] | null> {
+  return call<MailDraftView[] | null>('ListMailDrafts', req);
+}
+
+// ListMailGroups 列出分组。
+// kind: query
+export function listMailGroups(req: ListMailGroupsRequest): Promise<MailGroupView[] | null> {
+  return call<MailGroupView[] | null>('ListMailGroups', req);
 }
 
 // ListRecordings 列出历史录音，最近的在前。 顺带做崩溃恢复：进程被强杀过的会话在这里被标成 Interrupted，被截断的 WAV 也 在这里修好——列表是用户第一眼会看到的地方，修复放在这里最自然。 RecoverSessions 只回报它救过的那几场，所以完整清单要另取一次。
@@ -575,6 +635,18 @@ export function planStatus(sessionID: string): Promise<PlanRun> {
 // kind: idempotent-set
 export function planUpdate(sessionID: string, doc: PlanDoc): Promise<PlanRun> {
   return call<PlanRun>('PlanUpdate', sessionID, doc);
+}
+
+// PrepareMailSend 校验草稿修订、冻结附件字节、签发一次性 confirmationId。 不 SMTP；OA 锁在此与 Confirm 双检。
+// kind: trigger
+export function prepareMailSend(req: PrepareMailSendRequest): Promise<PrepareMailSendResult> {
+  return call<PrepareMailSendResult>('PrepareMailSend', req);
+}
+
+// PreviewMailContactImport 预览 CSV 导入。
+// kind: query
+export function previewMailContactImport(req: PreviewMailContactImportRequest): Promise<MailContactImportPreview> {
+  return call<MailContactImportPreview>('PreviewMailContactImport', req);
 }
 
 // ReadArtifact returns UTF-8 text through a live source-session reference.
@@ -773,6 +845,24 @@ export function saveMCPServer(in_: MCPServerInput): Promise<void> {
 // kind: idempotent-set
 export function saveMailAccount(req: SaveMailAccountRequest): Promise<MailSettings> {
   return call<MailSettings>('SaveMailAccount', req);
+}
+
+// SaveMailContact 新建或 CAS 更新联系人。
+// kind: idempotent-set
+export function saveMailContact(req: SaveMailContactRequest): Promise<MailContactView> {
+  return call<MailContactView>('SaveMailContact', req);
+}
+
+// SaveMailDraft 以 expectedRevision 做 CAS 保存用户编辑；不发信。
+// kind: idempotent-set
+export function saveMailDraft(req: SaveMailDraftRequest): Promise<MailDraftView> {
+  return call<MailDraftView>('SaveMailDraft', req);
+}
+
+// SaveMailGroup 新建或 CAS 更新分组。
+// kind: idempotent-set
+export function saveMailGroup(req: SaveMailGroupRequest): Promise<MailGroupView> {
+  return call<MailGroupView>('SaveMailGroup', req);
 }
 
 // SaveModelContextSettings only persists a preference; it never interrupts a turn.

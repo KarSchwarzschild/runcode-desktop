@@ -6,7 +6,9 @@ import { networkRouteLabel } from '@/core/network-route'
 import { type ToolEvent } from '@/core/bridge'
 import { useStickToBottom } from '@/hooks/use-stick-to-bottom'
 import { buildFileTree, classifyPreview, fileColor, kindIcon, type FileNode } from '@/preview/classify'
+import { BTN } from '@/ui/tokens'
 import { formatInput, lineClass, toolInputObj, parseToolInput } from './tool-text'
+import { parseMailDraftReady, useMailDraftActions } from './mail-draft-actions'
 
 // kvRows renders a compact key→value table for a tool's structured input.
 function kvRows(rows: ([string, unknown] | false | null | undefined)[]) {
@@ -100,8 +102,25 @@ function ToolInputView({ tool }: { tool: ToolEvent }) {
         !!s('prompt') && !intent && ['提示', s('prompt')],
       ])
     }
+    case 'search_contacts':
+      return kvRows([['查询', s('query')]])
+    case 'send_email': {
+      const to = Array.isArray(o.to) ? (o.to as { address?: string }[]).map((a) => a.address).filter(Boolean).join(', ') : ''
+      return kvRows([
+        !!s('subject') && ['主题', s('subject')],
+        !!to && ['收件人', to],
+        !!s('sendMode') && ['发送方式', s('sendMode')],
+        !!s('dispatchMode') && ['投递', s('dispatchMode')],
+        !!s('bodyMarkdown') && ['正文', clipPreview(s('bodyMarkdown'), 120)],
+      ])
+    }
   }
   return <RawJson value={o} />
+}
+
+function clipPreview(s: string, n: number) {
+  const t = s.replace(/\s+/g, ' ').trim()
+  return t.length <= n ? t : t.slice(0, n) + '…'
 }
 
 // MatchedFileTree renders a Glob/Grep matched-file list as a collapsible
@@ -166,6 +185,8 @@ export function ToolDetail({ tool }: { tool: ToolEvent }) {
   const out = tool.output ?? []
   const outScroll = useStickToBottom<HTMLPreElement>(out.length)
   const img = tool.image
+  const mailActions = useMailDraftActions()
+  const mailReady = tool.toolName === 'send_email' ? parseMailDraftReady(tool) : null
   // 栅格生图主图在行下舞台，展开区不嵌第二张图。
   const imgSrc = tool.toolName === 'image_generate'
     ? ''
@@ -186,6 +207,13 @@ export function ToolDetail({ tool }: { tool: ToolEvent }) {
         <div className="text-[11px] text-faint mb-1 tracking-wide">参数</div>
         <ToolInputView tool={tool} />
         {tool.toolName === 'analyze_image' && ((tool.inputTokens ?? 0) + (tool.outputTokens ?? 0) > 0) && <p className="text-[11px] text-muted mt-2">识图用量：输入 {tool.inputTokens ?? 0} / 输出 {tool.outputTokens ?? 0} tokens · 独立调用用量；分析文字计入主模型上下文</p>}
+        {mailReady && (
+          <div className="mt-2 flex flex-wrap gap-2 items-center">
+            <span className="text-[12px] text-muted">草稿已就绪 · 修订 {mailReady.revision ?? '—'}</span>
+            <button type="button" className={BTN} onClick={() => mailActions.openDraft(mailReady.draftId)}>编辑草稿</button>
+            <button type="button" className={BTN} onClick={() => mailActions.openDraft(mailReady.draftId)}>查看草稿</button>
+          </div>
+        )}
       </div>
 
       <div>

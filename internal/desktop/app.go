@@ -19,6 +19,7 @@ import (
 	"github.com/wt68/runcode/internal/codexproxy"
 	"github.com/wt68/runcode/internal/imagegentool"
 	"github.com/wt68/runcode/internal/localusage"
+	"github.com/wt68/runcode/internal/mailtool"
 	"github.com/wt68/runcode/internal/officetool"
 	"github.com/wt68/runcode/internal/plantool"
 	"github.com/wt68/runcode/internal/previewtool"
@@ -282,6 +283,11 @@ type App struct {
 	auto automationHost
 	// autoCtl 是任务库可用性和身份代际。它和 auto 分开，避免在主机发射锁里做存储 IO。
 	autoCtl autoCtl
+	// mailCtl 是独立邮件库与派发器；失败只阻断邮件，不影响聊天/automation。
+	mailCtl mailCtl
+	// windowCtrl 是独立窗口能力引用（GetWindowCapabilities）；不读取 autoCtl.window。
+	windowMu   sync.Mutex
+	windowCtrl WindowController
 }
 
 // New returns an App that emits events to sink. Session events are enveloped
@@ -422,6 +428,8 @@ func (a *App) Startup() {
 	}
 	// 自动化任务库失败不阻断聊天。New 不做这件事，避免测试和工具构造 App 时写库。
 	a.initAutomation()
+	// 邮件库/派发器失败只阻断邮件，不影响聊天与 automation。
+	a.initMail()
 }
 
 // hostSinkAdapter forwards host envelopes to the shell sink under the
@@ -711,6 +719,9 @@ var hostToolClasses = func() map[string]permissions.ToolClass {
 		// 生图会计费并写本地文件：ClassMutating 保留；会话开启「生成图片」后免弹窗放行。
 		imagegentool.Name:   permissions.ClassMutating,
 		imageinput.ToolName: permissions.ClassReadOnly,
+		// 邮件：查询只读；send_email 只建草稿仍归 mutating（写库），SMTP 另走用户确认。
+		mailtool.SearchContactsName: permissions.ClassReadOnly,
+		mailtool.SendEmailName:      permissions.ClassMutating,
 	}
 	for name, class := range oaToolClasses {
 		m[name] = class
@@ -896,6 +907,8 @@ func (a *App) configureSession(sctx host.SessionContext, cfg *engine.Config, opt
 		a.pendingImageGeneration = nil
 		a.mu.Unlock()
 	}
+	// 邮件工具：主会话常驻；子代理拿不到 ExtraTools。OA 锁在权限层挡 send_email。
+	opts.ExtraTools = append(opts.ExtraTools, a.mailTools(cfg, sctx.ID)...)
 	// 通用格式分工所有会话都需要；带 image_generate 的规则只跟随工具注册。
 	appendRenderRoutePrompts(cfg, hasImageGeneration)
 

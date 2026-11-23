@@ -3,13 +3,16 @@ import { Icon } from '@/ui/icons'
 import { Popover } from '@/ui/popover'
 
 // 静态入口。只放已经能打开的项；未实现的栏目不出现在菜单里。
+// automation 保持原位；mail 追加在末尾，不用通用插件框架。
 export const MORE_MENU_ITEMS = [
   { id: 'automation', label: '自动化任务', icon: 'clock' },
+  { id: 'mail', label: '邮箱与通信录', icon: 'at' },
 ] as const
 
-export function MoreMenu({ collapsed, onOpenAutomation }: {
+export function MoreMenu({ collapsed, onOpenAutomation, onOpenMail }: {
   collapsed?: boolean
   onOpenAutomation: () => void
+  onOpenMail: () => void
 }) {
   const [open, setOpen] = useState(false)
   return (
@@ -38,6 +41,7 @@ export function MoreMenu({ collapsed, onOpenAutomation }: {
               onClick={() => {
                 setOpen(false)
                 if (item.id === 'automation') onOpenAutomation()
+                else if (item.id === 'mail') onOpenMail()
               }}
             >
               <Icon name={item.icon} size={16} />

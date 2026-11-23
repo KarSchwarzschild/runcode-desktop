@@ -114,3 +114,197 @@ type ConfirmMailTestReceiptRequest struct {
 type OpenMailOfficialURLRequest struct {
 	Page string `json:"page"` // webmail_standard|webmail_xc|help_security_password
 }
+
+// ---- 通信录 / 草稿业务页（更多 → 邮箱与通信录）----
+
+// MailAddressView 是可编辑地址芯片。
+type MailAddressView struct {
+	Name    string `json:"name,omitempty"`
+	Address string `json:"address"`
+}
+
+// MailContactView 是通信录条目。
+type MailContactView struct {
+	ID           string   `json:"id"`
+	Revision     int64    `json:"revision"`
+	Name         string   `json:"name"`
+	Emails       []string `json:"emails"`
+	CreatedAtUTC string   `json:"createdAtUtc"`
+	UpdatedAtUTC string   `json:"updatedAtUtc"`
+}
+
+// MailGroupView 是分组。
+type MailGroupView struct {
+	ID           string   `json:"id"`
+	Revision     int64    `json:"revision"`
+	Name         string   `json:"name"`
+	MemberIDs    []string `json:"memberIds"`
+	CreatedAtUTC string   `json:"createdAtUtc"`
+	UpdatedAtUTC string   `json:"updatedAtUtc"`
+}
+
+// MailDraftView 是草稿编辑视图；含模型提案原文供对照，预览用用户修订字段。
+type MailDraftView struct {
+	ID             string            `json:"id"`
+	Revision       int64             `json:"revision"`
+	Status         string            `json:"status"`
+	AccountID      string            `json:"accountId"`
+	Subject        string            `json:"subject"`
+	BodyMarkdown   string            `json:"bodyMarkdown"`
+	To             []MailAddressView `json:"to"`
+	Cc             []MailAddressView `json:"cc"`
+	Bcc            []MailAddressView `json:"bcc"`
+	SendMode       string            `json:"sendMode"`
+	DispatchMode   string            `json:"dispatchMode"`
+	ScheduledLocal string            `json:"scheduledLocal,omitempty"`
+	TimeZone       string            `json:"timeZone,omitempty"`
+	ProposalMD     string            `json:"proposalMd,omitempty"`
+	UpdatedAtUTC   string            `json:"updatedAtUtc"`
+	CreatedAtUTC   string            `json:"createdAtUtc"`
+}
+
+// ListMailContactsRequest 搜索/分页通信录。
+type ListMailContactsRequest struct {
+	Query  string `json:"query,omitempty"`
+	Limit  int    `json:"limit,omitempty"`
+	Offset int    `json:"offset,omitempty"`
+}
+
+// SaveMailContactRequest 新建或 CAS 更新联系人。
+type SaveMailContactRequest struct {
+	ID               string   `json:"id,omitempty"`
+	Name             string   `json:"name"`
+	Emails           []string `json:"emails"`
+	ExpectedRevision int64    `json:"expectedRevision"`
+}
+
+// DeleteMailContactRequest 删除联系人。
+type DeleteMailContactRequest struct {
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expectedRevision"`
+}
+
+// ListMailGroupsRequest 分页分组。
+type ListMailGroupsRequest struct {
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
+}
+
+// SaveMailGroupRequest 新建或 CAS 更新分组。
+type SaveMailGroupRequest struct {
+	ID               string   `json:"id,omitempty"`
+	Name             string   `json:"name"`
+	MemberIDs        []string `json:"memberIds"`
+	ExpectedRevision int64    `json:"expectedRevision"`
+}
+
+// DeleteMailGroupRequest 删除分组。
+type DeleteMailGroupRequest struct {
+	ID               string `json:"id"`
+	ExpectedRevision int64  `json:"expectedRevision"`
+}
+
+// MailContactImportRow 是 CSV 预览/提交的一行。
+type MailContactImportRow struct {
+	Name   string   `json:"name"`
+	Emails []string `json:"emails"`
+}
+
+// PreviewMailContactImportRequest / Result。
+type PreviewMailContactImportRequest struct {
+	Rows []MailContactImportRow `json:"rows"`
+}
+
+type MailContactImportPreview struct {
+	Accept []MailContactImportRow `json:"accept"`
+	Skip   []string               `json:"skip"`
+}
+
+// CommitMailContactImportRequest 提交预览可接受行。
+type CommitMailContactImportRequest struct {
+	Rows []MailContactImportRow `json:"rows"`
+}
+
+// ListMailDraftsRequest 分页草稿。
+type ListMailDraftsRequest struct {
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
+}
+
+// GetMailDraftRequest 读取单草稿。
+type GetMailDraftRequest struct {
+	ID string `json:"id"`
+}
+
+// SaveMailDraftRequest 保存用户修订（CAS）。
+type SaveMailDraftRequest struct {
+	ID               string            `json:"id"`
+	ExpectedRevision int64             `json:"expectedRevision"`
+	AccountID        string            `json:"accountId"`
+	Subject          string            `json:"subject"`
+	BodyMarkdown     string            `json:"bodyMarkdown"`
+	To               []MailAddressView `json:"to"`
+	Cc               []MailAddressView `json:"cc"`
+	Bcc              []MailAddressView `json:"bcc"`
+	SendMode         string            `json:"sendMode"`
+	DispatchMode     string            `json:"dispatchMode"`
+	ScheduledLocal   string            `json:"scheduledLocal,omitempty"`
+	TimeZone         string            `json:"timeZone,omitempty"`
+}
+
+// CreateMailDraftRequest 新建空白用户草稿。
+type CreateMailDraftRequest struct {
+	AccountID string `json:"accountId,omitempty"`
+}
+
+// PrepareMailSendRequest 校验并冻结当前修订，返回一次性确认令牌与只读预览。
+type PrepareMailSendRequest struct {
+	DraftID          string `json:"draftId"`
+	ExpectedRevision int64  `json:"expectedRevision"`
+}
+
+// MailAttachmentPreview 是确认框里展示的已冻结附件。
+type MailAttachmentPreview struct {
+	Name   string `json:"name"`
+	Bytes  int64  `json:"bytes"`
+	SHA256 string `json:"sha256"`
+}
+
+// MailSendPreview 是本人确认前的只读定稿摘要。
+type MailSendPreview struct {
+	DraftID        string                  `json:"draftId"`
+	Revision       int64                   `json:"revision"`
+	AccountID      string                  `json:"accountId"`
+	Subject        string                  `json:"subject"`
+	BodyMarkdown   string                  `json:"bodyMarkdown"`
+	To             []MailAddressView       `json:"to"`
+	Cc             []MailAddressView       `json:"cc"`
+	Bcc            []MailAddressView       `json:"bcc"`
+	Attachments    []MailAttachmentPreview `json:"attachments"`
+	SendMode       string                  `json:"sendMode"`
+	DispatchMode   string                  `json:"dispatchMode"`
+	ScheduledLocal string                  `json:"scheduledLocal,omitempty"`
+	TimeZone       string                  `json:"timeZone,omitempty"`
+	ScheduledAtUTC string                  `json:"scheduledAtUtc,omitempty"`
+	Digest         string                  `json:"digest"`
+}
+
+// PrepareMailSendResult 含 confirmationId 与只读预览；不发信。
+type PrepareMailSendResult struct {
+	ConfirmationID string          `json:"confirmationId"`
+	ExpiresAtUtc   string          `json:"expiresAtUtc"`
+	Preview        MailSendPreview `json:"preview"`
+}
+
+// ConfirmMailSendRequest 消耗 confirmationId，入队 queued/scheduled。
+type ConfirmMailSendRequest struct {
+	ConfirmationID string `json:"confirmationId"`
+}
+
+// ConfirmMailSendResult 报告投递意图已入队；真实 SMTP 由独立 dispatcher 异步执行。
+type ConfirmMailSendResult struct {
+	SubmissionID string `json:"submissionId"`
+	Status       string `json:"status"` // queued | scheduled
+	DraftID      string `json:"draftId"`
+	Revision     int64  `json:"revision"`
+}

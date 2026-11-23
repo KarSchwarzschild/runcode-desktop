@@ -158,7 +158,7 @@ func TestMainCloseActiveRunWarnsAndCanExit(t *testing.T) {
 }
 
 func TestCloseConfirmationExplainsNativeYesNoFallback(t *testing.T) {
-	prompt := closeConfirmation(automation.ExitSummary{EnabledCount: 2, UnfinishedCount: 1}, nil)
+	prompt := closeConfirmation(automation.ExitSummary{EnabledCount: 2, UnfinishedCount: 1}, nil, MailExitSummary{}, nil)
 	for _, want := range []string{"隐藏主窗/是", "直接退出/否", "取消", "正在执行"} {
 		if !strings.Contains(prompt.Message, want) {
 			t.Fatalf("close prompt %q does not explain %q", prompt.Message, want)
@@ -243,10 +243,36 @@ func TestExitConfirmationCounts(t *testing.T) {
 }
 
 func TestExitConfirmationExplainsNativeYesNoFallback(t *testing.T) {
-	prompt := exitConfirmation(automation.ExitSummary{EnabledCount: 2, UnfinishedCount: 1}, nil)
+	prompt := exitConfirmation(automation.ExitSummary{EnabledCount: 2, UnfinishedCount: 1}, nil, MailExitSummary{}, nil)
 	for _, want := range []string{"退出/是", "取消/否", "关闭窗口", "已开启任务"} {
 		if !strings.Contains(prompt.Message, want) {
 			t.Fatalf("exit prompt %q does not explain %q", prompt.Message, want)
+		}
+	}
+}
+
+func TestExitConfirmationMailPendingAlone(t *testing.T) {
+	life, h := newLifecycleHarness(t)
+	life.opts.MailExitSummary = func(context.Context) (MailExitSummary, error) {
+		return MailExitSummary{PendingCount: 3}, nil
+	}
+	if err := life.RequestAppExit(); err != nil {
+		t.Fatal(err)
+	}
+	prompts := h.promptList()
+	if len(prompts) != 1 || !strings.Contains(prompts[0].Message, "待发邮件：3") {
+		t.Fatalf("prompts=%+v", prompts)
+	}
+}
+
+func TestExitConfirmationMailAndAutomationCounts(t *testing.T) {
+	prompt := exitConfirmation(
+		automation.ExitSummary{EnabledCount: 2, UnfinishedCount: 1}, nil,
+		MailExitSummary{PendingCount: 4}, nil,
+	)
+	for _, want := range []string{"已开启任务：2", "未完成运行：1", "待发邮件：4"} {
+		if !strings.Contains(prompt.Message, want) {
+			t.Fatalf("prompt missing %q: %s", want, prompt.Message)
 		}
 	}
 }

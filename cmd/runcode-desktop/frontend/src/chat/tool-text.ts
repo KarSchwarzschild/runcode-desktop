@@ -77,6 +77,15 @@ export function toolVerbTarget(t: ToolEvent): { verb: string; target: string } {
       target = clip(intent || progress, 44)
       break
     }
+    case 'search_contacts':
+      target = clip(String(o.query ?? ''), 44)
+      break
+    case 'send_email': {
+      const data = t.data && typeof t.data === 'object' ? t.data as { subject?: unknown } : null
+      const subj = typeof data?.subject === 'string' ? data.subject : String(o.subject ?? '')
+      target = clip(subj, 44)
+      break
+    }
     default:
       target = basename(t.files?.[0]?.path) || basename(String(o.path ?? ''))
   }

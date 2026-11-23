@@ -393,17 +393,30 @@ export {
   saveImageGenerationEdit,
 } from './protocol/commands'
 
-// ---- 邮箱账号设置（接入向导）----------------------------------------------------
+// ---- 邮箱账号设置（接入向导）+ 通信录/草稿业务页 --------------------------------
 export type {
   MailSettings, MailAccountView, MailVersion, MailOnboardingStatus,
   SaveMailAccountRequest, DisableMailAccountRequest, RemoveMailAccountRequest,
   TestMailConnectionRequest, MailConnectionTestResult,
   SendMailTestToSelfRequest, MailTestSendResult, ConfirmMailTestReceiptRequest,
   OpenMailOfficialURLRequest,
+  MailAddressView, MailContactView, MailGroupView, MailDraftView,
+  ListMailContactsRequest, SaveMailContactRequest, DeleteMailContactRequest,
+  ListMailGroupsRequest, SaveMailGroupRequest, DeleteMailGroupRequest,
+  MailContactImportRow, PreviewMailContactImportRequest, MailContactImportPreview,
+  CommitMailContactImportRequest, ListMailDraftsRequest, GetMailDraftRequest,
+  SaveMailDraftRequest, CreateMailDraftRequest,
+  PrepareMailSendRequest, PrepareMailSendResult, MailSendPreview, MailAttachmentPreview,
+  ConfirmMailSendRequest, ConfirmMailSendResult,
 } from './protocol/types'
 export {
   getMailSettings, saveMailAccount, disableMailAccount, removeMailAccount,
   testMailConnection, sendMailTestToSelf, confirmMailTestReceipt, openMailOfficialURL,
+  listMailContacts, saveMailContact, deleteMailContact,
+  listMailGroups, saveMailGroup, deleteMailGroup,
+  previewMailContactImport, commitMailContactImport,
+  listMailDrafts, getMailDraft, createMailDraft, saveMailDraft,
+  prepareMailSend, confirmMailSend,
 } from './protocol/commands'
 
 // ---- 用量统计（USAGE-001）：只读查询，类型与命令都来自生成协议 ------------------

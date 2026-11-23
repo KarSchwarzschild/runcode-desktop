@@ -49,11 +49,13 @@ import { SettingsSaveProvider, useSettingsSaveRegistry } from '@/pages/settings/
 import type { SettingsSectionId } from '@/pages/settings/navigation-model'
 import { StartForm } from '@/pages/start'
 import { UsagePage } from '@/pages/usage'
+import { MailPage } from '@/pages/mail'
+import { MailDraftActionsContext } from '@/chat/mail-draft-actions'
 import { GeneratedImageViewerProvider, useGeneratedImageViewer } from '@/chat/generated-image-viewer-context'
 import { GeneratedImageViewerHost } from '@/chat/generated-image-viewer'
 import type { ImageGenerationArtifact } from '@/core/bridge'
 
-export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage'
+export type View = 'chat' | 'settings' | 'plugins' | 'market' | 'permissions' | 'memory' | 'usage' | 'mail'
 
 export default function App() {
   return (
@@ -87,7 +89,12 @@ function AppShell() {
   // 而侧栏本身按此 prop 变宽窄。
   const [sidebarCollapsed, toggleSidebar] = usePersistentBool('sidebar.collapsed', false)
   const [automationOpen, setAutomationOpen] = useState(false)
+  const [mailDraftId, setMailDraftId] = useState<string | undefined>()
   useEffect(() => onAutomationOpenManager(() => setAutomationOpen(true)), [])
+  const openMailDraft = (draftId: string) => {
+    setMailDraftId(draftId)
+    goView('mail')
+  }
 
   // infoRef 是给事件回调读当前会话用的镜像：订阅只注册一次，闭包里不能直接读
   // info 这个 state。
@@ -322,6 +329,7 @@ function AppShell() {
           avatar={passport?.avatar}
           onLogout={() => void logout()}
           onOpenAutomation={() => setAutomationOpen(true)}
+          onOpenMail={() => goView('mail')}
         />
 
         <main className="flex-1 flex flex-col min-w-0 min-h-0 bg-surface">
@@ -386,8 +394,14 @@ function AppShell() {
           ) : view === 'usage' ? (
             // 统计页只读平台记录，不影响后台会话；未登录时页内引导去设置页登录。
             <UsagePage passport={passport} onOpenSettings={() => openSettings('passport')} />
+          ) : view === 'mail' ? (
+            <MailPage
+              onOpenSettings={() => openSettings('mail')}
+              initialDraftId={mailDraftId}
+            />
           ) : (
             <>
+              <MailDraftActionsContext.Provider value={{ openDraft: openMailDraft }}>
               <ArtifactActionsContext.Provider value={preview.actions}>
                 <ChatPaneWithRasterViewer
                   textOnly={restrictedConversation}
@@ -422,6 +436,7 @@ function AppShell() {
                   sessionGeneration={String((session.info as { generation?: string } | null)?.generation ?? '')}
                 />
               </ArtifactActionsContext.Provider>
+              </MailDraftActionsContext.Provider>
 
               {permissions.pending && (
                 <PermissionModal

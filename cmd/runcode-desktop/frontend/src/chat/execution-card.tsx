@@ -9,6 +9,7 @@ import { CheckMark, Spinner } from '@/ui/glyphs'
 import { DiffStat } from '@/ui/badges'
 import { type ToolEvent } from '@/core/bridge'
 import { diffStats, failText, toolVerbTarget } from './tool-text'
+import { parseMailDraftReady } from './mail-draft-actions'
 import { ToolDetail } from './tool-detail'
 
 export function ExecutionCard({ tools, harmAllows, oaBlocked }: {
@@ -73,6 +74,11 @@ export function ExecutionCard({ tools, harmAllows, oaBlocked }: {
                 <span className="text-[11px] text-red bg-redbg rounded-md px-1.5 py-0.5 flex-none">{failText(t)}</span>
               ) : st === 'running' ? (
                 <Spinner size={14} />
+              ) : t.toolName === 'send_email' && parseMailDraftReady(t) ? (
+                // 草稿就绪 ≠ 发送成功：单独文案，避免绿勾被理解成已发出。
+                <span className="text-[11px] text-muted bg-surface2 rounded-md px-1.5 py-0.5 flex-none inline-flex items-center gap-1">
+                  草稿已就绪 <CheckMark size={12} />
+                </span>
               ) : (
                 <span className="text-green flex-none"><CheckMark size={14} /></span>
               )}
