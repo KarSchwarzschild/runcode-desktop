@@ -171,6 +171,17 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"GetLocalUsageTenants": hostproto.CommandQuery,
 	"ResetLocalUsageStore": hostproto.CommandTrigger,
 
+	// 邮箱账号（设置接入向导）。查询可重试；保存/禁用/删除幂等目标态；
+	// 连接测试与本人发信/打开官网是 trigger（有界副作用，不可安全重放）。
+	"GetMailSettings":        hostproto.CommandQuery,
+	"SaveMailAccount":        hostproto.CommandIdempotentSet,
+	"DisableMailAccount":     hostproto.CommandIdempotentSet,
+	"RemoveMailAccount":      hostproto.CommandIdempotentSet,
+	"ConfirmMailTestReceipt": hostproto.CommandIdempotentSet,
+	"TestMailConnection":     hostproto.CommandTrigger,
+	"SendMailTestToSelf":     hostproto.CommandTrigger,
+	"OpenMailOfficialURL":    hostproto.CommandTrigger,
+
 	// 自动化任务。查询可重试；暂停是幂等目标态；创建靠 clientRequestId 去重，
 	// 但仍是一次会落库的变更。关闭和退出交给宿主，没有注入时明确失败。
 	"GetAutomationDefaults":     hostproto.CommandQuery,

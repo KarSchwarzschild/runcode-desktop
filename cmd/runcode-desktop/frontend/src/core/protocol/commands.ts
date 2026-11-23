@@ -5,7 +5,7 @@
 // Regenerate with: go run ./tools/protogen
 
 import { Call } from '@wailsio/runtime';
-import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationRunResult, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ContextAuditInfo, CreateAutomationTaskRequest, CustomModel, DeleteAutomationTaskRequest, DeleteAutomationTaskResult, DirectoryAccessRequest, DirectoryAccessView, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, MCPServerInfo, MCPServerInput, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecorderSettingsPatch, RecordingInfo, ResumedSession, RunAutomationTaskNowRequest, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SessionAutomationRunsRequest, SessionInfo, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
+import type { AgentList, AgentSaveRequest, ArtifactReference, AutomationConversationResult, AutomationDefaults, AutomationRunPage, AutomationRunResult, AutomationSessionResult, AutomationTaskPage, AutomationTaskResult, CodexDeviceCode, CodexModel, CodexStatus, CompactResult, ConfirmMailTestReceiptRequest, ContextAuditInfo, CreateAutomationTaskRequest, CustomModel, DeleteAutomationTaskRequest, DeleteAutomationTaskResult, DirectoryAccessRequest, DirectoryAccessView, DisableMailAccountRequest, EditDiff, EditRecord, ImageGenerationArtifact, ImageGenerationCatalog, ImageGenerationSettings, Info, ListAutomationRunsRequest, ListAutomationTasksRequest, MCPServerInfo, MCPServerInput, MailConnectionTestResult, MailSettings, MailTestSendResult, McpMarketEntry, MemoryInfo, ModelContextView, ModelReference, OpenAutomationSessionRequest, OpenMailOfficialURLRequest, OpenSessionInfo, PassportModel, PassportStatus, PassportTenant, PlanApproveRequest, PlanApproveResult, PlanDoc, PlanRun, ProjectContextInfo, QuestionDraft, QuestionReceipt, QuestionReference, RecorderDeviceList, RecorderSettings, RecorderSettingsPatch, RecordingInfo, RemoveMailAccountRequest, ResumedSession, RunAutomationTaskNowRequest, RuntimeInfo, SaveCustomModelRequest, SaveImageGenerationEditRequest, SaveImageGenerationSettingsRequest, SaveMailAccountRequest, SaveModelContextSettingsRequest, SaveSettingsRequest, SaveVisionSettingsRequest, SecretStorage, SendMailTestToSelfRequest, SessionAutomationRunsRequest, SessionInfo, SessionSummary, SetAutomationTaskPausedRequest, SetPlatformImageCapabilityRequest, SettingsView, SkillList, SkillMarketPage, SkillSaveRequest, StartRecordingRequest, StartSessionRequest, SubmitQuestionRequest, TestMailConnectionRequest, ToolInfo, UpdateAutomationTaskRequest, UpdateInfo, UsageDimensionsPage, UsageDimensionsQuery, UsageOverview, UsageQuery, UsageRequestsPage, UsageRequestsQuery, VisionSettings } from './types';
 
 // APP 是 desktop.App 在 Wails v3 绑定表里的全限定名。v3 按
 // "<包路径>.<类型>.<方法>" 定位方法(pkg/application/bindings.go 的 fqn)。
@@ -127,6 +127,12 @@ export function compact(sessionID: string): Promise<CompactResult> {
   return call<CompactResult>('Compact', sessionID);
 }
 
+// ConfirmMailTestReceipt 记录本人核实收到测试信。
+// kind: idempotent-set
+export function confirmMailTestReceipt(req: ConfirmMailTestReceiptRequest): Promise<MailSettings> {
+  return call<MailSettings>('ConfirmMailTestReceipt', req);
+}
+
 // ContextAuditStatus 报告上下文审核的当前状态（是否测试版、开关、查看地址、目录）。
 // kind: query
 export function contextAuditStatus(): Promise<ContextAuditInfo> {
@@ -181,6 +187,12 @@ export function deleteSkill(name: string, scope: string): Promise<SkillList> {
   return call<SkillList>('DeleteSkill', name, scope);
 }
 
+// DisableMailAccount 禁用账号但保留密文配置。
+// kind: idempotent-set
+export function disableMailAccount(req: DisableMailAccountRequest): Promise<MailSettings> {
+  return call<MailSettings>('DisableMailAccount', req);
+}
+
 // DiscardRecording 放弃这一场：停掉并删掉整个目录。
 // kind: trigger
 export function discardRecording(): Promise<void> {
@@ -227,6 +239,12 @@ export function getImageGenerationSettings(tenantID: string): Promise<ImageGener
 // kind: query
 export function getLocalUsageTenants(): Promise<PassportTenant[] | null> {
   return call<PassportTenant[] | null>('GetLocalUsageTenants');
+}
+
+// GetMailSettings 返回脱敏邮箱设置；不含密码。
+// kind: query
+export function getMailSettings(): Promise<MailSettings> {
+  return call<MailSettings>('GetMailSettings');
 }
 
 // GetModelContextSettings reads defaults and local overrides for one model.
@@ -451,6 +469,12 @@ export function openExternal(reference: string): Promise<void> {
   return call<void>('OpenExternal', reference);
 }
 
+// OpenMailOfficialURL 只打开固定官方页面。
+// kind: trigger
+export function openMailOfficialURL(req: OpenMailOfficialURLRequest): Promise<void> {
+  return call<void>('OpenMailOfficialURL', req);
+}
+
 // OpenSession **再开**一条会话，不关掉已经开着的那些。 workspace 为空是"就在当前工作区再开一条"；给了目录就在那个目录开——这是 **多工作区并行**的唯一入口。每条会话记着自己的目录（sessionEntry.workspace）， 工作区寻址的那批命令跟着聚焦走（见 focusLocked），预览服务器按目录共享并计数 （见 previewRef）。 它同时取代了原来的 SwitchWorkspace（关掉当前那条、在新目录重开一条）：换目录 不再意味着丢掉手上正在跑的会话。真要丢，从「打开中」里关掉它——那是一个明确的 动作，而不是换目录的副作用。 复用当前会话的 provider / 模型 / 凭据（与 NewSession 同一套 a.config），所以 并行的几条会话共用同一条连接——每会话独立连接不在本期范围内，见 docs/multi-session.md。模型倒是每会话可以不同：SetModel 本来就按会话生效。
 // kind: trigger
 export function openSession(workspace: string): Promise<SessionInfo> {
@@ -613,6 +637,12 @@ export function reloadMCPServers(): Promise<boolean> {
   return call<boolean>('ReloadMCPServers');
 }
 
+// RemoveMailAccount 删除账号与密文。
+// kind: idempotent-set
+export function removeMailAccount(req: RemoveMailAccountRequest): Promise<MailSettings> {
+  return call<MailSettings>('RemoveMailAccount', req);
+}
+
 // RemoveRuntime 删除已安装的运行时包。
 // kind: trigger
 export function removeRuntime(id: string): Promise<void> {
@@ -739,6 +769,12 @@ export function saveMCPServer(in_: MCPServerInput): Promise<void> {
   return call<void>('SaveMCPServer', in_);
 }
 
+// SaveMailAccount 仅在同配置连接测试通过且保护成功时原子写入。
+// kind: idempotent-set
+export function saveMailAccount(req: SaveMailAccountRequest): Promise<MailSettings> {
+  return call<MailSettings>('SaveMailAccount', req);
+}
+
 // SaveModelContextSettings only persists a preference; it never interrupts a turn.
 // kind: idempotent-set
 export function saveModelContextSettings(req: SaveModelContextSettingsRequest): Promise<ModelContextView> {
@@ -785,6 +821,12 @@ export function saveVisionSettings(req: SaveVisionSettingsRequest): Promise<Visi
 // kind: query
 export function secretStorageStatus(): Promise<SecretStorage> {
   return call<SecretStorage>('SecretStorageStatus');
+}
+
+// SendMailTestToSelf 向已保存账号自身发送固定测试信；不接受外部收件人。
+// kind: trigger
+export function sendMailTestToSelf(req: SendMailTestToSelfRequest): Promise<MailTestSendResult> {
+  return call<MailTestSendResult>('SendMailTestToSelf', req);
 }
 
 // SendMessage runs one user turn asynchronously.
@@ -929,6 +971,12 @@ export function submitQuestion(req: SubmitQuestionRequest): Promise<QuestionRece
 // kind: trigger
 export function switchModel(sessionID: string, kind: string, name: string): Promise<SessionInfo> {
   return call<SessionInfo>('SwitchModel', sessionID, kind, name);
+}
+
+// TestMailConnection 用当前表单探测 SMTP：连接/TLS/认证后退出，不发信、不落盘。
+// kind: trigger
+export function testMailConnection(req: TestMailConnectionRequest): Promise<MailConnectionTestResult> {
+  return call<MailConnectionTestResult>('TestMailConnection', req);
 }
 
 // UpdateAutomationTask replaces the editable fields.

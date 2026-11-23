@@ -105,7 +105,7 @@ export type {
 // expose it under a collision-free name (the old handwritten bridge exported no
 // error type, so nothing depends on the bare name).
 export type { Error as ProtocolError } from './protocol/types'
-export { Events, ToolEventTypes, Decisions, ErrCodes, PlanStages, PlanStates, SkillInstallStages, UpdateStages, RuntimePackIds, RuntimeStages, ProtocolVersion } from './protocol/types'
+export { Events, ToolEventTypes, Decisions, ErrCodes, PlanStages, PlanStates, SkillInstallStages, UpdateStages, RuntimePackIds, RuntimeStages, MailVersions, MailOnboardingStatuses, ProtocolVersion } from './protocol/types'
 
 export type { PassportTenant } from './protocol/types'
 
@@ -391,6 +391,19 @@ export type {
 export {
   listImageGenerationModels, getImageGenerationSettings, saveImageGenerationSettings,
   saveImageGenerationEdit,
+} from './protocol/commands'
+
+// ---- 邮箱账号设置（接入向导）----------------------------------------------------
+export type {
+  MailSettings, MailAccountView, MailVersion, MailOnboardingStatus,
+  SaveMailAccountRequest, DisableMailAccountRequest, RemoveMailAccountRequest,
+  TestMailConnectionRequest, MailConnectionTestResult,
+  SendMailTestToSelfRequest, MailTestSendResult, ConfirmMailTestReceiptRequest,
+  OpenMailOfficialURLRequest,
+} from './protocol/types'
+export {
+  getMailSettings, saveMailAccount, disableMailAccount, removeMailAccount,
+  testMailConnection, sendMailTestToSelf, confirmMailTestReceipt, openMailOfficialURL,
 } from './protocol/commands'
 
 // ---- 用量统计（USAGE-001）：只读查询，类型与命令都来自生成协议 ------------------

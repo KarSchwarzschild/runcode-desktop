@@ -223,6 +223,16 @@ var constGroupSpecs = []constGroupSpec{
 		doc:      "Local image-generation submission dispositions; they do not prove upstream receipt or billing.",
 		unionDoc: "ImageGenerationSubmissionStatus is the closed set of local send-boundary dispositions.",
 	},
+	{
+		goPrefix: "MailVersion", constName: "MailVersions", unionName: "MailVersion", open: false,
+		doc:      "Aliyun enterprise mailbox service presets; host/port are derived and not model-chosen.",
+		unionDoc: "MailVersion is the closed set of mailbox service presets.",
+	},
+	{
+		goPrefix: "MailStatus", constName: "MailOnboardingStatuses", unionName: "MailOnboardingStatus", open: false,
+		doc:      "Mail onboarding fact states; not a single verified boolean.",
+		unionDoc: "MailOnboardingStatus is the closed set of mailbox onboarding progress states.",
+	},
 }
 
 // constExemptTypes names constant types that are transport metadata rather than

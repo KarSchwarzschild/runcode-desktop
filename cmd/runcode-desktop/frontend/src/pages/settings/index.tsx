@@ -16,6 +16,7 @@ import { Toggle } from '@/ui/toggle'
 import { BRAND } from '@/core/brand'
 import { Section } from './section'
 import { AccountSection } from './account'
+import { MailSection } from './mail'
 import { SessionSection } from './session'
 import { CustomModelsSection } from './custom-models'
 import { VisionSection } from './vision'
@@ -287,6 +288,9 @@ export function SettingsPage({ initial, info, busy, update, onSaved, onSwitchMod
                 </label>
                 <AutoSaveStatus snapshot={four} />
               </Section>
+            </SettingsAnchor>
+            <SettingsAnchor section={sectionMeta('mail')} register={register}>
+              <MailSection />
             </SettingsAnchor>
           </SettingsGroup>
 

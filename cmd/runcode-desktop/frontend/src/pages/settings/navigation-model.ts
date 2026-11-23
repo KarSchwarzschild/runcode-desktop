@@ -1,10 +1,10 @@
-// 设置页目录：五个大类、十三个小节的固定清单，以及目录要用的纯函数。
+// 设置页目录：五个大类、十四个小节的固定清单，以及目录要用的纯函数。
 //
 // 清单只放 ID、标题与顺序，不放组件或账号对象——正文按完整清单挂载、目录按可见
 // 清单显示，二者靠同一份 ID 对上。ID 是写死的英文，不从数组下标或中文标题推导：
 // 标题改个字、顺序挪一格，都不该让锚点、组件 key 或测试跟着漂移。
 export type SettingsCategoryId = 'account' | 'models' | 'media' | 'environment' | 'about'
-export type SettingsSectionId = 'passport' | 'login' | 'session' | 'custom-models'
+export type SettingsSectionId = 'passport' | 'login' | 'mail' | 'session' | 'custom-models'
   | 'model-context' | 'vision' | 'image-generation' | 'recorder' | 'proxy' | 'runtimes'
   | 'context-audit' | 'updates' | 'workspace'
 
@@ -22,9 +22,10 @@ export type SettingsCategory = {
 export type SectionPosition = { id: SettingsSectionId; top: number }
 
 export const SETTINGS_CATEGORIES: readonly SettingsCategory[] = [
-  { id: 'account', title: '账号与登录', description: '管理通行证账号、租户与启动登录方式。', sections: [
+  { id: 'account', title: '账号与登录', description: '管理通行证账号、租户、登录方式与邮箱接入。', sections: [
     { id: 'passport', title: '账号（通行证）' },
     { id: 'login', title: '登录' },
+    { id: 'mail', title: '邮箱' },
   ] },
   { id: 'models', title: '模型与对话', description: '选择会话模型、权限模式并管理模型配置。', sections: [
     { id: 'session', title: '会话' },

@@ -183,6 +183,30 @@ export const ImageGenerationSubmissionStatuses = {
 // ImageGenerationSubmissionStatus is the closed set of local send-boundary dispositions.
 export type ImageGenerationSubmissionStatus = (typeof ImageGenerationSubmissionStatuses)[keyof typeof ImageGenerationSubmissionStatuses];
 
+// Mirrors the protocol.MailVersion* constants. Aliyun enterprise mailbox service presets; host/port are derived and not model-chosen.
+export const MailVersions = {
+  HK: 'hk',
+  Standard: 'standard',
+  XC: 'xc',
+} as const;
+
+// MailVersion is the closed set of mailbox service presets.
+export type MailVersion = (typeof MailVersions)[keyof typeof MailVersions];
+
+// Mirrors the protocol.MailStatus* constants. Mail onboarding fact states; not a single verified boolean.
+export const MailOnboardingStatuses = {
+  ConnectionTestPassed: 'connection_test_passed',
+  Guiding: 'guiding',
+  NeedsAttention: 'needs_attention',
+  NotConfigured: 'not_configured',
+  ReceiptConfirmed: 'receipt_confirmed',
+  Saved: 'saved',
+  TestMailAccepted: 'test_mail_accepted',
+} as const;
+
+// MailOnboardingStatus is the closed set of mailbox onboarding progress states.
+export type MailOnboardingStatus = (typeof MailOnboardingStatuses)[keyof typeof MailOnboardingStatuses];
+
 // Mirrors protocol.AgentInfo. AgentInfo is one sub-agent for the UI's sub-agent manager.
 export interface AgentInfo {
   name: string;
@@ -480,6 +504,12 @@ export interface CompactResult {
   outputTokens: number;
 }
 
+// Mirrors protocol.ConfirmMailTestReceiptRequest. ConfirmMailTestReceiptRequest 记录本人在网页核实收到测试信。
+export interface ConfirmMailTestReceiptRequest {
+  expectedRevision: number;
+  shortId: string;
+}
+
 // Mirrors protocol.ContextAuditInfo. ContextAuditInfo 是"上下文审核"（仅测试版构建存在）的状态快照。开启后，引擎每次 发给模型的完整请求上下文（系统提示词、全部消息历史、工具清单）都会落盘，并由一个 仅监听 127.0.0.1 的本地页面提供查看。
 export interface ContextAuditInfo {
   supported: boolean;
@@ -569,6 +599,11 @@ export interface DirectoryAccessView {
   workspace: string;
   revision: string;
   grants: DirectoryAccessGrant[] | null;
+}
+
+// Mirrors protocol.DisableMailAccountRequest. DisableMailAccountRequest 禁用已保存账号（保留配置，停止发信）。
+export interface DisableMailAccountRequest {
+  expectedRevision: number;
 }
 
 // Mirrors protocol.EditDiff. EditDiff is the red/green review of one edit: the turn baseline vs the turn's latest content for that file, as renderable diff lines.
@@ -740,6 +775,52 @@ export interface MCPToolBrief {
   description?: string;
 }
 
+// Mirrors protocol.MailAccountView. MailAccountView 是已保存账号的公开视图；无密码字段。
+export interface MailAccountView {
+  id: string;
+  address: string;
+  displayName: string;
+  version: string;
+  host: string;
+  port: number;
+  enabled: boolean;
+  hasPassword: boolean;
+  revision: number;
+  credentialRevision: number;
+  onboardingStatus: string;
+  lastConnectionTestAt?: string;
+  testMailAcceptedAt?: string;
+  receiptConfirmedAt?: string;
+  lastTestShortId?: string;
+  lastTestSubmissionId?: string;
+}
+
+// Mirrors protocol.MailConnectionTestResult. MailConnectionTestResult 是连接测试结果；成功时带 ConfigFingerprint 供保存校验。
+export interface MailConnectionTestResult {
+  ok: boolean;
+  phase?: string;
+  testedAtUtc?: string;
+  configFingerprint?: string;
+  errorCategory?: string;
+  message: string;
+}
+
+// Mirrors protocol.MailSettings. MailSettings 是设置页加载的脱敏视图。
+export interface MailSettings {
+  account?: MailAccountView;
+  secretStorageOk: boolean;
+}
+
+// Mirrors protocol.MailTestSendResult. MailTestSendResult 是本人测试发信结果；Accepted 只表示 SMTP 接受，不是收信核实。
+export interface MailTestSendResult {
+  status: string;
+  shortId?: string;
+  submissionId?: string;
+  acceptedAt?: string;
+  message: string;
+  errorCategory?: string;
+}
+
 // Mirrors protocol.MarketSkill. MarketSkill 是技能市场（lea-config / lea-gateway）里的一条。 与本包里其它 DTO 一样，它是**桌面自己的线上形状**，不是上游 API 的原样转发： 上游返回 snake_case 且带一堆界面用不到的列（is_builtin / can_edit / pending_publish / system_prompt 全文 …），照抄进前端只会让市场页跟着上游的表结构 走。这里只留画得出来、装得上的那几个字段，上游加列不必动前端。
 export interface MarketSkill {
   id: number;
@@ -820,6 +901,11 @@ export interface OpenAutomationSessionRequest {
   taskId: string;
   runId: string;
   ownerScope?: string;
+}
+
+// Mirrors protocol.OpenMailOfficialURLRequest. OpenMailOfficialURLRequest 只打开固定官方 URL，不接受任意地址。
+export interface OpenMailOfficialURLRequest {
+  page: string;
 }
 
 // Mirrors protocol.OpenSessionInfo. OpenSessionInfo 描述**此刻开着**的一条会话，供界面画会话列表。 与 SessionSummary 的分工：那个是工作区里**存下来**的历史会话（标题、时间、 回合数），这个是当前进程里活着的会话。界面上是两栏：「打开中」与「历史」。 只带后端独有的事实。标题走 session:renamed 事件与 SessionSummary，待审批数在 前端的授权队列里——都不必在这里重复一遍，重复就会出现两个版本互相矛盾。
@@ -1083,6 +1169,11 @@ export interface RecordingInfo {
   dir?: string;
 }
 
+// Mirrors protocol.RemoveMailAccountRequest. RemoveMailAccountRequest 删除已保存账号与密文。
+export interface RemoveMailAccountRequest {
+  expectedRevision: number;
+}
+
 // Mirrors protocol.ResolvedUsageQuery. ResolvedUsageQuery 是总览返回范围之后，日志与分组共用的查询条件；翻页沿用它， 不再各自解析相对时间。
 export interface ResolvedUsageQuery {
   tenantId: string;
@@ -1220,6 +1311,18 @@ export interface SaveImageGenerationSettingsRequest {
   defaultSize: string;
 }
 
+// Mirrors protocol.SaveMailAccountRequest. SaveMailAccountRequest 保存当前表单。Password 留空保留旧值；ClearPassword 才清空。 ConfigFingerprint 必须来自同配置的 TestMailConnection 成功结果。
+export interface SaveMailAccountRequest {
+  address: string;
+  displayName: string;
+  version: string;
+  password?: string;
+  clearPassword?: boolean;
+  configFingerprint: string;
+  expectedRevision: number;
+  enabled: boolean;
+}
+
 // Mirrors protocol.SaveModelContextSettingsRequest. SaveModelContextSettingsRequest replaces or clears one model preference.
 export interface SaveModelContextSettingsRequest {
   model: ModelReference;
@@ -1246,6 +1349,12 @@ export interface SecretStorage {
   ok: boolean;
   reason?: string;
   fix?: string;
+}
+
+// Mirrors protocol.SendMailTestToSelfRequest. SendMailTestToSelfRequest 向已保存账号自身发固定测试信；无收件人字段。
+export interface SendMailTestToSelfRequest {
+  expectedRevision: number;
+  clientRequestId?: string;
 }
 
 // Mirrors protocol.SessionAutomationRunsRequest. SessionAutomationRunsRequest lists runs linked to one workspace session.
@@ -1422,6 +1531,13 @@ export interface SubmitQuestionRequest {
   source?: QuestionReference;
   originalImages: number[] | null;
   allowSteering: boolean;
+}
+
+// Mirrors protocol.TestMailConnectionRequest. TestMailConnectionRequest 使用当前表单值探测 SMTP，不落盘、不发信。
+export interface TestMailConnectionRequest {
+  address: string;
+  password: string;
+  version: string;
 }
 
 // Mirrors protocol.ToolEvent. ToolEvent is the wire form of one tool-lifecycle update.

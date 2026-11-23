@@ -15,7 +15,7 @@ import {
 } from './navigation-model'
 
 const ALL_IDS: SettingsSectionId[] = [
-  'passport', 'login',
+  'passport', 'login', 'mail',
   'session', 'custom-models', 'model-context',
   'vision', 'image-generation', 'recorder',
   'proxy', 'runtimes',
@@ -37,20 +37,20 @@ describe('settings catalog', () => {
     }
   })
 
-  it('placesEachOfThirteenSectionsExactlyOnce', () => {
+  it('placesEachOfFourteenSectionsExactlyOnce', () => {
     const flat = SETTINGS_CATEGORIES.flatMap((c) => c.sections.map((s) => s.id))
     expect(flat).toEqual(ALL_IDS)
-    expect(new Set(flat).size).toBe(13)
+    expect(new Set(flat).size).toBe(14)
     expect(SETTINGS_SECTION_ORDER).toEqual(ALL_IDS)
     const anchors = flat.map(sectionAnchorId)
-    expect(new Set(anchors).size).toBe(13)
+    expect(new Set(anchors).size).toBe(14)
     expect(anchors[0]).toBe('settings-passport')
   })
 
   it('assignsSectionsToTheirCategories', () => {
     const owner = Object.fromEntries(SETTINGS_CATEGORIES.flatMap((c) => c.sections.map((s) => [s.id, c.id])))
     expect(owner).toEqual({
-      passport: 'account', login: 'account',
+      passport: 'account', login: 'account', mail: 'account',
       session: 'models', 'custom-models': 'models', 'model-context': 'models',
       vision: 'media', 'image-generation': 'media', recorder: 'media',
       proxy: 'environment', runtimes: 'environment',
@@ -70,10 +70,10 @@ describe('settings catalog', () => {
   })
 
   it('countsVisibleSectionsPerCapabilityCombination', () => {
-    expect(ids({ recorderEnabled: false, auditSupported: true })).toHaveLength(12)
-    expect(ids({ recorderEnabled: false, auditSupported: false })).toHaveLength(11)
-    expect(ids({ recorderEnabled: true, auditSupported: true })).toHaveLength(13)
-    expect(ids({ recorderEnabled: true, auditSupported: false })).toHaveLength(12)
+    expect(ids({ recorderEnabled: false, auditSupported: true })).toHaveLength(13)
+    expect(ids({ recorderEnabled: false, auditSupported: false })).toHaveLength(12)
+    expect(ids({ recorderEnabled: true, auditSupported: true })).toHaveLength(14)
+    expect(ids({ recorderEnabled: true, auditSupported: false })).toHaveLength(13)
     expect(ids({ recorderEnabled: false, auditSupported: false })).not.toContain('recorder')
     expect(ids({ recorderEnabled: false, auditSupported: false })).not.toContain('context-audit')
   })
@@ -87,7 +87,7 @@ describe('settings catalog', () => {
 
   it('doesNotMutateTheFullCatalog', () => {
     buildSettingsNavigation({ recorderEnabled: false, auditSupported: false })
-    expect(SETTINGS_CATEGORIES.flatMap((c) => c.sections)).toHaveLength(13)
+    expect(SETTINGS_CATEGORIES.flatMap((c) => c.sections)).toHaveLength(14)
   })
 
   it('expandsTheCategoryThatOwnsTheActiveSection', () => {

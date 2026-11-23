@@ -23,9 +23,9 @@ import { useSettingsNavigation } from './use-settings-navigation'
 const VIEW_H = 600
 const CONTENT_H = 2000
 const OFFSETS: Record<SettingsSectionId, number> = {
-  passport: 100, login: 260, session: 380, 'custom-models': 560, 'model-context': 760,
-  vision: 920, 'image-generation': 1060, recorder: 1200, proxy: 1320, runtimes: 1440,
-  'context-audit': 1580, updates: 1700, workspace: 1900,
+  passport: 100, login: 220, mail: 340, session: 460, 'custom-models': 620, 'model-context': 800,
+  vision: 960, 'image-generation': 1100, recorder: 1240, proxy: 1360, runtimes: 1480,
+  'context-audit': 1600, updates: 1720, workspace: 1900,
 }
 
 type FakeObserver = { callback: ResizeObserverCallback; targets: Element[]; disconnected: boolean }
@@ -296,7 +296,7 @@ describe('SettingsNavigation (wide)', () => {
       const nav = m.host.querySelector('nav[aria-label="设置目录"]')!
       const labels = Array.from(nav.querySelectorAll('button')).map((b) => b.textContent)
       expect(labels).toEqual([
-        '账号与登录', '账号（通行证）', '登录',
+        '账号与登录', '账号（通行证）', '登录', '邮箱',
         '模型与对话', '会话', '自定义模型', '模型上下文配置',
         '图片与录音', '图片识别', '图片生成',
         '网络与运行环境', '出网代理', '运行时环境',

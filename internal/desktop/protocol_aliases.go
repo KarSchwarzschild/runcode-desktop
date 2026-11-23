@@ -128,6 +128,19 @@ type (
 	CustomModel            = protocol.CustomModel
 	SaveCustomModelRequest = protocol.SaveCustomModelRequest
 
+	// 邮箱账号设置。
+	MailSettings                  = protocol.MailSettings
+	MailAccountView               = protocol.MailAccountView
+	SaveMailAccountRequest        = protocol.SaveMailAccountRequest
+	DisableMailAccountRequest     = protocol.DisableMailAccountRequest
+	RemoveMailAccountRequest      = protocol.RemoveMailAccountRequest
+	TestMailConnectionRequest     = protocol.TestMailConnectionRequest
+	MailConnectionTestResult      = protocol.MailConnectionTestResult
+	SendMailTestToSelfRequest     = protocol.SendMailTestToSelfRequest
+	MailTestSendResult            = protocol.MailTestSendResult
+	ConfirmMailTestReceiptRequest = protocol.ConfirmMailTestReceiptRequest
+	OpenMailOfficialURLRequest    = protocol.OpenMailOfficialURLRequest
+
 	// ChatGPT(Codex)登录。
 	CodexDeviceCode = protocol.CodexDeviceCode
 	CodexStatus     = protocol.CodexStatus

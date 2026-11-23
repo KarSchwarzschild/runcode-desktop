@@ -33,6 +33,12 @@ const api = vi.hoisted(() => ({
   authorizeRuntime: vi.fn(),
   cancelRuntimeInstall: vi.fn(),
   removeRuntime: vi.fn(),
+  getMailSettings: vi.fn(),
+  saveMailAccount: vi.fn(),
+  testMailConnection: vi.fn(),
+  sendMailTestToSelf: vi.fn(),
+  confirmMailTestReceipt: vi.fn(),
+  openMailOfficialURL: vi.fn(),
   onEvent: vi.fn(() => () => {}),
 }))
 
@@ -115,6 +121,8 @@ beforeEach(() => {
   })
   api.recorderDevices.mockResolvedValue({ mics: [], systems: [] })
   api.runtimeStatus.mockResolvedValue({ platform: 'windows/amd64', packs: [], fetched: true, error: '' })
+  api.getMailSettings.mockResolvedValue({ secretStorageOk: true })
+  api.openMailOfficialURL.mockResolvedValue(undefined)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => { nextFrame += 1; frames.set(nextFrame, cb); return nextFrame })
   vi.stubGlobal('cancelAnimationFrame', (id: number) => { frames.delete(id) })
@@ -292,7 +300,7 @@ describe('SettingsPage navigation shell', () => {
     expect(host.textContent).not.toContain('保存设置')
     const anchors = Array.from(host.querySelectorAll('section[id^="settings-"]')).map((el) => el.id)
     expect(anchors).toEqual([
-      'settings-passport', 'settings-login',
+      'settings-passport', 'settings-login', 'settings-mail',
       'settings-session', 'settings-custom-models', 'settings-model-context',
       'settings-vision', 'settings-image-generation', 'settings-recorder',
       'settings-proxy', 'settings-runtimes',
