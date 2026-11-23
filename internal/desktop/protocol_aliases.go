@@ -164,6 +164,9 @@ type (
 	MailAttachmentPreview           = protocol.MailAttachmentPreview
 	ConfirmMailSendRequest          = protocol.ConfirmMailSendRequest
 	ConfirmMailSendResult           = protocol.ConfirmMailSendResult
+	ListMailOutboxRequest           = protocol.ListMailOutboxRequest
+	MailOutboxEntryView             = protocol.MailOutboxEntryView
+	WindowCapabilitiesView          = protocol.WindowCapabilitiesView
 
 	// ChatGPT(Codex)登录。
 	CodexDeviceCode = protocol.CodexDeviceCode

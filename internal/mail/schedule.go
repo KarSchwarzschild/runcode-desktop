@@ -34,7 +34,7 @@ func ParseLocalSchedule(local, timeZone string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("%w: bad local time", ErrInvalid)
 	}
 	// 构造「字面」本地时刻；若与解析结果墙钟不一致，说明落入 DST 空洞被归一化。
-	var y, day, hour, min, sec int
+	var y, day, hour, minute, sec int
 	var mon time.Month
 	switch used {
 	case "2006-01-02T15:04:05":
@@ -47,7 +47,7 @@ func ParseLocalSchedule(local, timeZone string) (time.Time, error) {
 		if err2 != nil {
 			return time.Time{}, fmt.Errorf("%w: bad local time", ErrInvalid)
 		}
-		y, mon, day, hour, min, sec = t.Y, t.Mon, t.D, t.H, t.M, t.S
+		y, mon, day, hour, minute, sec = t.Y, t.Mon, t.D, t.H, t.M, t.S
 	default:
 		var err2 error
 		var t struct {
@@ -58,10 +58,10 @@ func ParseLocalSchedule(local, timeZone string) (time.Time, error) {
 		if err2 != nil {
 			return time.Time{}, fmt.Errorf("%w: bad local time", ErrInvalid)
 		}
-		y, mon, day, hour, min, sec = t.Y, t.Mon, t.D, t.H, t.M, 0
+		y, mon, day, hour, minute, sec = t.Y, t.Mon, t.D, t.H, t.M, 0
 	}
-	literal := time.Date(y, mon, day, hour, min, sec, 0, loc)
-	if literal.In(loc).Format("2006-01-02T15:04:05") != fmt.Sprintf("%04d-%02d-%02dT%02d:%02d:%02d", y, mon, day, hour, min, sec) {
+	literal := time.Date(y, mon, day, hour, minute, sec, 0, loc)
+	if literal.In(loc).Format("2006-01-02T15:04:05") != fmt.Sprintf("%04d-%02d-%02dT%02d:%02d:%02d", y, mon, day, hour, minute, sec) {
 		return time.Time{}, fmt.Errorf("%w: local time does not exist in timezone", ErrInvalid)
 	}
 	// 重叠小时：Date 与 ParseInLocation 可能不同；取较早 UTC。
@@ -87,6 +87,7 @@ func WithinLateWindow(scheduledAt, now time.Time) bool {
 // DeliveryDisposition 根据计划时刻与当前时间决定投递处置。
 type DeliveryDisposition string
 
+// 投递处置常量。
 const (
 	DispositionWait    DeliveryDisposition = "wait"
 	DispositionDeliver DeliveryDisposition = "deliver"

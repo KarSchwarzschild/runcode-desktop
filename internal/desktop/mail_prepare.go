@@ -75,6 +75,10 @@ func (a *App) ConfirmMailSend(req protocol.ConfirmMailSendRequest) (protocol.Con
 	if err != nil {
 		return protocol.ConfirmMailSendResult{}, wireError(err)
 	}
+	// 入队前必须有派发器：否则确认成功、SMTP 永不发生（自测同步发信会掩盖此缝）。
+	if err := a.ensureMailDispatcher(); err != nil {
+		return protocol.ConfirmMailSendResult{}, wireError(err)
+	}
 	ctx := context.Background()
 	now := time.Now().UTC()
 	conf, err := st.GetConfirmation(ctx, id, mailOwners())
@@ -121,13 +125,119 @@ func (a *App) ConfirmMailSend(req protocol.ConfirmMailSendRequest) (protocol.Con
 		// 投递意图已落库；草稿状态更新失败不回滚确认，返回事实。
 		return protocol.ConfirmMailSendResult{}, wireError(err)
 	}
-	a.wakeMailDispatcher()
-	return protocol.ConfirmMailSendResult{
+
+	result := protocol.ConfirmMailSendResult{
 		SubmissionID: sub.ID,
 		Status:       status,
 		DraftID:      d.ID,
 		Revision:     d.Revision,
-	}, nil
+	}
+	// immediate：与「确认发送测试邮件」同路径同步 SMTP，避免只入队、派发器未跑导致「点了确认却收不到」。
+	// scheduled：仍只入队，由 dispatcher 到期投递。
+	if snap.DispatchMode != mail.ModeScheduledAt {
+		delivStatus, detail := a.deliverSubmissionSync(st, sub, snap, items)
+		result.Status = delivStatus
+		result.Detail = detail
+		return result, nil
+	}
+	a.wakeMailDispatcher()
+	return result, nil
+}
+
+// deliverSubmissionSync 在确认线程内认领并投递（与自测信同一 SMTP 预算）；挡住 dispatcher 以免双投。
+func (a *App) deliverSubmissionSync(st *mail.Store, sub mail.Submission, snap mail.PreparedSnapshot, items []mail.SubmissionItem) (status, detail string) {
+	release := a.holdMailAdmission("confirm-immediate")
+	defer release()
+
+	ctx, cancel := context.WithTimeout(context.Background(), mailTestSendBudget)
+	defer cancel()
+
+	final := mail.StatusAccepted
+	var lastDetail string
+	for _, seed := range items {
+		now := time.Now().UTC()
+		claimed, err := st.ClaimItem(ctx, seed.ID, now)
+		if err != nil {
+			if errors.Is(err, mail.ErrConflict) {
+				if cur, loadErr := st.LoadItem(ctx, seed.ID, mailOwners()); loadErr == nil {
+					switch cur.Status {
+					case mail.StatusAccepted:
+						continue
+					case mail.StatusFailed, mail.StatusUnknown:
+						final = cur.Status
+						lastDetail = cur.BlockedReason
+					}
+				}
+				continue
+			}
+			final = mail.StatusFailed
+			lastDetail = err.Error()
+			_ = st.ReconcileSubmission(ctx, sub.ID, now)
+			continue
+		}
+		_ = st.ReconcileSubmission(ctx, sub.ID, now)
+
+		if ok, reason := a.mailAccountGate(ctx, snap.AccountID); !ok {
+			if reason == "" {
+				reason = "account_unavailable"
+			}
+			_ = st.FinishItem(ctx, claimed.ID, mail.StatusFailed, reason, now)
+			_ = st.ReconcileSubmission(ctx, sub.ID, now)
+			final = mail.StatusFailed
+			lastDetail = reason
+			continue
+		}
+		dayKey := time.Now().In(mailQuotaLocation()).Format("2006-01-02")
+		if err := st.ReserveQuota(ctx, claimed.OwnerScope, snap.AccountID, dayKey, claimed.ID, 1, mail.DailyQuotaDefault); err != nil {
+			reason := "quota_reserve_failed"
+			if errors.Is(err, mail.ErrQuotaExceeded) {
+				reason = "quota_exceeded"
+			}
+			_ = st.FinishItem(ctx, claimed.ID, mail.StatusFailed, reason, now)
+			_ = st.ReconcileSubmission(ctx, sub.ID, now)
+			final = mail.StatusFailed
+			lastDetail = reason
+			continue
+		}
+
+		delivStatus, reason, delivErr := a.mailDeliver(ctx, claimed, snap, sub)
+		fin := time.Now().UTC()
+		if reason == "" && delivErr != nil {
+			reason = delivErr.Error()
+		}
+		switch delivStatus {
+		case mail.StatusAccepted, mail.StatusUnknown:
+			_ = st.ConsumeQuota(ctx, claimed.OwnerScope, claimed.ID)
+			_ = st.FinishItem(ctx, claimed.ID, delivStatus, reason, fin)
+			if delivStatus == mail.StatusUnknown {
+				final = mail.StatusUnknown
+				lastDetail = reason
+			}
+		case mail.StatusFailed:
+			_ = st.ReleaseQuota(ctx, claimed.OwnerScope, claimed.ID)
+			_ = st.FinishItem(ctx, claimed.ID, mail.StatusFailed, reason, fin)
+			final = mail.StatusFailed
+			lastDetail = reason
+		default:
+			_ = st.ConsumeQuota(ctx, claimed.OwnerScope, claimed.ID)
+			_ = st.FinishItem(ctx, claimed.ID, mail.StatusUnknown, "invalid_delivery_status", fin)
+			final = mail.StatusUnknown
+			lastDetail = "invalid_delivery_status"
+		}
+		_ = st.ReconcileSubmission(ctx, sub.ID, fin)
+	}
+	if final == mail.StatusAccepted {
+		lastDetail = ""
+	}
+	return final, lastDetail
+}
+
+func mailQuotaLocation() *time.Location {
+	loc, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return time.FixedZone("CST", 8*3600)
+	}
+	return loc
 }
 
 // mailLiveGate 在 Prepare/Confirm 再过一遍账号与 OA 边界。
@@ -201,7 +311,7 @@ func hashFileSHA256(path string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	h := sha256.New()
 	if _, err := io.Copy(h, io.LimitReader(f, maxMailAttachmentBytes+1)); err != nil {
 		return "", err
@@ -209,7 +319,7 @@ func hashFileSHA256(path string) (string, error) {
 	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
-func buildSubmissionItems(snap mail.PreparedSnapshot, subID, status string, now time.Time) []mail.SubmissionItem {
+func buildSubmissionItems(snap mail.PreparedSnapshot, subID, status string, _ time.Time) []mail.SubmissionItem {
 	recipients := append([]mail.MailAddress(nil), snap.ResolvedTo...)
 	if snap.SendMode == mail.ModeTogether {
 		// together：一封多人，单 item 用第一个收件人代表；其余在 SMTP 步展开。

@@ -514,10 +514,11 @@ export interface ConfirmMailSendRequest {
   confirmationId: string;
 }
 
-// Mirrors protocol.ConfirmMailSendResult. ConfirmMailSendResult 报告投递意图已入队；真实 SMTP 由独立 dispatcher 异步执行。
+// Mirrors protocol.ConfirmMailSendResult. ConfirmMailSendResult 报告确认结果。 immediate：尽量同步 SMTP，status 为 accepted/failed/unknown；scheduled：仅入队为 scheduled。
 export interface ConfirmMailSendResult {
   submissionId: string;
   status: string;
+  detail?: string;
   draftId: string;
   revision: number;
 }
@@ -796,6 +797,12 @@ export interface ListMailGroupsRequest {
   offset?: number;
 }
 
+// Mirrors protocol.ListMailOutboxRequest. ListMailOutboxRequest 分页发件箱（投递项）。
+export interface ListMailOutboxRequest {
+  limit?: number;
+  offset?: number;
+}
+
 // Mirrors protocol.MCPServerInfo. MCPServerInfo is one configured MCP server plus its live connection state, for the UI's MCP management page.
 export interface MCPServerInfo {
   name: string;
@@ -877,7 +884,7 @@ export interface MailConnectionTestResult {
   message: string;
 }
 
-// Mirrors protocol.MailContactImportPreview.
+// Mirrors protocol.MailContactImportPreview. MailContactImportPreview 是通信录 CSV 导入预检结果。
 export interface MailContactImportPreview {
   accept: MailContactImportRow[] | null;
   skip: string[] | null;
@@ -927,6 +934,22 @@ export interface MailGroupView {
   memberIds: string[] | null;
   createdAtUtc: string;
   updatedAtUtc: string;
+}
+
+// Mirrors protocol.MailOutboxEntryView. MailOutboxEntryView 是发件箱一行；状态来自投递项，失败原因不含凭据。
+export interface MailOutboxEntryView {
+  itemId: string;
+  submissionId: string;
+  draftId: string;
+  draftRevision: number;
+  subject: string;
+  recipient: string;
+  status: string;
+  blockedReason?: string;
+  scheduledAtUtc?: string;
+  finishedAtUtc?: string;
+  createdAtUtc: string;
+  attemptCount: number;
 }
 
 // Mirrors protocol.MailSendPreview. MailSendPreview 是本人确认前的只读定稿摘要。

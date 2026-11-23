@@ -27,12 +27,12 @@ type Dispatcher struct {
 	deliver DeliverFunc
 	gate    AccountGate
 
-	mu      sync.Mutex
-	started bool
-	holds   map[string]int
-	wake    chan struct{}
-	cancel  context.CancelFunc
-	done    chan struct{}
+	mu       sync.Mutex
+	started  bool
+	holds    map[string]int
+	wake     chan struct{}
+	cancel   context.CancelFunc
+	done     chan struct{}
 	lastSent time.Time
 }
 
@@ -201,30 +201,36 @@ func (d *Dispatcher) dispatchOnce(ctx context.Context) {
 }
 
 func (d *Dispatcher) processClaimed(ctx context.Context, item SubmissionItem, now time.Time) {
+	finish := func(status, reason string, when time.Time) {
+		_ = d.store.FinishItem(ctx, item.ID, status, reason, when)
+		_ = d.store.ReconcileSubmission(ctx, item.SubmissionID, when)
+	}
+	_ = d.store.ReconcileSubmission(ctx, item.SubmissionID, now)
+
 	sub, err := d.store.GetSubmission(ctx, item.SubmissionID, []string{item.OwnerScope})
 	if err != nil {
-		_ = d.store.FinishItem(ctx, item.ID, StatusFailed, "submission_missing", now)
+		finish(StatusFailed, "submission_missing", now)
 		return
 	}
 	snap, err := d.store.GetPreparedSnapshot(ctx, sub.SnapshotID, []string{item.OwnerScope})
 	if err != nil {
-		_ = d.store.FinishItem(ctx, item.ID, StatusFailed, "snapshot_missing", now)
+		finish(StatusFailed, "snapshot_missing", now)
 		return
 	}
 	if ok, reason := d.gate(ctx, snap.AccountID); !ok {
 		if reason == "" {
 			reason = "account_unavailable"
 		}
-		_ = d.store.FinishItem(ctx, item.ID, StatusFailed, reason, now)
+		finish(StatusFailed, reason, now)
 		return
 	}
 	dayKey := quotaDayKey(now)
 	if err := d.store.ReserveQuota(ctx, item.OwnerScope, snap.AccountID, dayKey, item.ID, 1, DailyQuotaDefault); err != nil {
 		if errors.Is(err, ErrQuotaExceeded) {
-			_ = d.store.FinishItem(ctx, item.ID, StatusFailed, "quota_exceeded", now)
+			finish(StatusFailed, "quota_exceeded", now)
 			return
 		}
-		_ = d.store.FinishItem(ctx, item.ID, StatusFailed, "quota_reserve_failed", now)
+		finish(StatusFailed, "quota_reserve_failed", now)
 		return
 	}
 
@@ -236,16 +242,16 @@ func (d *Dispatcher) processClaimed(ctx context.Context, item SubmissionItem, no
 		if reason == "" && deliverErr != nil {
 			reason = deliverErr.Error()
 		}
-		_ = d.store.FinishItem(ctx, item.ID, status, sanitizeDetail(reason), fin)
+		finish(status, sanitizeDetail(reason), fin)
 	case StatusFailed:
 		_ = d.store.ReleaseQuota(ctx, item.OwnerScope, item.ID)
 		if reason == "" && deliverErr != nil {
 			reason = deliverErr.Error()
 		}
-		_ = d.store.FinishItem(ctx, item.ID, StatusFailed, sanitizeDetail(reason), fin)
+		finish(StatusFailed, sanitizeDetail(reason), fin)
 	default:
 		_ = d.store.ConsumeQuota(ctx, item.OwnerScope, item.ID)
-		_ = d.store.FinishItem(ctx, item.ID, StatusUnknown, "invalid_delivery_status", fin)
+		finish(StatusUnknown, "invalid_delivery_status", fin)
 	}
 }
 

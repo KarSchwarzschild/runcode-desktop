@@ -55,7 +55,7 @@ func (s *Store) ListAttempts(ctx context.Context, itemID string, owners []string
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Attempt
 	for rows.Next() {
 		var a Attempt

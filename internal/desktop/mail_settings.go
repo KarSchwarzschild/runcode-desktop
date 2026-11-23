@@ -316,9 +316,10 @@ func (a *App) SaveMailAccount(req protocol.SaveMailAccountRequest) (protocol.Mai
 				rec.ReceiptConfirmedAt = prev.ReceiptConfirmedAt
 				rec.LastTestShortID = prev.LastTestShortID
 				rec.LastTestSubmissionID = prev.LastTestSubmissionID
-				if prev.OnboardingStatus == protocol.MailStatusReceiptConfirmed {
+				switch prev.OnboardingStatus {
+				case protocol.MailStatusReceiptConfirmed:
 					rec.OnboardingStatus = protocol.MailStatusReceiptConfirmed
-				} else if prev.OnboardingStatus == protocol.MailStatusTestMailAccepted {
+				case protocol.MailStatusTestMailAccepted:
 					rec.OnboardingStatus = protocol.MailStatusTestMailAccepted
 				}
 			}

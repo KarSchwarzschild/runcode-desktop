@@ -16,8 +16,13 @@ func TestPrepareConfirmRejectsStaleRevisionAndReuse(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "mail.sqlite3")
 	openMailStore = func(string) (*mail.Store, error) { return mail.OpenStore(db) }
 	t.Cleanup(func() {
-		openMailStore = func(path string) (*mail.Store, error) { return mail.OpenStore(path) }
+		openMailStore = mail.OpenStore
 	})
+	mock := &mockMailSMTP{sendStatus: mail.StatusAccepted}
+	withMockMailSMTP(t, mock)
+	prevU := mailUnprotectSecret
+	mailUnprotectSecret = func(string) (string, bool) { return "pw", true }
+	t.Cleanup(func() { mailUnprotectSecret = prevU })
 
 	if err := updateRawConfig(func(cfg *desktopConfig) error {
 		cfg.MailAccount = &mailAccountRecord{
@@ -30,6 +35,13 @@ func TestPrepareConfirmRejectsStaleRevisionAndReuse(t *testing.T) {
 	}
 
 	app := &App{}
+	t.Cleanup(func() {
+		if d := app.mailDispatcher(); d != nil {
+			d.Stop()
+		}
+		app.setMailUnavailable("test done")
+		resetMailStoreForTest()
+	})
 	st, err := app.mailStore()
 	if err != nil {
 		t.Fatal(err)
@@ -42,7 +54,7 @@ func TestPrepareConfirmRejectsStaleRevisionAndReuse(t *testing.T) {
 	now := time.Now().UTC()
 	edited, err := mail.ApplyDraftEdit(d, mail.DraftEdit{
 		AccountID: "acc1", Subject: "主题", BodyMarkdown: "正文",
-		To: []mail.MailAddress{{Address: "to@ex.com"}},
+		To:       []mail.MailAddress{{Address: "to@ex.com"}},
 		SendMode: mail.ModeTogether, DispatchMode: mail.ModeImmediate,
 	}, now)
 	if err != nil {
@@ -70,8 +82,18 @@ func TestPrepareConfirmRejectsStaleRevisionAndReuse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Status != mail.StatusQueued || res.SubmissionID == "" {
-		t.Fatalf("res=%+v", res)
+	if res.Status != mail.StatusAccepted || res.SubmissionID == "" {
+		t.Fatalf("immediate confirm must sync-deliver, res=%+v", res)
+	}
+	if mock.sends.Load() < 1 {
+		t.Fatal("confirm must SMTP like self-test")
+	}
+	outbox, err := app.ListMailOutbox(protocol.ListMailOutboxRequest{Limit: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(outbox) == 0 || outbox[0].Status != mail.StatusAccepted {
+		t.Fatalf("outbox=%+v", outbox)
 	}
 	_, err = app.ConfirmMailSend(protocol.ConfirmMailSendRequest{ConfirmationID: prep.ConfirmationID})
 	if err == nil {

@@ -8,6 +8,7 @@ const api = vi.hoisted(() => ({
   listMailDrafts: vi.fn(),
   listMailContacts: vi.fn(),
   listMailGroups: vi.fn(),
+  listMailOutbox: vi.fn(),
   getMailDraft: vi.fn(),
   createMailDraft: vi.fn(),
   saveMailDraft: vi.fn(),
@@ -36,7 +37,7 @@ const onOpenSettings = vi.fn()
 const draftA = {
   id: 'd1',
   revision: 1,
-  status: 'draft_ready',
+  status: 'draft',
   accountId: '',
   subject: '主题甲',
   bodyMarkdown: '正文 **甲**',
@@ -57,6 +58,7 @@ beforeEach(() => {
   api.listMailDrafts.mockResolvedValue([draftA])
   api.listMailContacts.mockResolvedValue([])
   api.listMailGroups.mockResolvedValue([])
+  api.listMailOutbox.mockResolvedValue([])
   api.getMailDraft.mockResolvedValue(draftA)
   host = document.createElement('div')
   document.body.append(host)
@@ -143,10 +145,23 @@ describe('MailPage', () => {
     expect(preview?.textContent).not.toContain('正文')
   })
 
-  it('outbox tab is placeholder and does not send', async () => {
+  it('outbox tab lists delivery rows without sending', async () => {
+    api.listMailOutbox.mockResolvedValue([{
+      itemId: 'item1',
+      submissionId: 'sub1',
+      draftId: 'd1',
+      draftRevision: 1,
+      subject: '请假申请',
+      recipient: 'a@example.com',
+      status: 'accepted',
+      createdAtUtc: '2026-01-01T00:00:00Z',
+      attemptCount: 1,
+    }])
     await mount()
-    await click('发件箱（0）')
+    await click('发件箱（1）')
     expect(host.querySelector('[data-testid="mail-outbox"]')).toBeTruthy()
+    expect(host.textContent).toContain('请假申请')
+    expect(host.textContent).toContain('已送达')
     expect(api.saveMailDraft).not.toHaveBeenCalled()
     expect(api.createMailDraft).not.toHaveBeenCalled()
   })

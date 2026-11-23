@@ -2,6 +2,7 @@ package mail
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -34,7 +35,7 @@ func TestStoreContactCRUDAndDuplicateEmail(t *testing.T) {
 	if err != nil || next.Revision != 2 {
 		t.Fatalf("%+v %v", next, err)
 	}
-	if _, err := s.SaveContact(ctx, c, c.Revision); err != ErrConflict {
+	if _, err := s.SaveContact(ctx, c, c.Revision); !errors.Is(err, ErrConflict) {
 		t.Fatalf("want conflict got %v", err)
 	}
 	_ = c2
@@ -96,7 +97,7 @@ func TestStoreGroupAndDraftUserCreate(t *testing.T) {
 	}
 	// 冲突不覆盖
 	next.Subject = "冲突"
-	if _, err := s.SaveDraft(ctx, next, d.Revision); err != ErrConflict {
+	if _, err := s.SaveDraft(ctx, next, d.Revision); !errors.Is(err, ErrConflict) {
 		t.Fatalf("want conflict %v", err)
 	}
 	list, err := s.ListDrafts(ctx, []string{"o"}, 50, 0)
@@ -119,7 +120,7 @@ func TestStoreForeignOwnerHiddenContacts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetContact(ctx, c.ID, []string{"b"}); err != ErrNotFound {
+	if _, err := s.GetContact(ctx, c.ID, []string{"b"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("%v", err)
 	}
 }

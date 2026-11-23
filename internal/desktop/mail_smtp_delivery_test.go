@@ -187,22 +187,22 @@ func mustTestCert(t *testing.T, host string) (certPEM, keyPEM []byte) {
 	return certPEM, keyPEM
 }
 
-func withTestTLSRoots(t *testing.T, certPEM []byte, serverName string) {
+func withTestTLSRoots(t *testing.T, certPEM []byte) {
 	t.Helper()
 	pool := x509.NewCertPool()
 	if !pool.AppendCertsFromPEM(certPEM) {
 		t.Fatal("bad cert")
 	}
 	prev := mailTLSConfig
-	mailTLSConfig = func(host string) *tls.Config {
-		return &tls.Config{ServerName: serverName, RootCAs: pool, MinVersion: tls.VersionTLS12}
+	mailTLSConfig = func(_ string) *tls.Config {
+		return &tls.Config{ServerName: "127.0.0.1", RootCAs: pool, MinVersion: tls.VersionTLS12}
 	}
 	t.Cleanup(func() { mailTLSConfig = prev })
 }
 
 func TestSMTPSendMessageAuthFailure(t *testing.T) {
 	srv := startFakeSMTPTLS(t, fakeSMTPBehavior{authFail: true, password: "secret-pass"})
-	withTestTLSRoots(t, srv.certPEM, "127.0.0.1")
+	withTestTLSRoots(t, srv.certPEM)
 	msg := mustOutbound(t, "a@example.com")
 	res, err := realMailSMTP{}.SendMessage(context.Background(), srv.host, srv.port, "user@example.com", "secret-pass", msg)
 	if err == nil || res.Status != "failed" {
@@ -217,7 +217,7 @@ func TestSMTPSendMessageAuthFailure(t *testing.T) {
 
 func TestSMTPSendMessageRcptRejectAbandonsData(t *testing.T) {
 	srv := startFakeSMTPTLS(t, fakeSMTPBehavior{rcptReject: "bad@example.com"})
-	withTestTLSRoots(t, srv.certPEM, "127.0.0.1")
+	withTestTLSRoots(t, srv.certPEM)
 	msg, err := mail.BuildOutboundMessage(
 		mail.DisplayFrom{Address: "me@example.com"},
 		mail.PreparedSnapshot{
@@ -253,7 +253,7 @@ func TestSMTPSendMessageRcptRejectAbandonsData(t *testing.T) {
 
 func TestSMTPSendMessageDataReplyLostIsUnknown(t *testing.T) {
 	srv := startFakeSMTPTLS(t, fakeSMTPBehavior{dropData: true})
-	withTestTLSRoots(t, srv.certPEM, "127.0.0.1")
+	withTestTLSRoots(t, srv.certPEM)
 	res, err := realMailSMTP{}.SendMessage(context.Background(), srv.host, srv.port, "me@example.com", "pw", mustOutbound(t, "a@example.com"))
 	if res.Status != "unknown" {
 		t.Fatalf("status=%s err=%v", res.Status, err)
@@ -262,7 +262,7 @@ func TestSMTPSendMessageDataReplyLostIsUnknown(t *testing.T) {
 
 func TestSMTPSendMessageQuitFailStillAccepted(t *testing.T) {
 	srv := startFakeSMTPTLS(t, fakeSMTPBehavior{quitFail: true})
-	withTestTLSRoots(t, srv.certPEM, "127.0.0.1")
+	withTestTLSRoots(t, srv.certPEM)
 	res, err := realMailSMTP{}.SendMessage(context.Background(), srv.host, srv.port, "me@example.com", "pw", mustOutbound(t, "a@example.com"))
 	if err != nil || res.Status != "accepted" {
 		t.Fatalf("status=%s err=%v", res.Status, err)

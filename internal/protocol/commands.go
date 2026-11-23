@@ -197,6 +197,7 @@ var CommandKinds = map[string]hostproto.CommandKind{
 	"SaveMailDraft":            hostproto.CommandIdempotentSet,
 	"PrepareMailSend":          hostproto.CommandTrigger,
 	"ConfirmMailSend":          hostproto.CommandTrigger,
+	"ListMailOutbox":           hostproto.CommandQuery,
 
 	// 自动化任务。查询可重试；暂停是幂等目标态；创建靠 clientRequestId 去重，
 	// 但仍是一次会落库的变更。关闭和退出交给宿主，没有注入时明确失败。

@@ -33,12 +33,13 @@ func (s *Store) ListContacts(ctx context.Context, owners []string, q string, lim
 		args = append(args, like, like)
 	}
 	args = append(args, limit, offset)
+	//nolint:gosec // G202: where 仅含固定片段与 ownerInClause 生成的 ? 占位符，值全在 args。
 	rows, err := s.db.QueryContext(ctx, `SELECT id, owner_scope, revision, name, emails_json, created_at_utc, updated_at_utc
 		FROM contacts WHERE `+where+` ORDER BY lower(name), id LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	return scanContacts(rows)
 }
 
@@ -152,13 +153,15 @@ func (s *Store) ListGroups(ctx context.Context, owners []string, limit, offset i
 		offset = 0
 	}
 	ownerPh, ownerArgs := ownerInClause(owners)
-	args := append(ownerArgs, limit, offset)
+	args := append([]any{}, ownerArgs...)
+	args = append(args, limit, offset)
+	//nolint:gosec // G202: ownerPh 仅为 ? 占位符列表。
 	rows, err := s.db.QueryContext(ctx, `SELECT id, owner_scope, revision, name, member_ids_json, created_at_utc, updated_at_utc
 		FROM groups_meta WHERE owner_scope IN (`+ownerPh+`) ORDER BY lower(name), id LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out []Group
 	for rows.Next() {
 		var g Group
@@ -244,17 +247,19 @@ func (s *Store) DeleteGroup(ctx context.Context, id string, owners []string, exp
 	return nil
 }
 
-// PreviewContactImport 校验 CSV 行，返回可提交项与重复/错误摘要；不落盘。
+// ContactImportRow 是 CSV 导入的一行候选。
 type ContactImportRow struct {
 	Name   string   `json:"name"`
 	Emails []string `json:"emails"`
 }
 
+// ContactImportPreview 是导入预检结果；不落盘。
 type ContactImportPreview struct {
 	Accept []ContactImportRow `json:"accept"`
 	Skip   []string           `json:"skip"` // 人读原因
 }
 
+// PreviewContactImport 校验 CSV 行，返回可提交项与重复/错误摘要；不落盘。
 func (s *Store) PreviewContactImport(ctx context.Context, owner string, rows []ContactImportRow) (ContactImportPreview, error) {
 	existing, err := s.ListContacts(ctx, []string{owner}, "", 500, 0)
 	if err != nil {
@@ -331,17 +336,19 @@ func (s *Store) ListDrafts(ctx context.Context, owners []string, limit, offset i
 		limit = 50
 	}
 	ownerPh, ownerArgs := ownerInClause(owners)
-	args := append(ownerArgs, limit, offset)
+	args := append([]any{}, ownerArgs...)
+	args = append(args, limit, offset)
+	//nolint:gosec // G202: ownerPh 仅为 ? 占位符列表。
 	rows, err := s.db.QueryContext(ctx, `SELECT id FROM drafts WHERE owner_scope IN (`+ownerPh+`)
 		ORDER BY updated_at_utc DESC, id DESC LIMIT ? OFFSET ?`, args...)
 	if err != nil {
 		return nil, err
 	}
+	defer func() { _ = rows.Close() }()
 	var ids []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			_ = rows.Close()
 			return nil, err
 		}
 		ids = append(ids, id)

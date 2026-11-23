@@ -17,7 +17,7 @@ func TestMailSendEmailIdempotentAndNoSMTP(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "mail.sqlite3")
 	openMailStore = func(string) (*mail.Store, error) { return mail.OpenStore(db) }
 	t.Cleanup(func() {
-		openMailStore = func(path string) (*mail.Store, error) { return mail.OpenStore(path) }
+		openMailStore = mail.OpenStore
 	})
 
 	app := &App{}

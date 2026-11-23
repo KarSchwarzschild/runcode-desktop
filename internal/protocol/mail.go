@@ -215,6 +215,7 @@ type PreviewMailContactImportRequest struct {
 	Rows []MailContactImportRow `json:"rows"`
 }
 
+// MailContactImportPreview 是通信录 CSV 导入预检结果。
 type MailContactImportPreview struct {
 	Accept []MailContactImportRow `json:"accept"`
 	Skip   []string               `json:"skip"`
@@ -301,10 +302,34 @@ type ConfirmMailSendRequest struct {
 	ConfirmationID string `json:"confirmationId"`
 }
 
-// ConfirmMailSendResult 报告投递意图已入队；真实 SMTP 由独立 dispatcher 异步执行。
+// ConfirmMailSendResult 报告确认结果。
+// immediate：尽量同步 SMTP，status 为 accepted/failed/unknown；scheduled：仅入队为 scheduled。
 type ConfirmMailSendResult struct {
 	SubmissionID string `json:"submissionId"`
-	Status       string `json:"status"` // queued | scheduled
+	Status       string `json:"status"` // accepted | failed | unknown | queued | scheduled
+	Detail       string `json:"detail,omitempty"`
 	DraftID      string `json:"draftId"`
 	Revision     int64  `json:"revision"`
+}
+
+// ListMailOutboxRequest 分页发件箱（投递项）。
+type ListMailOutboxRequest struct {
+	Limit  int `json:"limit,omitempty"`
+	Offset int `json:"offset,omitempty"`
+}
+
+// MailOutboxEntryView 是发件箱一行；状态来自投递项，失败原因不含凭据。
+type MailOutboxEntryView struct {
+	ItemID         string `json:"itemId"`
+	SubmissionID   string `json:"submissionId"`
+	DraftID        string `json:"draftId"`
+	DraftRevision  int64  `json:"draftRevision"`
+	Subject        string `json:"subject"`
+	Recipient      string `json:"recipient"`
+	Status         string `json:"status"`
+	BlockedReason  string `json:"blockedReason,omitempty"`
+	ScheduledAtUTC string `json:"scheduledAtUtc,omitempty"`
+	FinishedAtUTC  string `json:"finishedAtUtc,omitempty"`
+	CreatedAtUTC   string `json:"createdAtUtc"`
+	AttemptCount   int    `json:"attemptCount"`
 }

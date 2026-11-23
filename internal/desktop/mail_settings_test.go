@@ -69,7 +69,7 @@ func TestMailSettingsProtectFailureDoesNotWrite(t *testing.T) {
 	mailProtectSecret = func(string) (string, bool) { return "", false }
 	t.Cleanup(func() { mailProtectSecret = prev })
 
-	fp := mustMailTestOK(t, app, "a@example.com", "secret", protocol.MailVersionStandard)
+	fp := mustMailTestOK(t, app, "a@example.com", "secret")
 	_, err := app.SaveMailAccount(protocol.SaveMailAccountRequest{
 		Address: "a@example.com", DisplayName: "A", Version: protocol.MailVersionStandard,
 		Password: "secret", ConfigFingerprint: fp, ExpectedRevision: 0, Enabled: true,
@@ -97,7 +97,7 @@ func TestMailSettingsBlankPasswordKeepsCiphertext(t *testing.T) {
 	}
 	t.Cleanup(func() { mailProtectSecret = prevP; mailUnprotectSecret = prevU })
 
-	fp := mustMailTestOK(t, app, "a@example.com", "secret", protocol.MailVersionStandard)
+	fp := mustMailTestOK(t, app, "a@example.com", "secret")
 	view, err := app.SaveMailAccount(protocol.SaveMailAccountRequest{
 		Address: "a@example.com", DisplayName: "A", Version: protocol.MailVersionStandard,
 		Password: "secret", ConfigFingerprint: fp, ExpectedRevision: 0, Enabled: true,
@@ -109,7 +109,7 @@ func TestMailSettingsBlankPasswordKeepsCiphertext(t *testing.T) {
 		t.Fatalf("%+v", view.Account)
 	}
 
-	fp2 := mustMailTestOK(t, app, "a@example.com", "secret", protocol.MailVersionStandard)
+	fp2 := mustMailTestOK(t, app, "a@example.com", "secret")
 	view, err = app.SaveMailAccount(protocol.SaveMailAccountRequest{
 		Address: "a@example.com", DisplayName: "A2", Version: protocol.MailVersionStandard,
 		Password: "", ConfigFingerprint: fp2, ExpectedRevision: view.Account.Revision, Enabled: true,
@@ -134,7 +134,7 @@ func TestMailSettingsViewNeverReturnsPassword(t *testing.T) {
 	mailProtectSecret = func(s string) (string, bool) { return "enc:" + s, true }
 	t.Cleanup(func() { mailProtectSecret = prevP })
 
-	fp := mustMailTestOK(t, app, "a@example.com", "secret", protocol.MailVersionStandard)
+	fp := mustMailTestOK(t, app, "a@example.com", "secret")
 	_, err := app.SaveMailAccount(protocol.SaveMailAccountRequest{
 		Address: "a@example.com", Version: protocol.MailVersionStandard,
 		Password: "secret", ConfigFingerprint: fp, Enabled: true,
@@ -187,7 +187,7 @@ func TestMailConfigChangeInvalidatesOldTest(t *testing.T) {
 	mailProtectSecret = func(s string) (string, bool) { return "enc:" + s, true }
 	t.Cleanup(func() { mailProtectSecret = prevP })
 
-	fp := mustMailTestOK(t, app, "a@example.com", "old", protocol.MailVersionStandard)
+	fp := mustMailTestOK(t, app, "a@example.com", "old")
 	_, err := app.SaveMailAccount(protocol.SaveMailAccountRequest{
 		Address: "a@example.com", Version: protocol.MailVersionStandard,
 		Password: "new", ConfigFingerprint: fp, Enabled: true,
@@ -207,7 +207,7 @@ func TestMailSelfTestRejectsExternalRecipientInjection(t *testing.T) {
 	mailUnprotectSecret = func(s string) (string, bool) { return strings.TrimPrefix(s, "enc:"), true }
 	t.Cleanup(func() { mailProtectSecret = prevP; mailUnprotectSecret = prevU })
 
-	fp := mustMailTestOK(t, app, "me@example.com", "secret", protocol.MailVersionStandard)
+	fp := mustMailTestOK(t, app, "me@example.com", "secret")
 	view, err := app.SaveMailAccount(protocol.SaveMailAccountRequest{
 		Address: "me@example.com", Version: protocol.MailVersionStandard,
 		Password: "secret", ConfigFingerprint: fp, Enabled: true,
@@ -238,7 +238,7 @@ func TestMailSelfTestIdempotentClientRequest(t *testing.T) {
 	mailUnprotectSecret = func(s string) (string, bool) { return strings.TrimPrefix(s, "enc:"), true }
 	t.Cleanup(func() { mailProtectSecret = prevP; mailUnprotectSecret = prevU })
 
-	fp := mustMailTestOK(t, app, "me@example.com", "secret", protocol.MailVersionStandard)
+	fp := mustMailTestOK(t, app, "me@example.com", "secret")
 	view, err := app.SaveMailAccount(protocol.SaveMailAccountRequest{
 		Address: "me@example.com", Version: protocol.MailVersionStandard,
 		Password: "secret", ConfigFingerprint: fp, Enabled: true,
@@ -274,7 +274,7 @@ func TestMailUnknownDoesNotAutoRetry(t *testing.T) {
 	mailUnprotectSecret = func(s string) (string, bool) { return strings.TrimPrefix(s, "enc:"), true }
 	t.Cleanup(func() { mailProtectSecret = prevP; mailUnprotectSecret = prevU })
 
-	fp := mustMailTestOK(t, app, "me@example.com", "secret", protocol.MailVersionStandard)
+	fp := mustMailTestOK(t, app, "me@example.com", "secret")
 	view, err := app.SaveMailAccount(protocol.SaveMailAccountRequest{
 		Address: "me@example.com", Version: protocol.MailVersionStandard,
 		Password: "secret", ConfigFingerprint: fp, Enabled: true,
@@ -344,10 +344,10 @@ func TestLoadConfigDoesNotExposeMailPassword(t *testing.T) {
 	}
 }
 
-func mustMailTestOK(t *testing.T, app *App, address, password, version string) string {
+func mustMailTestOK(t *testing.T, app *App, address, password string) string {
 	t.Helper()
 	res, err := app.TestMailConnection(protocol.TestMailConnectionRequest{
-		Address: address, Password: password, Version: version,
+		Address: address, Password: password, Version: protocol.MailVersionStandard,
 	})
 	if err != nil || !res.OK || res.ConfigFingerprint == "" {
 		t.Fatalf("test: %+v err=%v", res, err)

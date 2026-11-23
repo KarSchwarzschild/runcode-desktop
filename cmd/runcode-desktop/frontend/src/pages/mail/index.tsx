@@ -19,6 +19,21 @@ function parseAddresses(raw: string): { address: string }[] {
   return raw.split(/[,;，；\s]+/).map((s) => s.trim()).filter(Boolean).map((address) => ({ address }))
 }
 
+function statusLabel(status: string | undefined): string {
+  switch (status) {
+    case 'draft': return '草稿'
+    case 'queued': return '已入队'
+    case 'scheduled': return '已排期'
+    case 'sending': return '发送中'
+    case 'accepted': return '已送达'
+    case 'failed': return '失败'
+    case 'unknown': return '结果未知'
+    case 'missed': return '错过窗口'
+    case 'cancelled': return '已取消'
+    default: return status || '—'
+  }
+}
+
 export function MailPage({
   onOpenSettings,
   initialDraftId,
@@ -45,6 +60,7 @@ export function MailPage({
   const [importSkip, setImportSkip] = useState<string[]>([])
   const [sendPrep, setSendPrep] = useState<PrepareMailSendResult | null>(null)
   const [confirming, setConfirming] = useState(false)
+  const [notice, setNotice] = useState('')
 
   const dirty = !!draft && (
     editSubject !== draft.subject
@@ -171,13 +187,32 @@ export function MailPage({
     if (!sendPrep || confirming) return
     setConfirming(true)
     mail.setError('')
+    setNotice('')
     try {
-      await mail.confirmSend(sendPrep.confirmationId)
+      const res = await mail.confirmSend(sendPrep.confirmationId)
       setSendPrep(null)
-      if (draft) {
-        const refreshed = await mail.loadDraft(draft.id)
-        setDraft(refreshed)
+      if (res.status === 'accepted') {
+        setNotice('邮件已发送（服务器已接受）。可在发件箱查看记录。')
+      } else if (res.status === 'scheduled') {
+        setNotice('已排期投递；发件箱可查看进度。')
+      } else if (res.status === 'unknown') {
+        setNotice('发送结果待核实：邮件可能已发出，请先查收件箱，不要立即重发。')
+      } else if (res.status === 'failed') {
+        mail.setError(res.detail ? `发送失败：${res.detail}` : '发送失败，请查看发件箱中的原因')
+        setNotice('')
+      } else {
+        setNotice(`已提交（${res.status}）；发件箱可查看投递结果。`)
       }
+      setTab('outbox')
+      if (draft) {
+        try {
+          const refreshed = await mail.loadDraft(draft.id)
+          setDraft(refreshed)
+        } catch {
+          // 投递后草稿可能仍可读；失败不挡发件箱。
+        }
+      }
+      await mail.reload()
     } catch (e) {
       mail.setError(errText(e) || '确认失败，未发送')
     } finally {
@@ -234,8 +269,8 @@ export function MailPage({
     { id: 'drafts' as const, label: `草稿（${mail.drafts.length}）` },
     { id: 'contacts' as const, label: '通信录' },
     { id: 'groups' as const, label: '分组' },
-    { id: 'outbox' as const, label: '发件箱（0）' },
-  ]), [mail.drafts.length])
+    { id: 'outbox' as const, label: `发件箱（${mail.outbox.length}）` },
+  ]), [mail.drafts.length, mail.outbox.length])
 
   return (
     <PageShell
@@ -249,6 +284,11 @@ export function MailPage({
       )}
     >
       {mail.error && <InlineError>{mail.error}</InlineError>}
+      {notice && !mail.error && (
+        <div className="rounded-field border border-line2 bg-surface2 px-3 py-2 text-[13px] text-ink" data-testid="mail-send-notice">
+          {notice}
+        </div>
+      )}
       {!mail.hasAccount && (
         <div className="rounded-field border border-amber/40 bg-amber/10 px-3 py-2 text-[13px] text-amberink" data-testid="mail-no-account">
           尚未接入邮箱账号。仍可起草与维护通信录；发送请先
@@ -298,7 +338,8 @@ export function MailPage({
             ) : (
               <>
                 <div className="text-[12px] text-muted" data-testid="mail-draft-status">
-                  修订 {draft.revision} · {dirty ? '未保存修改' : '已保存'}
+                  修订 {draft.revision} · {statusLabel(draft.status)}
+                  {' · '}{dirty ? '未保存修改' : '已保存'}
                   {draft.proposalMd ? ' · 含模型提案原文（只读）' : ''}
                 </div>
                 <label className={LABEL_CLS}>主题
@@ -362,7 +403,10 @@ export function MailPage({
                   <button
                     type="button"
                     className={`${BTN} ${BTN_PRIMARY}`}
-                    disabled={saving || confirming || !mail.hasAccount}
+                    disabled={
+                      saving || confirming || !mail.hasAccount
+                      || ['queued', 'scheduled', 'sending', 'accepted', 'unknown'].includes(draft.status)
+                    }
                     onClick={() => void checkAndSend()}
                     data-testid="mail-check-send"
                     title={!mail.hasAccount ? '请先接入邮箱账号' : undefined}
@@ -437,10 +481,32 @@ export function MailPage({
       )}
 
       {!mail.loading && tab === 'outbox' && (
-        <div data-testid="mail-outbox">
-          <Placeholder pad="lg">
-            发件箱将在发送链路接入后显示已提交记录。本步不发信。
-          </Placeholder>
+        <div className="flex flex-col gap-3" data-testid="mail-outbox">
+          <div className="flex justify-end">
+            <button type="button" className={BTN} onClick={() => void mail.reload()}>刷新</button>
+          </div>
+          {mail.outbox.length === 0 ? (
+            <Placeholder pad="lg">暂无投递记录。确认发送后会出现在这里。</Placeholder>
+          ) : (
+            <ul className="m-0 p-0 list-none flex flex-col gap-2">
+              {mail.outbox.map((e) => (
+                <li
+                  key={e.itemId}
+                  className="border border-line2 rounded-field px-3 py-2 text-[13px] flex flex-col gap-1"
+                  data-testid="mail-outbox-row"
+                >
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <span className="font-medium text-ink">{e.subject || '（无主题）'}</span>
+                    <span className="text-[12px] text-muted">{statusLabel(e.status)}</span>
+                  </div>
+                  <div className="text-[12px] text-muted">收件人 {e.recipient || '—'}</div>
+                  {e.blockedReason ? (
+                    <div className="text-[12px] text-amberink">原因：{e.blockedReason}</div>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

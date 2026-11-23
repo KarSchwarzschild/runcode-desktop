@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // SQLite driver registration for database/sql
 )
 
 // Store 是邮件业务的独立 SQLite 存储；密码不得写入本库。
@@ -324,6 +324,67 @@ func (s *Store) loadItem(ctx context.Context, id string) (SubmissionItem, error)
 	it.ScheduledAtUTC = parseTimePtr(sched)
 	it.ClaimedAtUTC = parseTimePtr(claimed)
 	it.FinishedAtUTC = parseTimePtr(finished)
+	return it, nil
+}
+
+// ClaimItem 认领指定未开始项（供 immediate 确认同步投递）；迟到窗口外标 missed。
+func (s *Store) ClaimItem(ctx context.Context, id string, now time.Time) (SubmissionItem, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return SubmissionItem{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var recip string
+	var it SubmissionItem
+	var sched, claimed, finished sql.NullString
+	err = tx.QueryRowContext(ctx, `SELECT id, submission_id, owner_scope, recipient_json, status, blocked_reason,
+		scheduled_at_utc, claimed_at_utc, finished_at_utc, attempt_count FROM submission_items WHERE id=?`, id).Scan(
+		&it.ID, &it.SubmissionID, &it.OwnerScope, &recip, &it.Status, &it.BlockedReason,
+		&sched, &claimed, &finished, &it.AttemptCount,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return SubmissionItem{}, ErrNotFound
+	}
+	if err != nil {
+		return SubmissionItem{}, err
+	}
+	_ = json.Unmarshal([]byte(recip), &it.Recipient)
+	it.ScheduledAtUTC = parseTimePtr(sched)
+	if it.Status != StatusQueued && it.Status != StatusScheduled {
+		return it, ErrConflict
+	}
+	if claimed.Valid && claimed.String != "" {
+		return it, ErrConflict
+	}
+	if it.ScheduledAtUTC != nil && !WithinLateWindow(*it.ScheduledAtUTC, now) {
+		_, err = tx.ExecContext(ctx, `UPDATE submission_items SET status=?, blocked_reason=?, finished_at_utc=? WHERE id=? AND claimed_at_utc IS NULL`,
+			StatusMissed, "late_window_exceeded", fmtTime(now), it.ID)
+		if err != nil {
+			return SubmissionItem{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return SubmissionItem{}, err
+		}
+		return SubmissionItem{}, ErrNotFound
+	}
+	res, err := tx.ExecContext(ctx, `UPDATE submission_items SET status=?, claimed_at_utc=?, attempt_count=attempt_count+1
+		WHERE id=? AND claimed_at_utc IS NULL AND status IN (?, ?)`,
+		StatusSending, fmtTime(now), it.ID, StatusQueued, StatusScheduled)
+	if err != nil {
+		return SubmissionItem{}, err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return SubmissionItem{}, ErrConflict
+	}
+	if err := tx.Commit(); err != nil {
+		return SubmissionItem{}, err
+	}
+	it.Status = StatusSending
+	c := now.UTC()
+	it.ClaimedAtUTC = &c
+	it.AttemptCount++
 	return it, nil
 }
 

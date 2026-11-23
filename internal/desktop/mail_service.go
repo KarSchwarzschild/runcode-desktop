@@ -39,8 +39,7 @@ func (a *App) initMail() {
 	mailStoreInst = st
 	mailStoreMu.Unlock()
 
-	d := mail.NewDispatcher(st, mail.SystemClock{}, a.mailDeliver, a.mailAccountGate)
-	if err := d.Start(context.Background()); err != nil {
+	if err := a.attachMailDispatcher(st); err != nil {
 		_ = st.Close()
 		mailStoreMu.Lock()
 		mailStoreInst = nil
@@ -49,12 +48,45 @@ func (a *App) initMail() {
 		debugLog("mail dispatcher start: %v", err)
 		return
 	}
+}
+
+// attachMailDispatcher 把派发器挂到同一 Store；已有派发器则复用，避免双循环重复投递。
+func (a *App) attachMailDispatcher(st *mail.Store) error {
+	if a == nil || st == nil {
+		return fmt.Errorf("mail unavailable")
+	}
 	a.mailCtl.mu.Lock()
-	a.mailCtl.available = true
-	a.mailCtl.reason = ""
+	defer a.mailCtl.mu.Unlock()
+	if a.mailCtl.dispatch != nil {
+		a.mailCtl.store = st
+		a.mailCtl.available = true
+		a.mailCtl.reason = ""
+		return nil
+	}
+	d := mail.NewDispatcher(st, mail.SystemClock{}, a.mailDeliver, a.mailAccountGate)
+	if err := d.Start(context.Background()); err != nil {
+		return err
+	}
 	a.mailCtl.dispatch = d
 	a.mailCtl.store = st
-	a.mailCtl.mu.Unlock()
+	a.mailCtl.available = true
+	a.mailCtl.reason = ""
+	return nil
+}
+
+// ensureMailDispatcher 在确认发信前保证派发器活着；修「库懒打开但无人投递」的缝。
+func (a *App) ensureMailDispatcher() error {
+	st, err := a.mailStore()
+	if err != nil {
+		return err
+	}
+	if err := a.attachMailDispatcher(st); err != nil {
+		return fmt.Errorf("邮件派发器不可用: %w", err)
+	}
+	if a.mailDispatcher() == nil {
+		return fmt.Errorf("邮件派发器不可用")
+	}
+	return nil
 }
 
 func (a *App) setMailUnavailable(reason string) {
@@ -207,11 +239,10 @@ func (a *App) recordMailAttempts(ctx context.Context, item mail.SubmissionItem, 
 	now := time.Now().UTC()
 	for i, p := range res.Phases {
 		_ = st.RecordAttempt(ctx, mail.Attempt{
-			ID: fmt.Sprintf("att-%s-%d", item.ID, i),
+			ID:     fmt.Sprintf("att-%s-%d", item.ID, i),
 			ItemID: item.ID, OwnerScope: item.OwnerScope,
 			Phase: p.Phase, Outcome: p.Outcome, Detail: p.Detail,
 			StartedAtUTC: now, FinishedAtUTC: now,
 		})
 	}
 }
-

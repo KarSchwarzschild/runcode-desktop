@@ -21,11 +21,11 @@ func tempStore(t *testing.T) *Store {
 	return s
 }
 
-func sampleDraft(id, owner, tool string) Draft {
+func sampleDraft(id string) Draft {
 	now := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
 	return Draft{
-		ID: id, OwnerScope: owner, AccountID: "acc1", Revision: 1, Status: StatusDraft,
-		Source:  DraftSource{SessionID: "s1", TurnID: "t1", ToolUseID: tool, ProposalMD: "提案", CreatedAtUTC: now},
+		ID: id, OwnerScope: "owner-a", AccountID: "acc1", Revision: 1, Status: StatusDraft,
+		Source:  DraftSource{SessionID: "s1", TurnID: "t1", ToolUseID: "tool-1", ProposalMD: "提案", CreatedAtUTC: now},
 		Subject: "主题", BodyMarkdown: "正文",
 		To:       []MailAddress{{Address: "a@example.com"}},
 		SendMode: ModeTogether, DispatchMode: ModeImmediate,
@@ -41,7 +41,7 @@ func TestStoreReopenKeepsDraft(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := context.Background()
-	d, err := s1.CreateDraftFromProposal(ctx, sampleDraft("d1", "owner-a", "tool-1"))
+	d, err := s1.CreateDraftFromProposal(ctx, sampleDraft("d1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,11 +63,11 @@ func TestStoreReopenKeepsDraft(t *testing.T) {
 func TestStoreProposalIdempotent(t *testing.T) {
 	s := tempStore(t)
 	ctx := context.Background()
-	d1, err := s.CreateDraftFromProposal(ctx, sampleDraft("d1", "owner-a", "tool-1"))
+	d1, err := s.CreateDraftFromProposal(ctx, sampleDraft("d1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	d2 := sampleDraft("d-other", "owner-a", "tool-1")
+	d2 := sampleDraft("d-other")
 	d2.Subject = "第二次"
 	got, err := s.CreateDraftFromProposal(ctx, d2)
 	if err != nil {
@@ -81,7 +81,7 @@ func TestStoreProposalIdempotent(t *testing.T) {
 func TestStoreRevisionCAS(t *testing.T) {
 	s := tempStore(t)
 	ctx := context.Background()
-	d, err := s.CreateDraftFromProposal(ctx, sampleDraft("d1", "owner-a", "tool-1"))
+	d, err := s.CreateDraftFromProposal(ctx, sampleDraft("d1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +98,7 @@ func TestStoreRevisionCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	next.Subject = "冲突"
-	if _, err := s.SaveDraft(ctx, next, d.Revision); err != ErrConflict {
+	if _, err := s.SaveDraft(ctx, next, d.Revision); !errors.Is(err, ErrConflict) {
 		t.Fatalf("want conflict got %v", err)
 	}
 }
@@ -106,11 +106,11 @@ func TestStoreRevisionCAS(t *testing.T) {
 func TestStoreForeignOwnerHidden(t *testing.T) {
 	s := tempStore(t)
 	ctx := context.Background()
-	d, err := s.CreateDraftFromProposal(ctx, sampleDraft("d1", "owner-a", "tool-1"))
+	d, err := s.CreateDraftFromProposal(ctx, sampleDraft("d1"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.GetDraft(ctx, d.ID, []string{"owner-b"}); err != ErrNotFound {
+	if _, err := s.GetDraft(ctx, d.ID, []string{"owner-b"}); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -165,7 +165,7 @@ func TestStoreCancelVersusClaimRace(t *testing.T) {
 		t.Fatalf("%s", claimed.Status)
 	}
 	_, err = s.CancelItem(ctx, "item1", []string{"owner-a"}, now)
-	if err != ErrConflict {
+	if !errors.Is(err, ErrConflict) {
 		t.Fatalf("want conflict after claim, got %v", err)
 	}
 }
@@ -190,11 +190,12 @@ func TestStoreQuotaCap300(t *testing.T) {
 	close(errs)
 	ok, fail := 0, 0
 	for err := range errs {
-		if err == nil {
+		switch {
+		case err == nil:
 			ok++
-		} else if err == ErrQuotaExceeded {
+		case errors.Is(err, ErrQuotaExceeded):
 			fail++
-		} else {
+		default:
 			t.Fatalf("unexpected %v", err)
 		}
 	}

@@ -20,7 +20,7 @@ const mailOwnerLocal = "local"
 var (
 	mailStoreMu   sync.Mutex
 	mailStoreInst *mail.Store
-	openMailStore = func(path string) (*mail.Store, error) { return mail.OpenStore(path) }
+	openMailStore = mail.OpenStore
 )
 
 func mailDBPath() (string, error) {
@@ -272,6 +272,43 @@ func (a *App) ListMailDrafts(req protocol.ListMailDraftsRequest) ([]protocol.Mai
 		out = append(out, publicMailDraft(d))
 	}
 	return out, nil
+}
+
+// ListMailOutbox 列出发件箱投递项（含终态与失败原因）。
+func (a *App) ListMailOutbox(req protocol.ListMailOutboxRequest) ([]protocol.MailOutboxEntryView, error) {
+	st, err := a.mailStore()
+	if err != nil {
+		return nil, wireError(err)
+	}
+	list, err := st.ListOutbox(context.Background(), mailOwners(), req.Limit, req.Offset)
+	if err != nil {
+		return nil, wireError(err)
+	}
+	out := make([]protocol.MailOutboxEntryView, 0, len(list))
+	for _, e := range list {
+		out = append(out, publicMailOutbox(e))
+	}
+	return out, nil
+}
+
+func publicMailOutbox(e mail.OutboxEntry) protocol.MailOutboxEntryView {
+	v := protocol.MailOutboxEntryView{
+		ItemID: e.ItemID, SubmissionID: e.SubmissionID, DraftID: e.DraftID,
+		DraftRevision: e.DraftRevision, Subject: e.Subject,
+		Recipient: e.Recipient.Address, Status: e.Status, BlockedReason: e.BlockedReason,
+		CreatedAtUTC: e.CreatedAtUTC.UTC().Format(time.RFC3339Nano),
+		AttemptCount: e.AttemptCount,
+	}
+	if e.Recipient.Name != "" && e.Recipient.Address != "" {
+		v.Recipient = e.Recipient.Name + " <" + e.Recipient.Address + ">"
+	}
+	if e.ScheduledAtUTC != nil {
+		v.ScheduledAtUTC = e.ScheduledAtUTC.UTC().Format(time.RFC3339Nano)
+	}
+	if e.FinishedAtUTC != nil {
+		v.FinishedAtUTC = e.FinishedAtUTC.UTC().Format(time.RFC3339Nano)
+	}
+	return v
 }
 
 // GetMailDraft 读取草稿。

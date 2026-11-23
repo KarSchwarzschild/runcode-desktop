@@ -321,8 +321,8 @@ func newWithBuild(sink EventSink, build host.BuildFunc) *App {
 		if err != nil {
 			return nil, err
 		}
-		if real, ok := session.(*engine.Session); ok {
-			return &imageGenerationInvocationSession{Session: real, app: a, sessionID: cfg.SessionID}, nil
+		if engSess, ok := session.(*engine.Session); ok {
+			return &imageGenerationInvocationSession{Session: engSess, app: a, sessionID: cfg.SessionID}, nil
 		}
 		return session, nil
 	}

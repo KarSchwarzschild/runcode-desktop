@@ -44,7 +44,9 @@ type AccountRef struct {
 	Display   string
 }
 
-// MailAddress 是已规范化的邮箱地址。
+// MailAddress 是已规范化的邮箱地址（与协议字段同名，避免跨层映射歧义）。
+//
+//nolint:revive // stutter intentional: matches wire MailAddress
 type MailAddress struct {
 	Name    string
 	Address string
@@ -107,7 +109,7 @@ type DraftEdit struct {
 	TimeZone       string
 }
 
-// Contact / Group 通信录实体。
+// Contact 是通信录联系人。
 type Contact struct {
 	ID           string
 	OwnerScope   string
@@ -118,6 +120,7 @@ type Contact struct {
 	UpdatedAtUTC time.Time
 }
 
+// Group 是通信录分组。
 type Group struct {
 	ID           string
 	OwnerScope   string
@@ -161,7 +164,7 @@ type Confirmation struct {
 	CreatedAtUTC  time.Time
 }
 
-// Submission / Item / Attempt 记录投递意图与尝试。
+// Submission 记录一次确认后的投递意图。
 type Submission struct {
 	ID             string
 	OwnerScope     string
@@ -175,6 +178,7 @@ type Submission struct {
 	UpdatedAtUTC   time.Time
 }
 
+// SubmissionItem 是提交下的单封投递项。
 type SubmissionItem struct {
 	ID             string
 	SubmissionID   string
@@ -188,6 +192,7 @@ type SubmissionItem struct {
 	AttemptCount   int
 }
 
+// Attempt 记录一次 SMTP 阶段尝试。
 type Attempt struct {
 	ID            string
 	ItemID        string
