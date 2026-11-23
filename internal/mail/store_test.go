@@ -115,6 +115,21 @@ func TestStoreForeignOwnerHidden(t *testing.T) {
 	}
 }
 
+func TestStoreDeleteDraft(t *testing.T) {
+	s := tempStore(t)
+	ctx := context.Background()
+	d, err := s.CreateDraftFromProposal(ctx, sampleDraft("d-del"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteDraft(ctx, d.ID, []string{"owner-a"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.GetDraft(ctx, d.ID, []string{"owner-a"}); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("want gone, got %v", err)
+	}
+}
+
 func TestStoreSubmissionIdempotent(t *testing.T) {
 	s := tempStore(t)
 	ctx := context.Background()

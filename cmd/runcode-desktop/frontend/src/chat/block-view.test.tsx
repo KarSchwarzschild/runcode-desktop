@@ -36,6 +36,14 @@ it('shows frozen imagegen footnote on completed assistant replies only', () => {
   expect(streaming).not.toContain('修改生图设置')
 })
 
+it('shows mail-setup footnote with settings link on completed assistant replies', () => {
+  const done = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a1', text: '草稿好了', streaming: false, ts: '', mailSetupRequired: true }} onOpenMailSettings={() => {}} />)
+  expect(done).toContain('尚未接入邮箱')
+  expect(done).toContain('前往邮箱设置')
+  const streaming = renderToStaticMarkup(<BlockView block={{ kind: 'assistant', id: 'a2', text: '草稿', streaming: true, ts: '', mailSetupRequired: true }} onOpenMailSettings={() => {}} />)
+  expect(streaming).not.toContain('前往邮箱设置')
+})
+
 it('strips desktop-preview boilerplate from assistant text', () => {
   const html = renderToStaticMarkup(<BlockView block={{
     kind: 'assistant', id: 'a1',

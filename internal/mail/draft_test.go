@@ -143,11 +143,18 @@ func TestAmbiguousContactNameNotGuessed(t *testing.T) {
 }
 
 func TestToolResultIsDraftReadyNotSent(t *testing.T) {
-	m := ToolResultDraftReady("d1", 3)
+	m := ToolResultDraftReady("d1", 3, false)
 	if m["status"] != "draft_ready" {
 		t.Fatalf("%v", m)
 	}
+	if _, ok := m["needsMailSetup"]; ok {
+		t.Fatalf("needsMailSetup must be omitted when false: %v", m)
+	}
 	if strings.Contains(strings.ToLower(m["status"].(string)), "accept") {
 		t.Fatal("must not look like SMTP accepted")
+	}
+	setup := ToolResultDraftReady("d2", 1, true)
+	if setup["needsMailSetup"] != true {
+		t.Fatalf("want needsMailSetup: %v", setup)
 	}
 }

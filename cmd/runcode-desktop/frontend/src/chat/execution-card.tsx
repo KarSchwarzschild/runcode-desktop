@@ -44,6 +44,7 @@ export function ExecutionCard({ tools, harmAllows, oaBlocked }: {
         // 被 OA 闸门拦下的那一次不算"失败"：调用确实没跑成（模型据此停下来），
         // 但系统正在自动切换并重跑这一轮，红色报错会让用户以为要自己处理。
         const blockedModel = oaBlocked && t.toolUseID ? oaBlocked[t.toolUseID] : undefined
+        const mailReady = t.toolName === 'send_email' ? parseMailDraftReady(t) : null
         const iconColor = blockedModel ? 'text-faint' : st === 'failed' ? 'text-red' : st === 'running' ? 'text-primary' : 'text-faint'
         const rowBg = active ? 'bg-surface2' : 'hover:bg-surface2'
         return (
@@ -74,11 +75,15 @@ export function ExecutionCard({ tools, harmAllows, oaBlocked }: {
                 <span className="text-[11px] text-red bg-redbg rounded-md px-1.5 py-0.5 flex-none">{failText(t)}</span>
               ) : st === 'running' ? (
                 <Spinner size={14} />
-              ) : t.toolName === 'send_email' && parseMailDraftReady(t) ? (
+              ) : mailReady ? (
                 // 草稿就绪 ≠ 发送成功：单独文案，避免绿勾被理解成已发出。
-                <span className="text-[11px] text-muted bg-surface2 rounded-md px-1.5 py-0.5 flex-none inline-flex items-center gap-1">
-                  草稿已就绪 <CheckMark size={12} />
-                </span>
+                mailReady.needsMailSetup ? (
+                  <span className="text-[11px] text-amberink bg-amber/15 rounded-md px-1.5 py-0.5 flex-none">需先接入邮箱</span>
+                ) : (
+                  <span className="text-[11px] text-muted bg-surface2 rounded-md px-1.5 py-0.5 flex-none inline-flex items-center gap-1">
+                    草稿已就绪 <CheckMark size={12} />
+                  </span>
+                )
               ) : (
                 <span className="text-green flex-none"><CheckMark size={14} /></span>
               )}

@@ -401,7 +401,7 @@ function AppShell() {
             />
           ) : (
             <>
-              <MailDraftActionsContext.Provider value={{ openDraft: openMailDraft }}>
+              <MailDraftActionsContext.Provider value={{ openDraft: openMailDraft, openMailSettings: () => openSettings('mail') }}>
               <ArtifactActionsContext.Provider value={preview.actions}>
                 <ChatPaneWithRasterViewer
                   textOnly={restrictedConversation}
@@ -432,6 +432,7 @@ function AppShell() {
                   recorderCard={restrictedConversation ? undefined : <LiveRecorderCard rec={recorder} onOpenWindow={() => void showRecorderWindow()} />}
                   onGenerateMinutes={(m) => void sendRecordingRequest(m, 'doc')}
                   onOpenImageGenerationSettings={() => openSettings('image-generation')}
+                  onOpenMailSettings={() => openSettings('mail')}
                   sessionId={session.info?.sessionId}
                   sessionGeneration={String((session.info as { generation?: string } | null)?.generation ?? '')}
                 />

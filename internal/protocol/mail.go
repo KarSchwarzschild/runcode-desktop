@@ -133,16 +133,6 @@ type MailContactView struct {
 	UpdatedAtUTC string   `json:"updatedAtUtc"`
 }
 
-// MailGroupView 是分组。
-type MailGroupView struct {
-	ID           string   `json:"id"`
-	Revision     int64    `json:"revision"`
-	Name         string   `json:"name"`
-	MemberIDs    []string `json:"memberIds"`
-	CreatedAtUTC string   `json:"createdAtUtc"`
-	UpdatedAtUTC string   `json:"updatedAtUtc"`
-}
-
 // MailDraftView 是草稿编辑视图；含模型提案原文供对照，预览用用户修订字段。
 type MailDraftView struct {
 	ID             string            `json:"id"`
@@ -184,26 +174,6 @@ type DeleteMailContactRequest struct {
 	ExpectedRevision int64  `json:"expectedRevision"`
 }
 
-// ListMailGroupsRequest 分页分组。
-type ListMailGroupsRequest struct {
-	Limit  int `json:"limit,omitempty"`
-	Offset int `json:"offset,omitempty"`
-}
-
-// SaveMailGroupRequest 新建或 CAS 更新分组。
-type SaveMailGroupRequest struct {
-	ID               string   `json:"id,omitempty"`
-	Name             string   `json:"name"`
-	MemberIDs        []string `json:"memberIds"`
-	ExpectedRevision int64    `json:"expectedRevision"`
-}
-
-// DeleteMailGroupRequest 删除分组。
-type DeleteMailGroupRequest struct {
-	ID               string `json:"id"`
-	ExpectedRevision int64  `json:"expectedRevision"`
-}
-
 // MailContactImportRow 是 CSV 预览/提交的一行。
 type MailContactImportRow struct {
 	Name   string   `json:"name"`
@@ -234,6 +204,11 @@ type ListMailDraftsRequest struct {
 
 // GetMailDraftRequest 读取单草稿。
 type GetMailDraftRequest struct {
+	ID string `json:"id"`
+}
+
+// DeleteMailDraftRequest 删除草稿箱中的草稿。
+type DeleteMailDraftRequest struct {
 	ID string `json:"id"`
 }
 
@@ -318,13 +293,14 @@ type ListMailOutboxRequest struct {
 	Offset int `json:"offset,omitempty"`
 }
 
-// MailOutboxEntryView 是发件箱一行；状态来自投递项，失败原因不含凭据。
+// MailOutboxEntryView 是发件箱一行；状态来自投递项，失败原因不含凭据；正文为定稿快照只读。
 type MailOutboxEntryView struct {
 	ItemID         string `json:"itemId"`
 	SubmissionID   string `json:"submissionId"`
 	DraftID        string `json:"draftId"`
 	DraftRevision  int64  `json:"draftRevision"`
 	Subject        string `json:"subject"`
+	BodyMarkdown   string `json:"bodyMarkdown,omitempty"`
 	Recipient      string `json:"recipient"`
 	Status         string `json:"status"`
 	BlockedReason  string `json:"blockedReason,omitempty"`

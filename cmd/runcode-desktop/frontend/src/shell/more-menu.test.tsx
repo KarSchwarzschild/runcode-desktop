@@ -14,7 +14,7 @@ const bridge = vi.hoisted(() => ({
   getMailSettings: vi.fn(),
   listMailDrafts: vi.fn(),
   listMailContacts: vi.fn(),
-  listMailGroups: vi.fn(),
+  listMailOutbox: vi.fn(),
 }))
 
 vi.mock('@/core/bridge', () => ({
@@ -26,7 +26,7 @@ vi.mock('@/core/bridge', () => ({
   getMailSettings: bridge.getMailSettings,
   listMailDrafts: bridge.listMailDrafts,
   listMailContacts: bridge.listMailContacts,
-  listMailGroups: bridge.listMailGroups,
+  listMailOutbox: bridge.listMailOutbox,
   errText: (e: unknown) => (e instanceof Error ? e.message : String(e)),
   Events: {
     AutomationTaskChanged: 'automation:task_changed',
@@ -53,7 +53,7 @@ beforeEach(() => {
   bridge.getMailSettings.mockReset()
   bridge.listMailDrafts.mockReset()
   bridge.listMailContacts.mockReset()
-  bridge.listMailGroups.mockReset()
+  bridge.listMailOutbox.mockReset()
   bridge.getAutomationDefaults.mockResolvedValue({
     context: { viewId: 'view', epoch: 1 },
     available: true,
@@ -69,7 +69,7 @@ beforeEach(() => {
   bridge.getMailSettings.mockResolvedValue({ secretStorageOk: true })
   bridge.listMailDrafts.mockResolvedValue([])
   bridge.listMailContacts.mockResolvedValue([])
-  bridge.listMailGroups.mockResolvedValue([])
+  bridge.listMailOutbox.mockResolvedValue([])
   host = document.createElement('div')
   document.body.appendChild(host)
   root = createRoot(host)

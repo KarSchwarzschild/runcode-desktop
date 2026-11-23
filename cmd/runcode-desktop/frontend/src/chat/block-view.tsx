@@ -24,7 +24,7 @@ import {
 } from './image-generation-note'
 import type { CodePreviewTarget } from '@/preview/code-preview'
 
-export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings, sessionId, onOpenCodePreview }: {
+export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings, onOpenMailSettings, sessionId, onOpenCodePreview }: {
   textOnly?: boolean
   block: Block
   onRetryQuestion?: (id: string) => void
@@ -35,6 +35,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
   onGenerateMinutes?: (mark: RecordingMark) => void
   onContentHeightChange?: () => void
   onOpenImageGenerationSettings?: () => void
+  onOpenMailSettings?: () => void
   sessionId?: string
   onOpenCodePreview?: (target: CodePreviewTarget) => void
 }) {
@@ -113,6 +114,18 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                   </button>
                 ) : (
                   <span className="text-faint">在「设置 → 图片生成」中修改生图设置</span>
+                )}
+              </div>
+            )}
+            {!block.streaming && block.mailSetupRequired && (
+              <div className="text-[12px] text-amberink leading-snug flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span>尚未接入邮箱：请先填写邮箱地址与密码后再确认发送。</span>
+                {onOpenMailSettings ? (
+                  <button type="button" onClick={onOpenMailSettings} className="text-primary hover:underline cursor-pointer bg-transparent border-0 p-0 text-[12px]">
+                    前往邮箱设置
+                  </button>
+                ) : (
+                  <span className="text-faint">在「设置 → 邮箱」中接入</span>
                 )}
               </div>
             )}

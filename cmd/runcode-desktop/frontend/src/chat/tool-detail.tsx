@@ -208,10 +208,20 @@ export function ToolDetail({ tool }: { tool: ToolEvent }) {
         <ToolInputView tool={tool} />
         {tool.toolName === 'analyze_image' && ((tool.inputTokens ?? 0) + (tool.outputTokens ?? 0) > 0) && <p className="text-[11px] text-muted mt-2">识图用量：输入 {tool.inputTokens ?? 0} / 输出 {tool.outputTokens ?? 0} tokens · 独立调用用量；分析文字计入主模型上下文</p>}
         {mailReady && (
-          <div className="mt-2 flex flex-wrap gap-2 items-center">
-            <span className="text-[12px] text-muted">草稿已就绪 · 修订 {mailReady.revision ?? '—'}</span>
-            <button type="button" className={BTN} onClick={() => mailActions.openDraft(mailReady.draftId)}>编辑草稿</button>
-            <button type="button" className={BTN} onClick={() => mailActions.openDraft(mailReady.draftId)}>查看草稿</button>
+          <div className="mt-2 flex flex-col gap-2">
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-[12px] text-muted">草稿已就绪 · 修订 {mailReady.revision ?? '—'}</span>
+              <button type="button" className={BTN} onClick={() => mailActions.openDraft(mailReady.draftId)}>编辑草稿</button>
+              <button type="button" className={BTN} onClick={() => mailActions.openDraft(mailReady.draftId)}>查看草稿</button>
+            </div>
+            {mailReady.needsMailSetup && (
+              <div className="flex flex-wrap gap-2 items-center text-[12px] text-amberink">
+                <span>尚未设置邮箱地址与密码，确认发送前请先接入邮箱。</span>
+                <button type="button" className="text-primary hover:underline cursor-pointer bg-transparent border-0 p-0 text-[12px]" onClick={() => mailActions.openMailSettings()}>
+                  前往邮箱设置
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

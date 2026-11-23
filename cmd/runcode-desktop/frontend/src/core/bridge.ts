@@ -400,12 +400,11 @@ export type {
   TestMailConnectionRequest, MailConnectionTestResult,
   SendMailTestToSelfRequest, MailTestSendResult, ConfirmMailTestReceiptRequest,
   OpenMailOfficialURLRequest,
-  MailAddressView, MailContactView, MailGroupView, MailDraftView, MailOutboxEntryView,
+  MailAddressView, MailContactView, MailDraftView, MailOutboxEntryView,
   ListMailContactsRequest, SaveMailContactRequest, DeleteMailContactRequest,
-  ListMailGroupsRequest, SaveMailGroupRequest, DeleteMailGroupRequest,
   MailContactImportRow, PreviewMailContactImportRequest, MailContactImportPreview,
   CommitMailContactImportRequest, ListMailDraftsRequest, GetMailDraftRequest,
-  SaveMailDraftRequest, CreateMailDraftRequest, ListMailOutboxRequest,
+  DeleteMailDraftRequest, SaveMailDraftRequest, CreateMailDraftRequest, ListMailOutboxRequest,
   PrepareMailSendRequest, PrepareMailSendResult, MailSendPreview, MailAttachmentPreview,
   ConfirmMailSendRequest, ConfirmMailSendResult,
 } from './protocol/types'
@@ -413,9 +412,8 @@ export {
   getMailSettings, saveMailAccount, disableMailAccount, removeMailAccount,
   testMailConnection, sendMailTestToSelf, confirmMailTestReceipt, openMailOfficialURL,
   listMailContacts, saveMailContact, deleteMailContact,
-  listMailGroups, saveMailGroup, deleteMailGroup,
   previewMailContactImport, commitMailContactImport,
-  listMailDrafts, getMailDraft, createMailDraft, saveMailDraft, listMailOutbox,
+  listMailDrafts, getMailDraft, createMailDraft, saveMailDraft, deleteMailDraft, listMailOutbox,
   prepareMailSend, confirmMailSend,
 } from './protocol/commands'
 

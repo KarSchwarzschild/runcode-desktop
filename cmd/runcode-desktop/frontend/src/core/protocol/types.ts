@@ -601,10 +601,9 @@ export interface DeleteMailContactRequest {
   expectedRevision: number;
 }
 
-// Mirrors protocol.DeleteMailGroupRequest. DeleteMailGroupRequest 删除分组。
-export interface DeleteMailGroupRequest {
+// Mirrors protocol.DeleteMailDraftRequest. DeleteMailDraftRequest 删除草稿箱中的草稿。
+export interface DeleteMailDraftRequest {
   id: string;
-  expectedRevision: number;
 }
 
 // Mirrors protocol.DirectoryAccessChanged. DirectoryAccessChanged 使某一工作区的目录视图失效。
@@ -791,12 +790,6 @@ export interface ListMailDraftsRequest {
   offset?: number;
 }
 
-// Mirrors protocol.ListMailGroupsRequest. ListMailGroupsRequest 分页分组。
-export interface ListMailGroupsRequest {
-  limit?: number;
-  offset?: number;
-}
-
 // Mirrors protocol.ListMailOutboxRequest. ListMailOutboxRequest 分页发件箱（投递项）。
 export interface ListMailOutboxRequest {
   limit?: number;
@@ -926,23 +919,14 @@ export interface MailDraftView {
   createdAtUtc: string;
 }
 
-// Mirrors protocol.MailGroupView. MailGroupView 是分组。
-export interface MailGroupView {
-  id: string;
-  revision: number;
-  name: string;
-  memberIds: string[] | null;
-  createdAtUtc: string;
-  updatedAtUtc: string;
-}
-
-// Mirrors protocol.MailOutboxEntryView. MailOutboxEntryView 是发件箱一行；状态来自投递项，失败原因不含凭据。
+// Mirrors protocol.MailOutboxEntryView. MailOutboxEntryView 是发件箱一行；状态来自投递项，失败原因不含凭据；正文为定稿快照只读。
 export interface MailOutboxEntryView {
   itemId: string;
   submissionId: string;
   draftId: string;
   draftRevision: number;
   subject: string;
+  bodyMarkdown?: string;
   recipient: string;
   status: string;
   blockedReason?: string;
@@ -1529,14 +1513,6 @@ export interface SaveMailDraftRequest {
   dispatchMode: string;
   scheduledLocal?: string;
   timeZone?: string;
-}
-
-// Mirrors protocol.SaveMailGroupRequest. SaveMailGroupRequest 新建或 CAS 更新分组。
-export interface SaveMailGroupRequest {
-  id?: string;
-  name: string;
-  memberIds: string[] | null;
-  expectedRevision: number;
 }
 
 // Mirrors protocol.SaveModelContextSettingsRequest. SaveModelContextSettingsRequest replaces or clears one model preference.

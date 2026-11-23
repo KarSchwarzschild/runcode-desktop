@@ -8,13 +8,14 @@ import (
 	"time"
 )
 
-// OutboxEntry 是发件箱一行：投递项 + 定稿主题/草稿引用。
+// OutboxEntry 是发件箱一行：投递项 + 定稿主题/正文/草稿引用。
 type OutboxEntry struct {
 	ItemID         string
 	SubmissionID   string
 	DraftID        string
 	DraftRevision  int64
 	Subject        string
+	BodyMarkdown   string
 	Recipient      MailAddress
 	Status         string
 	BlockedReason  string
@@ -41,7 +42,7 @@ func (s *Store) ListOutbox(ctx context.Context, owners []string, limit, offset i
 	rows, err := s.db.QueryContext(ctx, `SELECT
 		i.id, i.submission_id, i.recipient_json, i.status, i.blocked_reason,
 		i.scheduled_at_utc, i.claimed_at_utc, i.finished_at_utc, i.attempt_count,
-		s.draft_id, s.draft_revision, s.created_at_utc, COALESCE(p.subject, '')
+		s.draft_id, s.draft_revision, s.created_at_utc, COALESCE(p.subject, ''), COALESCE(p.body_markdown, '')
 		FROM submission_items i
 		JOIN submissions s ON s.id = i.submission_id
 		LEFT JOIN prepared_snapshots p ON p.id = s.snapshot_id
@@ -62,7 +63,7 @@ func (s *Store) ListOutbox(ctx context.Context, owners []string, limit, offset i
 		if err := rows.Scan(
 			&e.ItemID, &e.SubmissionID, &recip, &e.Status, &e.BlockedReason,
 			&sched, &claimed, &finished, &e.AttemptCount,
-			&e.DraftID, &e.DraftRevision, &created, &e.Subject,
+			&e.DraftID, &e.DraftRevision, &created, &e.Subject, &e.BodyMarkdown,
 		); err != nil {
 			return nil, err
 		}

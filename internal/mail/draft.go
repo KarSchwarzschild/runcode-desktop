@@ -82,10 +82,15 @@ func ConfirmationStillValid(c Confirmation, draft Draft, now time.Time) error {
 }
 
 // ToolResultDraftReady 强调工具成功只表示草稿已创建。
-func ToolResultDraftReady(draftID string, revision int64) map[string]any {
-	return map[string]any{
+// needsMailSetup 为真时，前端应提示用户先接入邮箱并提供设置入口。
+func ToolResultDraftReady(draftID string, revision int64, needsMailSetup bool) map[string]any {
+	m := map[string]any{
 		"status":   "draft_ready",
 		"draftId":  draftID,
 		"revision": revision,
 	}
+	if needsMailSetup {
+		m["needsMailSetup"] = true
+	}
+	return m
 }

@@ -41,6 +41,39 @@ func TestMailSendEmailIdempotentAndNoSMTP(t *testing.T) {
 	if a.Status != "draft_ready" {
 		t.Fatalf("status=%s", a.Status)
 	}
+	if !a.NeedsMailSetup {
+		t.Fatal("no mailbox configured: want NeedsMailSetup")
+	}
+}
+
+func TestMailCreateProposalNeedsMailSetupClearsWhenAccountReady(t *testing.T) {
+	isolateConfigDir(t)
+	resetMailStoreForTest()
+	t.Cleanup(resetMailStoreForTest)
+	db := filepath.Join(t.TempDir(), "mail.sqlite3")
+	openMailStore = func(string) (*mail.Store, error) { return mail.OpenStore(db) }
+	t.Cleanup(func() { openMailStore = mail.OpenStore })
+
+	if err := updateRawConfig(func(cfg *desktopConfig) error {
+		cfg.MailAccount = &mailAccountRecord{
+			ID: "acc1", Address: "me@ex.com", Enabled: true,
+			PasswordProtected: "opaque", Host: "smtp.example.com", Port: 465,
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	host := mailDraftHost{app: &App{}, sessionID: "sess1"}
+	ready, err := host.CreateProposal(context.Background(), mailtool.SendInput{
+		Subject: "s", BodyMarkdown: "b", To: []mailtool.AddressIn{{Address: "a@ex.com"}},
+	}, mailtool.CallMeta{SessionID: "sess1", TurnID: "t", ToolUseID: "u"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ready.NeedsMailSetup {
+		t.Fatalf("configured account must clear NeedsMailSetup: %+v", ready)
+	}
 }
 
 func TestMailSendEmailOALockedRejected(t *testing.T) {

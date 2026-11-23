@@ -203,6 +203,29 @@ func (s *Store) GetDraft(ctx context.Context, id string, owners []string) (Draft
 	return d, nil
 }
 
+// DeleteDraft 删除仍属草稿箱的条目（draft/failed/cancelled/missed）；投递中/已送达不可删。
+func (s *Store) DeleteDraft(ctx context.Context, id string, owners []string) error {
+	d, err := s.GetDraft(ctx, id, owners)
+	if err != nil {
+		return err
+	}
+	switch d.Status {
+	case StatusDraft, StatusFailed, StatusCancelled, StatusMissed, StatusScheduled:
+		// ok
+	default:
+		return fmt.Errorf("%w: cannot delete draft in status %s", ErrInvalid, d.Status)
+	}
+	res, err := s.db.ExecContext(ctx, `DELETE FROM drafts WHERE id=?`, id)
+	if err != nil {
+		return err
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (s *Store) loadDraft(ctx context.Context, id string) (Draft, error) {
 	var d Draft
 	var toJ, ccJ, bccJ, attJ, srcCreated, created, updated string

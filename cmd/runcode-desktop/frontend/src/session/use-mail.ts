@@ -1,22 +1,21 @@
-// 邮箱业务页数据层：列表加载、草稿 CAS 保存、通信录/分组 CRUD、发件箱投递状态。
+// 邮箱业务页数据层：列表加载、草稿 CAS 保存、通信录、发件箱投递状态。
 // 账号是否可用只读 GetMailSettings；真实 SMTP 由后端 dispatcher 异步完成。
 import { useCallback, useEffect, useState } from 'react'
 import {
-  commitMailContactImport, confirmMailSend, createMailDraft, deleteMailContact, errText,
-  getMailDraft, getMailSettings, listMailContacts, listMailDrafts, listMailGroups, listMailOutbox,
-  prepareMailSend, previewMailContactImport, saveMailContact, saveMailDraft, saveMailGroup,
+  commitMailContactImport, confirmMailSend, createMailDraft, deleteMailContact, deleteMailDraft, errText,
+  getMailDraft, getMailSettings, listMailContacts, listMailDrafts, listMailOutbox,
+  prepareMailSend, previewMailContactImport, saveMailContact, saveMailDraft,
   type ConfirmMailSendResult, type MailContactImportRow, type MailContactView, type MailDraftView,
-  type MailGroupView, type MailOutboxEntryView, type MailSettings, type PrepareMailSendResult,
+  type MailOutboxEntryView, type MailSettings, type PrepareMailSendResult,
   type SaveMailDraftRequest,
 } from '@/core/bridge'
 
-export type MailTab = 'drafts' | 'contacts' | 'groups' | 'outbox'
+export type MailTab = 'drafts' | 'contacts' | 'outbox'
 
 export function useMail() {
   const [settings, setSettings] = useState<MailSettings | null>(null)
   const [drafts, setDrafts] = useState<MailDraftView[]>([])
   const [contacts, setContacts] = useState<MailContactView[]>([])
-  const [groups, setGroups] = useState<MailGroupView[]>([])
   const [outbox, setOutbox] = useState<MailOutboxEntryView[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -24,17 +23,15 @@ export function useMail() {
   const reload = useCallback(async () => {
     setError('')
     try {
-      const [s, d, c, g, o] = await Promise.all([
+      const [s, d, c, o] = await Promise.all([
         getMailSettings(),
         listMailDrafts({ limit: 50 }),
         listMailContacts({ limit: 50 }),
-        listMailGroups({ limit: 50 }),
         listMailOutbox({ limit: 50 }),
       ])
       setSettings(s)
       setDrafts(d ?? [])
       setContacts(c ?? [])
-      setGroups(g ?? [])
       setOutbox(o ?? [])
     } catch (e) {
       setError(errText(e) || '加载失败')
@@ -63,6 +60,11 @@ export function useMail() {
     return saved
   }
 
+  async function removeDraft(id: string): Promise<void> {
+    await deleteMailDraft({ id })
+    await reload()
+  }
+
   async function addContact(name: string, email: string): Promise<void> {
     await saveMailContact({ name, emails: [email], expectedRevision: 0 })
     await reload()
@@ -70,11 +72,6 @@ export function useMail() {
 
   async function removeContact(id: string, expectedRevision: number): Promise<void> {
     await deleteMailContact({ id, expectedRevision })
-    await reload()
-  }
-
-  async function addGroup(name: string): Promise<void> {
-    await saveMailGroup({ name, memberIds: [], expectedRevision: 0 })
     await reload()
   }
 
@@ -99,9 +96,9 @@ export function useMail() {
   }
 
   return {
-    settings, drafts, contacts, groups, outbox, loading, error, setError,
-    hasAccount, reload, loadDraft, createDraft, persistDraft,
-    addContact, removeContact, addGroup, importContacts,
+    settings, drafts, contacts, outbox, loading, error, setError,
+    hasAccount, reload, loadDraft, createDraft, persistDraft, removeDraft,
+    addContact, removeContact, importContacts,
     prepareSend, confirmSend,
   }
 }

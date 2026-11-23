@@ -12,7 +12,7 @@ import type { AssistantImageGenerationNote } from './image-generation-note'
 export type AgentNested = { agent: string; text: string; tools: ToolEvent[]; usage?: { inTok: number; outTok: number; durMs?: number } }
 export type Block =
   | { kind: 'user'; id: string; questionId?: string; text: string; ts: string; attachments?: string[] }
-  | { kind: 'assistant'; id: string; text: string; thinking?: string; streaming: boolean; ts: string; imageGenerationNote?: AssistantImageGenerationNote }
+  | { kind: 'assistant'; id: string; text: string; thinking?: string; streaming: boolean; ts: string; imageGenerationNote?: AssistantImageGenerationNote; mailSetupRequired?: boolean }
   // sessionId is the session the tool ran in; previews that open its files must
   // address that session, never whichever is focused.
   | { kind: 'tool'; id: string; tool: ToolEvent; nested?: AgentNested; sessionId?: string }

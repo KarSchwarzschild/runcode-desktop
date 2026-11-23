@@ -1,4 +1,4 @@
-// 更多 → 邮箱与通信录：草稿 / 通信录 / 分组 / 发件箱。
+// 更多 → 邮箱与通信录：草稿 / 通信录 / 发件箱。
 // 账号配置只跳转设置，本页不收集安全密码；编辑保存不发信。
 import { useEffect, useMemo, useState } from 'react'
 import { errText, type MailDraftView, type PrepareMailSendResult } from '@/core/bridge'
@@ -9,10 +9,21 @@ import { FIELD_CLS, LABEL_CLS } from '@/ui/fields'
 import { PageShell, Placeholder } from '@/ui/layout'
 import { ConfirmDialog } from '@/ui/confirm-dialog'
 import { isComposingKey } from '@/ui/keys'
+import { clearDraftSeen, isDraftSeen, markDraftSeen } from './draft-seen'
+import { MailMessageModal } from './mail-message-modal'
 import { MailSafePreview } from './safe-preview'
 
-function joinAddresses(addrs: { address: string }[] | null | undefined): string {
+function joinAddresses(addrs: { name?: string; address: string }[] | null | undefined): string {
   return (addrs ?? []).map((a) => a.address).filter(Boolean).join(', ')
+}
+
+function formatRecipients(addrs: { name?: string; address: string }[] | null | undefined): string {
+  return (addrs ?? []).map((a) => {
+    const addr = a.address?.trim()
+    if (!addr) return ''
+    const name = a.name?.trim()
+    return name ? `${name} <${addr}>` : addr
+  }).filter(Boolean).join(', ')
 }
 
 function parseAddresses(raw: string): { address: string }[] {
@@ -48,19 +59,21 @@ export function MailPage({
   const [editSubject, setEditSubject] = useState('')
   const [editBody, setEditBody] = useState('')
   const [editTo, setEditTo] = useState('')
-  const [previewMode, setPreviewMode] = useState(false)
   const [saving, setSaving] = useState(false)
   const [leaveOpen, setLeaveOpen] = useState(false)
   const [pendingTab, setPendingTab] = useState<MailTab | null>(null)
   const [pendingDraftId, setPendingDraftId] = useState<string | null>(null)
   const [contactName, setContactName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
-  const [groupName, setGroupName] = useState('')
   const [importText, setImportText] = useState('')
   const [importSkip, setImportSkip] = useState<string[]>([])
   const [sendPrep, setSendPrep] = useState<PrepareMailSendResult | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
   const [notice, setNotice] = useState('')
+  const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null)
+  const [seenTick, setSeenTick] = useState(0)
+  const [expandedOutboxId, setExpandedOutboxId] = useState<string | null>(null)
 
   const dirty = !!draft && (
     editSubject !== draft.subject
@@ -84,7 +97,8 @@ export function MailPage({
       setEditSubject(d.subject)
       setEditBody(d.bodyMarkdown)
       setEditTo(joinAddresses(d.to))
-      setPreviewMode(false)
+      markDraftSeen(d.id)
+      setSeenTick((n) => n + 1)
     }).catch((e) => {
       if (!cancelled) mail.setError(errText(e))
     })
@@ -154,7 +168,6 @@ export function MailPage({
       setEditTo(joinAddresses(saved.to))
       return saved
     } catch (e) {
-      // CAS/校验失败保留本地编辑，不覆盖。
       mail.setError(errText(e) || '保存失败，编辑已保留')
       return null
     } finally {
@@ -162,7 +175,7 @@ export function MailPage({
     }
   }
 
-  async function checkAndSend() {
+  async function openConfirmSend() {
     if (!draft) return
     if (dirty) {
       const saved = await saveDraft()
@@ -178,6 +191,7 @@ export function MailPage({
     try {
       const prep = await mail.prepareSend(d.id, d.revision)
       setSendPrep(prep)
+      setPreviewOpen(false)
     } catch (e) {
       mail.setError(errText(e) || '检查失败')
     }
@@ -203,15 +217,9 @@ export function MailPage({
       } else {
         setNotice(`已提交（${res.status}）；发件箱可查看投递结果。`)
       }
+      setDraft(null)
+      setActiveDraftId(null)
       setTab('outbox')
-      if (draft) {
-        try {
-          const refreshed = await mail.loadDraft(draft.id)
-          setDraft(refreshed)
-        } catch {
-          // 投递后草稿可能仍可读；失败不挡发件箱。
-        }
-      }
       await mail.reload()
     } catch (e) {
       mail.setError(errText(e) || '确认失败，未发送')
@@ -231,20 +239,29 @@ export function MailPage({
     }
   }
 
+  async function applyDeleteDraft() {
+    const id = deleteTargetId
+    if (!id) return
+    setDeleteTargetId(null)
+    mail.setError('')
+    try {
+      await mail.removeDraft(id)
+      clearDraftSeen(id)
+      setSeenTick((n) => n + 1)
+      if (activeDraftId === id) {
+        setActiveDraftId(null)
+        setDraft(null)
+      }
+    } catch (e) {
+      mail.setError(errText(e) || '删除失败')
+    }
+  }
+
   async function addContact() {
     try {
       await mail.addContact(contactName, contactEmail)
       setContactName('')
       setContactEmail('')
-    } catch (e) {
-      mail.setError(errText(e))
-    }
-  }
-
-  async function addGroup() {
-    try {
-      await mail.addGroup(groupName)
-      setGroupName('')
     } catch (e) {
       mail.setError(errText(e))
     }
@@ -268,14 +285,15 @@ export function MailPage({
   const tabs = useMemo(() => ([
     { id: 'drafts' as const, label: `草稿（${mail.drafts.length}）` },
     { id: 'contacts' as const, label: '通信录' },
-    { id: 'groups' as const, label: '分组' },
     { id: 'outbox' as const, label: `发件箱（${mail.outbox.length}）` },
   ]), [mail.drafts.length, mail.outbox.length])
+
+  // seenTick：标记已读后强制重渲列表紫点。
+  void seenTick
 
   return (
     <PageShell
       title="邮箱与通信录"
-      hint="在此编辑草稿与通信录；账号与安全密码请到设置。"
       width={960}
       action={(
         <button type="button" className={BTN} onClick={onOpenSettings}>
@@ -304,7 +322,7 @@ export function MailPage({
             type="button"
             role="tab"
             aria-selected={tab === t.id}
-            className={`px-3 py-1.5 text-[13px] rounded-field ${tab === t.id ? 'bg-surface2 text-ink font-medium' : 'text-muted hover:text-ink'}`}
+            className={`px-3 py-2 text-[15px] font-bold rounded-field cursor-pointer transition shadow-none hover:shadow-md ${tab === t.id ? 'bg-surface2 text-ink' : 'text-muted hover:text-ink'}`}
             onClick={() => requestTab(t.id)}
           >
             {t.label}
@@ -319,17 +337,36 @@ export function MailPage({
           <div className="flex flex-col gap-2">
             <button type="button" className={`${BTN} ${BTN_PRIMARY}`} onClick={() => void newDraft()}>新建草稿</button>
             <ul className="m-0 p-0 list-none flex flex-col gap-1" data-testid="mail-draft-list">
-              {mail.drafts.map((d) => (
-                <li key={d.id}>
-                  <button
-                    type="button"
-                    className={`w-full text-left px-2 py-2 rounded-field text-[13px] ${activeDraftId === d.id ? 'bg-surface2 text-ink' : 'text-muted hover:bg-surface2'}`}
-                    onClick={() => requestDraft(d.id)}
-                  >
-                    {d.subject || '（无主题）'}
-                  </button>
-                </li>
-              ))}
+              {mail.drafts.map((d) => {
+                const unseen = !isDraftSeen(d.id)
+                return (
+                  <li key={d.id} className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      className={`flex-1 min-w-0 text-left px-2 py-2 rounded-field text-[13px] cursor-pointer ${activeDraftId === d.id ? 'bg-surface2 text-ink' : 'text-muted hover:bg-surface2'}`}
+                      onClick={() => requestDraft(d.id)}
+                    >
+                      <span className="truncate block">{d.subject || '（无主题）'}</span>
+                    </button>
+                    {unseen ? (
+                      <span className="w-2 h-2 rounded-full bg-primary flex-none" data-testid="mail-draft-unseen" title="待查看" />
+                    ) : null}
+                    <button
+                      type="button"
+                      className={`${BTN} flex-none px-2 py-1 text-muted`}
+                      title="删除"
+                      aria-label="删除"
+                      data-testid="mail-draft-list-delete"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setDeleteTargetId(d.id)
+                      }}
+                    >
+                      ×
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           </div>
           <div className="flex flex-col gap-3 min-w-0">
@@ -337,19 +374,24 @@ export function MailPage({
               <Placeholder>选择或新建草稿</Placeholder>
             ) : (
               <>
-                <div className="text-[12px] text-muted" data-testid="mail-draft-status">
-                  修订 {draft.revision} · {statusLabel(draft.status)}
-                  {' · '}{dirty ? '未保存修改' : '已保存'}
-                  {draft.proposalMd ? ' · 含模型提案原文（只读）' : ''}
+                <div className="flex items-start justify-between gap-3">
+                  <label className={`${LABEL_CLS} flex-1 min-w-0`}>主题
+                    <input
+                      className={FIELD_CLS}
+                      value={editSubject}
+                      onChange={(e) => setEditSubject(e.target.value)}
+                      data-testid="mail-draft-subject"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    className={`${BTN} flex-none mt-5 text-red border-red bg-transparent`}
+                    data-testid="mail-delete-draft"
+                    onClick={() => setDeleteTargetId(draft.id)}
+                  >
+                    删除草稿
+                  </button>
                 </div>
-                <label className={LABEL_CLS}>主题
-                  <input
-                    className={FIELD_CLS}
-                    value={editSubject}
-                    onChange={(e) => setEditSubject(e.target.value)}
-                    data-testid="mail-draft-subject"
-                  />
-                </label>
                 <label className={LABEL_CLS}>收件人（逗号分隔）
                   <input
                     className={FIELD_CLS}
@@ -358,30 +400,15 @@ export function MailPage({
                     data-testid="mail-draft-to"
                   />
                 </label>
-                <div className="flex gap-2">
-                  <button type="button" className={BTN} aria-pressed={!previewMode} onClick={() => setPreviewMode(false)}>
-                    Markdown编辑
-                  </button>
-                  <button type="button" className={BTN} aria-pressed={previewMode} onClick={() => setPreviewMode(true)} data-testid="mail-preview-toggle">
-                    预览
-                  </button>
-                </div>
-                {previewMode ? (
-                  <div className="border border-line2 rounded-field p-3 bg-surface2 min-h-[200px]" data-testid="mail-preview">
-                    <MailSafePreview markdown={editBody} />
-                  </div>
-                ) : (
-                  <textarea
-                    className={`${FIELD_CLS} min-h-[220px] resize-y font-mono text-[13px]`}
-                    value={editBody}
-                    onChange={(e) => setEditBody(e.target.value)}
-                    data-testid="mail-draft-body"
-                    onKeyDown={(e) => {
-                      // 组字中 Enter 不触发任何发送；本页也无发送快捷键。
-                      if (isComposingKey(e)) return
-                    }}
-                  />
-                )}
+                <textarea
+                  className={`${FIELD_CLS} min-h-[220px] resize-y font-mono text-[13px]`}
+                  value={editBody}
+                  onChange={(e) => setEditBody(e.target.value)}
+                  data-testid="mail-draft-body"
+                  onKeyDown={(e) => {
+                    if (isComposingKey(e)) return
+                  }}
+                />
                 <div className="flex flex-wrap gap-2">
                   <button
                     type="button"
@@ -395,6 +422,17 @@ export function MailPage({
                   <button
                     type="button"
                     className={BTN}
+                    data-testid="mail-preview-toggle"
+                    onClick={() => {
+                      setPreviewOpen(true)
+                      setSendPrep(null)
+                    }}
+                  >
+                    预览
+                  </button>
+                  <button
+                    type="button"
+                    className={BTN}
                     disabled={!dirty}
                     onClick={discardLocalEdits}
                   >
@@ -403,15 +441,12 @@ export function MailPage({
                   <button
                     type="button"
                     className={`${BTN} ${BTN_PRIMARY}`}
-                    disabled={
-                      saving || confirming || !mail.hasAccount
-                      || ['queued', 'scheduled', 'sending', 'accepted', 'unknown'].includes(draft.status)
-                    }
-                    onClick={() => void checkAndSend()}
+                    disabled={saving || confirming || !mail.hasAccount}
+                    onClick={() => void openConfirmSend()}
                     data-testid="mail-check-send"
                     title={!mail.hasAccount ? '请先接入邮箱账号' : undefined}
                   >
-                    检查并发送
+                    发送
                   </button>
                 </div>
               </>
@@ -457,29 +492,6 @@ export function MailPage({
         </div>
       )}
 
-      {!mail.loading && tab === 'groups' && (
-        <div className="flex flex-col gap-4" data-testid="mail-groups">
-          <div className="flex flex-wrap gap-2 items-end">
-            <label className={LABEL_CLS}>分组名
-              <input className={FIELD_CLS} value={groupName} onChange={(e) => setGroupName(e.target.value)} />
-            </label>
-            <button type="button" className={`${BTN} ${BTN_PRIMARY}`} onClick={() => void addGroup()}>新建分组</button>
-          </div>
-          <ul className="m-0 p-0 list-none flex flex-col gap-2">
-            {mail.groups.map((g) => (
-              <li key={g.id} className="border border-line2 rounded-field px-3 py-2 text-[13px]">
-                {g.name} · {(g.memberIds ?? []).length} 人
-              </li>
-            ))}
-          </ul>
-          {mail.contacts.length > 1 && (
-            <p className="m-0 text-[12px] text-muted">
-              同名联系人须在后续加人分组时明确选择，不自动猜测。
-            </p>
-          )}
-        </div>
-      )}
-
       {!mail.loading && tab === 'outbox' && (
         <div className="flex flex-col gap-3" data-testid="mail-outbox">
           <div className="flex justify-end">
@@ -489,22 +501,36 @@ export function MailPage({
             <Placeholder pad="lg">暂无投递记录。确认发送后会出现在这里。</Placeholder>
           ) : (
             <ul className="m-0 p-0 list-none flex flex-col gap-2">
-              {mail.outbox.map((e) => (
-                <li
-                  key={e.itemId}
-                  className="border border-line2 rounded-field px-3 py-2 text-[13px] flex flex-col gap-1"
-                  data-testid="mail-outbox-row"
-                >
-                  <div className="flex flex-wrap items-baseline justify-between gap-2">
-                    <span className="font-medium text-ink">{e.subject || '（无主题）'}</span>
-                    <span className="text-[12px] text-muted">{statusLabel(e.status)}</span>
-                  </div>
-                  <div className="text-[12px] text-muted">收件人 {e.recipient || '—'}</div>
-                  {e.blockedReason ? (
-                    <div className="text-[12px] text-amberink">原因：{e.blockedReason}</div>
-                  ) : null}
-                </li>
-              ))}
+              {mail.outbox.map((e) => {
+                const open = expandedOutboxId === e.itemId
+                return (
+                  <li
+                    key={e.itemId}
+                    className="border border-line2 rounded-field px-3 py-2 text-[13px] flex flex-col gap-1"
+                    data-testid="mail-outbox-row"
+                  >
+                    <button
+                      type="button"
+                      className="w-full text-left bg-transparent border-0 p-0 cursor-pointer"
+                      onClick={() => setExpandedOutboxId(open ? null : e.itemId)}
+                    >
+                      <div className="flex flex-wrap items-baseline justify-between gap-2">
+                        <span className="font-medium text-ink">{e.subject || '（无主题）'}</span>
+                        <span className="text-[12px] text-muted">{statusLabel(e.status)}</span>
+                      </div>
+                      <div className="text-[12px] text-muted">收件人 {e.recipient || '—'}</div>
+                    </button>
+                    {e.blockedReason ? (
+                      <div className="text-[12px] text-amberink">原因：{e.blockedReason}</div>
+                    ) : null}
+                    {open ? (
+                      <div className="mt-2 border-t border-line2 pt-2 break-words [overflow-wrap:anywhere]" data-testid="mail-outbox-body">
+                        <MailSafePreview markdown={e.bodyMarkdown || ''} />
+                      </div>
+                    ) : null}
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>
@@ -524,36 +550,36 @@ export function MailPage({
         />
       )}
 
+      {deleteTargetId && (
+        <ConfirmDialog
+          title="删除草稿？"
+          message="删除后不可恢复。"
+          confirmLabel="确认删除"
+          onCancel={() => setDeleteTargetId(null)}
+          onConfirm={() => void applyDeleteDraft()}
+        />
+      )}
+
+      {previewOpen && !sendPrep && (
+        <MailMessageModal
+          mode="preview"
+          subject={editSubject}
+          recipients={editTo}
+          bodyMarkdown={editBody}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
+
       {sendPrep && (
-        <div className="fixed inset-0 bg-[rgba(30,33,50,0.32)] backdrop-blur-[2px] flex items-center justify-center z-30" data-testid="mail-send-confirm">
-          <div className="w-[480px] max-w-[92vw] max-h-[85vh] overflow-y-auto bg-surface rounded-2xl p-[22px] shadow-modal flex flex-col gap-3">
-            <h3 className="m-0 text-[16px] font-bold">确认发送</h3>
-            <p className="m-0 text-[13px] text-muted">以下为服务端冻结的最终修订；返回编辑会使本确认失效。</p>
-            <div className="text-[13px] border border-line2 rounded-field p-3 bg-surface2 flex flex-col gap-1.5">
-              <div><span className="text-faint">主题</span> {sendPrep.preview.subject}</div>
-              <div><span className="text-faint">收件人</span> {joinAddresses(sendPrep.preview.to)}</div>
-              {(sendPrep.preview.cc?.length ?? 0) > 0 && (
-                <div><span className="text-faint">抄送</span> {joinAddresses(sendPrep.preview.cc)}</div>
-              )}
-              <div><span className="text-faint">修订</span> {sendPrep.preview.revision} · {sendPrep.preview.dispatchMode}</div>
-              <div className="border-t border-line2 pt-2 mt-1">
-                <MailSafePreview markdown={sendPrep.preview.bodyMarkdown} />
-              </div>
-            </div>
-            <div className="flex justify-end gap-2.5">
-              <button type="button" className={BTN} onClick={() => setSendPrep(null)}>返回编辑</button>
-              <button
-                type="button"
-                className={`${BTN} ${BTN_PRIMARY}`}
-                disabled={confirming}
-                onClick={() => void confirmPrepared()}
-                data-testid="mail-confirm-send"
-              >
-                {confirming ? '提交中…' : '确认发送'}
-              </button>
-            </div>
-          </div>
-        </div>
+        <MailMessageModal
+          mode="confirm-send"
+          subject={sendPrep.preview.subject}
+          recipients={formatRecipients(sendPrep.preview.to)}
+          bodyMarkdown={sendPrep.preview.bodyMarkdown}
+          confirming={confirming}
+          onClose={() => setSendPrep(null)}
+          onConfirmSend={() => void confirmPrepared()}
+        />
       )}
     </PageShell>
   )

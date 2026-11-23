@@ -92,18 +92,6 @@ func publicMailContact(c mail.Contact) protocol.MailContactView {
 	}
 }
 
-func publicMailGroup(g mail.Group) protocol.MailGroupView {
-	ids := g.MemberIDs
-	if ids == nil {
-		ids = []string{}
-	}
-	return protocol.MailGroupView{
-		ID: g.ID, Revision: g.Revision, Name: g.Name, MemberIDs: ids,
-		CreatedAtUTC: g.CreatedAtUTC.UTC().Format(time.RFC3339Nano),
-		UpdatedAtUTC: g.UpdatedAtUTC.UTC().Format(time.RFC3339Nano),
-	}
-}
-
 func publicMailDraft(d mail.Draft) protocol.MailDraftView {
 	return protocol.MailDraftView{
 		ID: d.ID, Revision: d.Revision, Status: d.Status, AccountID: d.AccountID,
@@ -163,52 +151,6 @@ func (a *App) DeleteMailContact(req protocol.DeleteMailContactRequest) error {
 	return wireError(st.DeleteContact(context.Background(), req.ID, mailOwners(), req.ExpectedRevision))
 }
 
-// ListMailGroups 列出分组。
-func (a *App) ListMailGroups(req protocol.ListMailGroupsRequest) ([]protocol.MailGroupView, error) {
-	st, err := a.mailStore()
-	if err != nil {
-		return nil, wireError(err)
-	}
-	list, err := st.ListGroups(context.Background(), mailOwners(), req.Limit, req.Offset)
-	if err != nil {
-		return nil, wireError(err)
-	}
-	out := make([]protocol.MailGroupView, 0, len(list))
-	for _, g := range list {
-		out = append(out, publicMailGroup(g))
-	}
-	return out, nil
-}
-
-// SaveMailGroup 新建或 CAS 更新分组。
-func (a *App) SaveMailGroup(req protocol.SaveMailGroupRequest) (protocol.MailGroupView, error) {
-	if err := mailRefuseIfExiting(a); err != nil {
-		return protocol.MailGroupView{}, wireError(err)
-	}
-	st, err := a.mailStore()
-	if err != nil {
-		return protocol.MailGroupView{}, wireError(err)
-	}
-	g := mail.Group{ID: strings.TrimSpace(req.ID), OwnerScope: mailOwnerLocal, Name: req.Name, MemberIDs: req.MemberIDs}
-	saved, err := st.SaveGroup(context.Background(), g, req.ExpectedRevision)
-	if err != nil {
-		return protocol.MailGroupView{}, wireError(err)
-	}
-	return publicMailGroup(saved), nil
-}
-
-// DeleteMailGroup 删除分组。
-func (a *App) DeleteMailGroup(req protocol.DeleteMailGroupRequest) error {
-	if err := mailRefuseIfExiting(a); err != nil {
-		return wireError(err)
-	}
-	st, err := a.mailStore()
-	if err != nil {
-		return wireError(err)
-	}
-	return wireError(st.DeleteGroup(context.Background(), req.ID, mailOwners(), req.ExpectedRevision))
-}
-
 // PreviewMailContactImport 预览 CSV 导入。
 func (a *App) PreviewMailContactImport(req protocol.PreviewMailContactImportRequest) (protocol.MailContactImportPreview, error) {
 	st, err := a.mailStore()
@@ -257,7 +199,7 @@ func (a *App) CommitMailContactImport(req protocol.CommitMailContactImportReques
 	return out, nil
 }
 
-// ListMailDrafts 列出草稿。
+// ListMailDrafts 列出仍可编辑的草稿（已投递的进发件箱，不在此出现）。
 func (a *App) ListMailDrafts(req protocol.ListMailDraftsRequest) ([]protocol.MailDraftView, error) {
 	st, err := a.mailStore()
 	if err != nil {
@@ -269,7 +211,10 @@ func (a *App) ListMailDrafts(req protocol.ListMailDraftsRequest) ([]protocol.Mai
 	}
 	out := make([]protocol.MailDraftView, 0, len(list))
 	for _, d := range list {
-		out = append(out, publicMailDraft(d))
+		switch d.Status {
+		case mail.StatusDraft, mail.StatusFailed, mail.StatusCancelled, mail.StatusMissed, mail.StatusScheduled:
+			out = append(out, publicMailDraft(d))
+		}
 	}
 	return out, nil
 }
@@ -294,7 +239,7 @@ func (a *App) ListMailOutbox(req protocol.ListMailOutboxRequest) ([]protocol.Mai
 func publicMailOutbox(e mail.OutboxEntry) protocol.MailOutboxEntryView {
 	v := protocol.MailOutboxEntryView{
 		ItemID: e.ItemID, SubmissionID: e.SubmissionID, DraftID: e.DraftID,
-		DraftRevision: e.DraftRevision, Subject: e.Subject,
+		DraftRevision: e.DraftRevision, Subject: e.Subject, BodyMarkdown: e.BodyMarkdown,
 		Recipient: e.Recipient.Address, Status: e.Status, BlockedReason: e.BlockedReason,
 		CreatedAtUTC: e.CreatedAtUTC.UTC().Format(time.RFC3339Nano),
 		AttemptCount: e.AttemptCount,
@@ -322,6 +267,22 @@ func (a *App) GetMailDraft(req protocol.GetMailDraftRequest) (protocol.MailDraft
 		return protocol.MailDraftView{}, wireError(err)
 	}
 	return publicMailDraft(d), nil
+}
+
+// DeleteMailDraft 删除草稿箱中的草稿。
+func (a *App) DeleteMailDraft(req protocol.DeleteMailDraftRequest) error {
+	if err := mailRefuseIfExiting(a); err != nil {
+		return wireError(err)
+	}
+	id := strings.TrimSpace(req.ID)
+	if id == "" {
+		return wireError(fmt.Errorf("%w: id", mail.ErrInvalid))
+	}
+	st, err := a.mailStore()
+	if err != nil {
+		return wireError(err)
+	}
+	return wireError(st.DeleteDraft(context.Background(), id, mailOwners()))
 }
 
 // CreateMailDraft 新建空白用户草稿。

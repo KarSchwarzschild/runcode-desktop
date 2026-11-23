@@ -45,10 +45,11 @@ type SendInput struct {
 
 // DraftReady 是工具成功结果：只表示草稿已创建，不是已发送。
 type DraftReady struct {
-	Status   string `json:"status"` // draft_ready
-	DraftID  string `json:"draftId"`
-	Revision int64  `json:"revision"`
-	Subject  string `json:"subject,omitempty"`
+	Status         string `json:"status"` // draft_ready
+	DraftID        string `json:"draftId"`
+	Revision       int64  `json:"revision"`
+	Subject        string `json:"subject,omitempty"`
+	NeedsMailSetup bool   `json:"needsMailSetup,omitempty"`
 }
 
 // DraftHost 由 desktop 注入：校验 OA/账号边界后幂等写入提案草稿。
@@ -80,6 +81,8 @@ func (SendEmailTool) Description() string {
 		"then returns {status:\"draft_ready\", draftId, revision} immediately. " +
 		"This does NOT send mail over SMTP and does NOT wait for the user to finish editing. " +
 		"Tell the user the draft is ready and waiting for their review/confirmation; never claim the message was sent. " +
+		"If needsMailSetup is true, tell the user they must first configure mailbox address and password in Settings → Mail, " +
+		"and that the app shows a direct link to that settings page; do not invent a URL. " +
 		"There is no confirmed parameter — human confirmation happens in the app UI after editing."
 }
 
@@ -170,5 +173,8 @@ func (t SendEmailTool) Run(ctx context.Context, raw json.RawMessage, tc *tool.Co
 		return tool.Result{}, err
 	}
 	text := string(payload) + "\n草稿已创建，等待用户在「邮箱与通信录」中编辑并确认后才会发送。不要声称邮件已发出。"
+	if ready.NeedsMailSetup {
+		text += "\nneedsMailSetup=true：本机尚未接入可用邮箱（地址/密码等）。请明确告诉用户先到「设置 → 邮箱」填写邮箱地址与密码；应用界面会提供「前往邮箱设置」入口，不要编造链接。"
+	}
 	return tool.Result{Content: []tool.ResultContent{{Type: tool.ResultContentTypeText, Text: text}}}, nil
 }

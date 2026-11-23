@@ -7,14 +7,13 @@ const api = vi.hoisted(() => ({
   getMailSettings: vi.fn(),
   listMailDrafts: vi.fn(),
   listMailContacts: vi.fn(),
-  listMailGroups: vi.fn(),
   listMailOutbox: vi.fn(),
   getMailDraft: vi.fn(),
   createMailDraft: vi.fn(),
   saveMailDraft: vi.fn(),
+  deleteMailDraft: vi.fn(),
   saveMailContact: vi.fn(),
   deleteMailContact: vi.fn(),
-  saveMailGroup: vi.fn(),
   previewMailContactImport: vi.fn(),
   commitMailContactImport: vi.fn(),
 }))
@@ -52,14 +51,15 @@ const draftA = {
 
 beforeEach(() => {
   ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+  localStorage.clear()
   for (const fn of Object.values(api)) fn.mockReset()
   onOpenSettings.mockReset()
   api.getMailSettings.mockResolvedValue({ secretStorageOk: true })
   api.listMailDrafts.mockResolvedValue([draftA])
   api.listMailContacts.mockResolvedValue([])
-  api.listMailGroups.mockResolvedValue([])
   api.listMailOutbox.mockResolvedValue([])
   api.getMailDraft.mockResolvedValue(draftA)
+  api.deleteMailDraft.mockResolvedValue(undefined)
   host = document.createElement('div')
   document.body.append(host)
   root = createRoot(host)
@@ -100,12 +100,45 @@ describe('MailPage', () => {
     expect(onOpenSettings).toHaveBeenCalled()
   })
 
-  it('renders tabs including drafts contacts groups and outbox', async () => {
+  it('renders tabs without groups', async () => {
     await mount()
     expect(host.textContent).toContain('草稿（1）')
     expect(host.textContent).toContain('通信录')
-    expect(host.textContent).toContain('分组')
     expect(host.textContent).toContain('发件箱（0）')
+    expect(host.textContent).not.toContain('分组')
+  })
+
+  it('hides meta line and markdown toggle; preview sits after save', async () => {
+    await mount()
+    await click('主题甲')
+    expect(host.querySelector('[data-testid="mail-draft-status"]')).toBeNull()
+    expect(host.textContent).not.toContain('Markdown编辑')
+    expect(host.textContent).not.toContain('含模型提案原文')
+    const save = host.querySelector('[data-testid="mail-save-draft"]')
+    const preview = host.querySelector('[data-testid="mail-preview-toggle"]')
+    expect(save && preview && (save.compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING)).toBeTruthy()
+    expect(host.textContent).toContain('发送')
+    expect(host.textContent).not.toContain('检查并发送')
+  })
+
+  it('opens shared preview modal', async () => {
+    await mount()
+    await click('主题甲')
+    await click('预览')
+    expect(host.querySelector('[data-testid="mail-preview-modal"]')).toBeTruthy()
+    expect(host.textContent).toContain('主题甲')
+  })
+
+  it('shows delete draft control and confirms before delete', async () => {
+    await mount()
+    await click('主题甲')
+    const del = host.querySelector('[data-testid="mail-delete-draft"]') as HTMLButtonElement
+    expect(del).toBeTruthy()
+    await act(async () => { del.click() })
+    await flush()
+    expect(host.textContent).toContain('删除草稿？')
+    await click('确认删除')
+    expect(api.deleteMailDraft).toHaveBeenCalledWith({ id: 'd1' })
   })
 
   it('loads draft and keeps local edits when save fails', async () => {
@@ -130,28 +163,14 @@ describe('MailPage', () => {
     expect(host.textContent).toMatch(/保存失败|冲突/)
   })
 
-  it('preview uses the current user-edited markdown', async () => {
-    await mount()
-    await click('主题甲')
-    const body = host.querySelector('[data-testid="mail-draft-body"]') as HTMLTextAreaElement
-    await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
-      setter.call(body, '预览用 **修订**')
-      body.dispatchEvent(new InputEvent('input', { bubbles: true }))
-    })
-    await click('预览')
-    const preview = host.querySelector('[data-testid="mail-preview"]')
-    expect(preview?.textContent).toContain('修订')
-    expect(preview?.textContent).not.toContain('正文')
-  })
-
-  it('outbox tab lists delivery rows without sending', async () => {
+  it('outbox tab lists delivery rows and expands body read-only', async () => {
     api.listMailOutbox.mockResolvedValue([{
       itemId: 'item1',
       submissionId: 'sub1',
       draftId: 'd1',
       draftRevision: 1,
       subject: '请假申请',
+      bodyMarkdown: '正文内容',
       recipient: 'a@example.com',
       status: 'accepted',
       createdAtUtc: '2026-01-01T00:00:00Z',
@@ -162,6 +181,8 @@ describe('MailPage', () => {
     expect(host.querySelector('[data-testid="mail-outbox"]')).toBeTruthy()
     expect(host.textContent).toContain('请假申请')
     expect(host.textContent).toContain('已送达')
+    await click('请假申请')
+    expect(host.querySelector('[data-testid="mail-outbox-body"]')?.textContent).toContain('正文内容')
     expect(api.saveMailDraft).not.toHaveBeenCalled()
     expect(api.createMailDraft).not.toHaveBeenCalled()
   })

@@ -47,6 +47,7 @@ import {
   stampTurnAssistantNote,
   type AssistantImageGenerationNote,
 } from '@/chat/image-generation-note'
+import { rehydrateMailSetupNotes, stampMailSetupRequired } from '@/chat/mail-setup-note'
 import {
   AUTOMATION_HISTORY_NOTE,
   automationRunActive,
@@ -487,6 +488,8 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
             }
             // observed 但尚无 questionId：保留，等 submit 回执 finalize。
           }
+          // 未接入邮箱的 send_email：在助手回复脚注盖「前往邮箱设置」。
+          next = stampMailSetupRequired(next)
           return next
         })
       }),
@@ -794,9 +797,11 @@ export function useConversation({ focusedId, infoRef, permissions, onFilesChange
     // 已经有直播流时不走这条，避免把后到的历史盖掉正在增长的回答。
     setBlocks(blocksFromResumed(r.blocks, sid))
     // 引擎恢复会换掉助手块 id；按 questionId 从本机尾注映射贴回去。
-    if (sid) {
-      setBlocks((prev) => rehydrateAssistantNotes(prev, loadImageGenerationNoteMap(sid)))
-    }
+    // 邮箱未接入脚注从工具结果重贴，不依赖 localStorage。
+    setBlocks((prev) => {
+      const withNotes = sid ? rehydrateAssistantNotes(prev, loadImageGenerationNoteMap(sid)) : prev
+      return rehydrateMailSetupNotes(withNotes)
+    })
     const edits = (await listEdits(sid)) ?? []
     if (isStale()) return
     if (edits.length > 0) {

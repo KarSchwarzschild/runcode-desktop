@@ -148,13 +148,31 @@ func (h mailDraftHost) CreateProposal(ctx context.Context, in mailtool.SendInput
 	if err != nil {
 		return mailtool.DraftReady{}, err
 	}
-	ready := mail.ToolResultDraftReady(saved.ID, saved.Revision)
+	needsSetup := !mailAccountConfiguredForSend(accountID)
+	ready := mail.ToolResultDraftReady(saved.ID, saved.Revision, needsSetup)
 	return mailtool.DraftReady{
-		Status:   fmt.Sprint(ready["status"]),
-		DraftID:  fmt.Sprint(ready["draftId"]),
-		Revision: saved.Revision,
-		Subject:  saved.Subject,
+		Status:         fmt.Sprint(ready["status"]),
+		DraftID:        fmt.Sprint(ready["draftId"]),
+		Revision:       saved.Revision,
+		Subject:        saved.Subject,
+		NeedsMailSetup: needsSetup,
 	}, nil
+}
+
+// mailAccountConfiguredForSend 判断当前是否已接入可发信的邮箱账号。
+// 与 mailLiveGate / mailAccountGate 同口径：启用 + 有密文；草稿指定了账号时还须与已保存 ID 一致。
+func mailAccountConfiguredForSend(draftAccountID string) bool {
+	cfg := loadRawConfig().MailAccount
+	if cfg == nil || !cfg.Enabled {
+		return false
+	}
+	if strings.TrimSpace(cfg.Address) == "" || strings.TrimSpace(cfg.PasswordProtected) == "" {
+		return false
+	}
+	if id := strings.TrimSpace(draftAccountID); id != "" && id != cfg.ID {
+		return false
+	}
+	return true
 }
 
 func mailAddrsFromTool(in []mailtool.AddressIn) ([]mail.MailAddress, error) {

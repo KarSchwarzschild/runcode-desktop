@@ -71,6 +71,23 @@ func TestSendEmailCreatesDraftReadyOncePerCall(t *testing.T) {
 	}
 }
 
+func TestSendEmailNeedsMailSetupGuidesUser(t *testing.T) {
+	h := &fakeHost{ready: DraftReady{Status: "draft_ready", DraftID: "d9", Revision: 2, NeedsMailSetup: true}}
+	toolInst := SendEmailTool{Host: h}
+	raw := []byte(`{"subject":"病假","bodyMarkdown":"请假","to":[{"address":"boss@ex.com"}]}`)
+	res, err := toolInst.Run(context.Background(), raw, &tool.Context{SessionID: "s", MessageID: "m", ToolUseID: "t"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := res.Content[0].Text
+	if !strings.Contains(text, `"needsMailSetup":true`) {
+		t.Fatalf("payload must carry needsMailSetup: %s", text)
+	}
+	if !strings.Contains(text, "设置 → 邮箱") {
+		t.Fatalf("must guide user to mail settings: %s", text)
+	}
+}
+
 func TestSearchContactsRequiresQuery(t *testing.T) {
 	_, err := (SearchContactsTool{Searcher: searchFn(func(context.Context, string, int) ([]ContactHit, error) {
 		return nil, nil
