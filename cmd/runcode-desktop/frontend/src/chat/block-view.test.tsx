@@ -44,6 +44,21 @@ it('shows mail-setup footnote with settings link on completed assistant replies'
   expect(streaming).not.toContain('前往邮箱设置')
 })
 
+it('shows view-draft link at the end of completed send_email replies', () => {
+  const done = renderToStaticMarkup(
+    <BlockView
+      block={{ kind: 'assistant', id: 'a1', text: '草稿已就绪', streaming: false, ts: '', mailDraftId: 'draft-abc' }}
+      onOpenMailDraft={() => {}}
+    />,
+  )
+  expect(done).toContain('查看草稿')
+  expect(done).toContain('mail-draft-reply-link')
+  const streaming = renderToStaticMarkup(
+    <BlockView block={{ kind: 'assistant', id: 'a2', text: '草稿', streaming: true, ts: '', mailDraftId: 'draft-abc' }} />,
+  )
+  expect(streaming).not.toContain('查看草稿')
+})
+
 it('strips desktop-preview boilerplate from assistant text', () => {
   const html = renderToStaticMarkup(<BlockView block={{
     kind: 'assistant', id: 'a1',

@@ -35,7 +35,6 @@ export function MailSection() {
     address: '', displayName: '', version: MailVersions.Standard, password: '',
   })
   const [showPassword, setShowPassword] = useState(false)
-  const [checklist, setChecklist] = useState<boolean[]>(() => PASSWORD_CHECKLIST.map(() => false))
   const [testResult, setTestResult] = useState<MailConnectionTestResult | null>(null)
   const [testedFingerprint, setTestedFingerprint] = useState<string | null>(null)
   const [testing, setTesting] = useState(false)
@@ -45,7 +44,6 @@ export function MailSection() {
   const [sendMessage, setSendMessage] = useState('')
   const [sendError, setSendError] = useState('')
   const [shortId, setShortId] = useState('')
-  const [helpOpen, setHelpOpen] = useState(false)
   const [guiding, setGuiding] = useState(false)
   const passwordRef = useRef('')
   const [generation] = useState(() => ({ seq: 0 }))
@@ -174,6 +172,8 @@ export function MailSection() {
         shortId,
       })
       setSettings(next)
+      // 切回已完成摘要卡（重新配置 / 更新安全密码）。
+      setGuiding(false)
     } catch (e) {
       setSendError(errText(e) || '确认失败')
     }
@@ -199,7 +199,7 @@ export function MailSection() {
     return (
       <Section title="邮箱" hint="账号与登录">
         <p className="text-[13px] text-muted">接入本人阿里企业邮箱后，可在对话中起草并发送邮件。</p>
-        <button type="button" className={BTN_PRIMARY} onClick={() => { setGuiding(true); setStep(1) }}>开始接入</button>
+        <button type="button" className={`${BTN} ${BTN_PRIMARY}`} onClick={() => { setGuiding(true); setStep(1) }}>开始接入</button>
       </Section>
     )
   }
@@ -222,14 +222,14 @@ export function MailSection() {
           </label>
           <label className={LABEL_CLS}>邮箱版本
             <SelectField value={draft.version} onChange={(v) => patchDraft({ version: v as MailVersion })}>
-              <option value={MailVersions.Standard}>标准版</option>
+              <option value={MailVersions.Standard}>标准版（默认）</option>
               <option value={MailVersions.XC}>国产化版</option>
               <option value={MailVersions.HK}>香港优化</option>
             </SelectField>
           </label>
           <div className="flex flex-wrap gap-2">
             <button type="button" className={BTN} onClick={() => void openMailOfficialURL({ page: mailWebmailPage(draft.version) })}>打开阿里邮箱网页端</button>
-            <button type="button" className={BTN_PRIMARY} disabled={!canAdvanceFromStep1(draft.address)} onClick={() => setStep(2)}>我能登录该邮箱，下一步</button>
+            <button type="button" className={`${BTN} ${BTN_PRIMARY}`} disabled={!canAdvanceFromStep1(draft.address)} onClick={() => setStep(2)}>我能登录该邮箱，下一步</button>
           </div>
           <p className="text-[12px] text-muted">此按钮只确认网页登录，尚未验证 SMTP。</p>
         </div>
@@ -238,28 +238,18 @@ export function MailSection() {
       {step === 2 && (
         <div className="flex flex-col gap-3">
           <p className="text-[13px] text-ink">接下来生成的是第三方客户端专用密码，不是网页登录密码。智开不会代收手机验证码。</p>
-          <ul className="flex flex-col gap-2 m-0 p-0 list-none">
+          <ol className="flex flex-col gap-2 m-0 p-0 list-none">
             {PASSWORD_CHECKLIST.map((line, i) => (
-              <li key={line}>
-                <label className="flex items-start gap-2 text-[13px] text-ink cursor-pointer">
-                  <input type="checkbox" checked={checklist[i]} onChange={(e) => {
-                    const next = [...checklist]; next[i] = e.target.checked; setChecklist(next)
-                  }} />
-                  <span>{line}</span>
-                </label>
+              <li key={line} className="flex items-start gap-2 text-[13px] text-ink">
+                <span className="flex-none w-5 text-muted tabular-nums">{i + 1}.</span>
+                <span>{line}</span>
               </li>
             ))}
-          </ul>
+          </ol>
           <button type="button" className={BTN} onClick={() => void openMailOfficialURL({ page: 'help_security_password' })}>打开官方图文帮助</button>
-          <button type="button" className={BTN} onClick={() => setHelpOpen((v) => !v)}>{helpOpen ? '收起问题帮助' : '遇到问题'}</button>
-          {helpOpen && (
-            <Banner tone="warning">
-              没收到验证码或找不到菜单时，请留在官方网页使用账号安全/手机绑定流程，或联系单位管理员。智开无法跳过验证，也不索要验证码。
-            </Banner>
-          )}
           <div className="flex flex-wrap gap-2">
             <button type="button" className={BTN} onClick={() => setStep(1)}>上一步</button>
-            <button type="button" className={BTN_PRIMARY} onClick={() => setStep(3)}>我已生成并复制，填写连接信息</button>
+            <button type="button" className={`${BTN} ${BTN_PRIMARY}`} onClick={() => setStep(3)}>我已生成并复制，填写连接信息</button>
           </div>
         </div>
       )}
@@ -295,7 +285,7 @@ export function MailSection() {
             <button type="button" className={BTN} disabled={testing || !draft.password} onClick={() => void runTest()}>
               {testing ? '正在验证账号…' : '测试连接'}
             </button>
-            <button type="button" className={BTN_PRIMARY} disabled={!testValid || testing} onClick={() => setStep(4)}>保存邮箱账号</button>
+            <button type="button" className={`${BTN} ${BTN_PRIMARY}`} disabled={!testValid || testing} onClick={() => setStep(4)}>保存邮箱账号</button>
           </div>
         </div>
       )}
@@ -308,7 +298,7 @@ export function MailSection() {
           <p className="text-[13px] text-ink">将把当前已测试通过的配置写入本机受保护存储。前端自称“已测试”不能取代服务端校验。</p>
           <div className="flex flex-wrap gap-2">
             <button type="button" className={BTN} onClick={() => setStep(3)}>上一步</button>
-            <button type="button" className={BTN_PRIMARY} disabled={!testValid || saving || !secretsOk} onClick={() => void runSave()}>
+            <button type="button" className={`${BTN} ${BTN_PRIMARY}`} disabled={!testValid || saving || !secretsOk} onClick={() => void runSave()}>
               {saving ? '正在保存…' : '确认安全保存'}
             </button>
           </div>
@@ -330,24 +320,21 @@ export function MailSection() {
               {sendError && <InlineError>{sendError}</InlineError>}
               {shortId && <p className="text-[12px] text-muted">短编号：{shortId}</p>}
               <div className="flex flex-wrap gap-2">
-                <button type="button" className={BTN_PRIMARY} disabled={sending} onClick={() => void runSendSelf()}>
-                  {sending ? '正在发送…' : '确认发送测试邮件'}
+                <button type="button" className={`${BTN} ${BTN_PRIMARY}`} disabled={sending} onClick={() => void runSendSelf()} data-testid="mail-send-test">
+                  {sending ? '正在发送…' : '发送测试邮件'}
                 </button>
                 <button type="button" className={BTN} onClick={() => void openMailOfficialURL({ page: mailWebmailPage(settings.account!.version) })}>打开邮箱网页</button>
                 <button
                   type="button"
-                  className={BTN_PRIMARY}
-                  disabled={!shortId || settings.account.onboardingStatus === MailOnboardingStatuses.ReceiptConfirmed}
+                  className={`${BTN} ${BTN_PRIMARY}`}
+                  disabled={!shortId}
+                  title={!shortId ? '请先发送测试邮件' : undefined}
                   onClick={() => void runConfirmReceipt()}
+                  data-testid="mail-confirm-receipt"
                 >
-                  我已收到这封测试邮件
+                  已收到邮件
                 </button>
               </div>
-              {settings.account.onboardingStatus === MailOnboardingStatuses.ReceiptConfirmed && (
-                <Banner tone="neutral" title="接入与自测完成">
-                  账号已保存、连接通过、SMTP 已接受测试、本人确认收到。
-                </Banner>
-              )}
             </>
           ) : (
             <InlineError>尚未保存邮箱账号</InlineError>

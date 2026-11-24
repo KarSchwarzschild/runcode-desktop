@@ -433,6 +433,7 @@ function AppShell() {
                   onGenerateMinutes={(m) => void sendRecordingRequest(m, 'doc')}
                   onOpenImageGenerationSettings={() => openSettings('image-generation')}
                   onOpenMailSettings={() => openSettings('mail')}
+                  onOpenMailDraft={openMailDraft}
                   sessionId={session.info?.sessionId}
                   sessionGeneration={String((session.info as { generation?: string } | null)?.generation ?? '')}
                 />

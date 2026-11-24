@@ -8,6 +8,7 @@ export function MailMessageModal({
   mode,
   subject,
   recipients,
+  cc,
   bodyMarkdown,
   confirming,
   onClose,
@@ -16,6 +17,7 @@ export function MailMessageModal({
   mode: MailMessageModalMode
   subject: string
   recipients: string
+  cc?: string
   bodyMarkdown: string
   confirming?: boolean
   onClose: () => void
@@ -40,8 +42,16 @@ export function MailMessageModal({
           </button>
         </div>
         <div className="px-5 pb-2 text-[13px] text-muted break-words">
-          <span className="text-faint">收件人</span>{' '}
-          {recipients.trim() || '—'}
+          <div>
+            <span className="text-faint">收件人</span>{' '}
+            {recipients.trim() || '—'}
+          </div>
+          {cc?.trim() ? (
+            <div className="mt-1" data-testid="mail-modal-cc">
+              <span className="text-faint">抄送</span>{' '}
+              {cc.trim()}
+            </div>
+          ) : null}
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-5 pb-4">
           <div className="border border-line2 rounded-field p-4 bg-surface2 break-words [overflow-wrap:anywhere]">

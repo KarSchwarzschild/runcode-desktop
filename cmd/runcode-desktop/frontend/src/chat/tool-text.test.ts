@@ -97,6 +97,16 @@ describe('toolVerbTarget', () => {
   it('maps search_contacts to query', () => {
     expect(toolVerbTarget(ev({ toolName: 'search_contacts', input: { query: '王老师' } })).target).toBe('王老师')
   })
+
+  it('maps add_mail_contact to name and email', () => {
+    expect(toolVerbTarget(ev({
+      toolName: 'add_mail_contact',
+      input: { name: '马文涛', email: 'mawentao@ouc-online.com.cn' },
+    }))).toEqual({
+      verb: '添加联系人',
+      target: '马文涛 mawentao@ouc-online.com.cn',
+    })
+  })
   it('shows an MCP tool by its Chinese name, or at least without the mcp__ plumbing', () => {
     expect(toolVerbTarget(ev({ toolName: 'mcp__oa__my_todo' })).verb).toBe('待办事项')
     expect(toolVerbTarget(ev({ toolName: 'mcp__x__y' })).verb).toBe('y')

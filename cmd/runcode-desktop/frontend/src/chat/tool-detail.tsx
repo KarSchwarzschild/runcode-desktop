@@ -104,11 +104,26 @@ function ToolInputView({ tool }: { tool: ToolEvent }) {
     }
     case 'search_contacts':
       return kvRows([['查询', s('query')]])
+    case 'add_mail_contact':
+      return kvRows([
+        !!s('name') && ['姓名', s('name')],
+        !!s('email') && ['邮箱', s('email')],
+      ])
     case 'send_email': {
-      const to = Array.isArray(o.to) ? (o.to as { address?: string }[]).map((a) => a.address).filter(Boolean).join(', ') : ''
+      const addrs = (v: unknown) => Array.isArray(v)
+        ? (v as { address?: string; name?: string }[]).map((a) => {
+          const addr = a.address?.trim()
+          if (!addr) return ''
+          const name = a.name?.trim()
+          return name ? `${name} <${addr}>` : addr
+        }).filter(Boolean).join(', ')
+        : ''
+      const to = addrs(o.to)
+      const cc = addrs(o.cc)
       return kvRows([
         !!s('subject') && ['主题', s('subject')],
         !!to && ['收件人', to],
+        !!cc && ['抄送', cc],
         !!s('sendMode') && ['发送方式', s('sendMode')],
         !!s('dispatchMode') && ['投递', s('dispatchMode')],
         !!s('bodyMarkdown') && ['正文', clipPreview(s('bodyMarkdown'), 120)],

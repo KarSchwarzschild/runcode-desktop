@@ -7,6 +7,7 @@ import (
 
 	"github.com/wt68/runcode/internal/mail"
 	"github.com/wt68/runcode/internal/mailtool"
+	"gitlab.ouc-online.com.cn/aibase/agentloop/permissions"
 	"gitlab.ouc-online.com.cn/aibase/agentloop/tool"
 )
 
@@ -102,7 +103,7 @@ func TestMailToolsRegisteredOnExtraToolsList(t *testing.T) {
 	for _, tl := range tools {
 		names[tl.Name()] = true
 	}
-	if !names[mailtool.SearchContactsName] || !names[mailtool.SendEmailName] {
+	if !names[mailtool.SearchContactsName] || !names[mailtool.SendEmailName] || !names[mailtool.AddMailContactName] {
 		t.Fatalf("tools=%v", names)
 	}
 	if _, ok := hostToolClasses[mailtool.SendEmailName]; !ok {
@@ -110,6 +111,9 @@ func TestMailToolsRegisteredOnExtraToolsList(t *testing.T) {
 	}
 	if _, ok := hostToolClasses[mailtool.SearchContactsName]; !ok {
 		t.Fatal("hostToolClasses missing search_contacts")
+	}
+	if hostToolClasses[mailtool.AddMailContactName] != permissions.ClassMutating {
+		t.Fatal("hostToolClasses missing add_mail_contact as mutating")
 	}
 	_ = tool.Result{}
 }

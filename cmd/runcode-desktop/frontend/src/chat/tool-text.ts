@@ -80,6 +80,12 @@ export function toolVerbTarget(t: ToolEvent): { verb: string; target: string } {
     case 'search_contacts':
       target = clip(String(o.query ?? ''), 44)
       break
+    case 'add_mail_contact': {
+      const name = String(o.name ?? '').trim()
+      const email = String(o.email ?? '').trim()
+      target = clip([name, email].filter(Boolean).join(' '), 44)
+      break
+    }
     case 'send_email': {
       const data = t.data && typeof t.data === 'object' ? t.data as { subject?: unknown } : null
       const subj = typeof data?.subject === 'string' ? data.subject : String(o.subject ?? '')

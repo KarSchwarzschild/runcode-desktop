@@ -43,6 +43,7 @@ export function ChatPane({
   onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled,
   onOpenImageGenerationSettings,
   onOpenMailSettings,
+  onOpenMailDraft,
   sessionId,
   onRasterImageView,
   onRasterImageAnnotate,
@@ -81,6 +82,7 @@ export function ChatPane({
   onGenerateMinutes?: (mark: RecordingMark) => void
   onOpenImageGenerationSettings?: () => void
   onOpenMailSettings?: () => void
+  onOpenMailDraft?: (draftId: string) => void
   sessionId?: string
   onRasterImageView?: (image: import('@/core/bridge').ImageGenerationArtifact, toolUseId: string) => void
   onRasterImageAnnotate?: (image: import('@/core/bridge').ImageGenerationArtifact, toolUseId: string) => void
@@ -233,7 +235,7 @@ export function ChatPane({
               <BotRow key={g.id}><AgentTaskGroup tasks={g.tasks} sessionId={sessionId} onOpenCodePreview={onOpenCodePreview} /></BotRow>
             ) : (
               <div key={g.block.id}>
-                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} onOpenCodePreview={onOpenCodePreview} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} onContentHeightChange={onContentHeightChange} onOpenImageGenerationSettings={onOpenImageGenerationSettings} onOpenMailSettings={onOpenMailSettings} sessionId={sessionId} />
+                <BlockView textOnly={textOnly} onRetryQuestion={onRetryQuestion} onEditQuestion={onEditQuestion} questionActionsDisabled={questionActionsDisabled} block={g.block} onOpenFile={onOpenFile} onOpenCodePreview={onOpenCodePreview} resolveFile={resolveFile} onGenerateMinutes={onGenerateMinutes} onContentHeightChange={onContentHeightChange} onOpenImageGenerationSettings={onOpenImageGenerationSettings} onOpenMailSettings={onOpenMailSettings} onOpenMailDraft={onOpenMailDraft} sessionId={sessionId} />
                 {!textOnly && g.block.kind === 'assistant' && (
                   <ReplyArtifacts text={g.block.text} files={files} tabs={tabs} onOpen={onOpenFile} />
                 )}

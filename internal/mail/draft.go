@@ -37,7 +37,7 @@ func ApplyDraftEdit(d Draft, edit DraftEdit, now time.Time) (Draft, error) {
 	out.Subject = strings.TrimSpace(edit.Subject)
 	out.BodyMarkdown = edit.BodyMarkdown // 保留用户空白意图；校验已要求 trim 非空
 	if strings.TrimSpace(out.BodyMarkdown) == "" {
-		return Draft{}, fmt.Errorf("%w: empty body", ErrInvalid)
+		return Draft{}, fmt.Errorf("%w: 请填写正文内容", ErrInvalid)
 	}
 	out.To, out.Cc, out.Bcc = to, cc, bcc
 	out.Attachments = append([]AttachmentRef(nil), edit.Attachments...)

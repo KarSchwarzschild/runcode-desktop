@@ -2,10 +2,10 @@
 // 账号是否可用只读 GetMailSettings；真实 SMTP 由后端 dispatcher 异步完成。
 import { useCallback, useEffect, useState } from 'react'
 import {
-  commitMailContactImport, confirmMailSend, createMailDraft, deleteMailContact, deleteMailDraft, errText,
+  confirmMailSend, createMailDraft, deleteMailContact, deleteMailDraft, errText,
   getMailDraft, getMailSettings, listMailContacts, listMailDrafts, listMailOutbox,
-  prepareMailSend, previewMailContactImport, saveMailContact, saveMailDraft,
-  type ConfirmMailSendResult, type MailContactImportRow, type MailContactView, type MailDraftView,
+  prepareMailSend, saveMailContact, saveMailDraft,
+  type ConfirmMailSendResult, type MailContactView, type MailDraftView,
   type MailOutboxEntryView, type MailSettings, type PrepareMailSendResult,
   type SaveMailDraftRequest,
 } from '@/core/bridge'
@@ -75,16 +75,6 @@ export function useMail() {
     await reload()
   }
 
-  async function importContacts(rows: MailContactImportRow[]): Promise<string[]> {
-    const prev = await previewMailContactImport({ rows })
-    const skip = prev.skip ?? []
-    if ((prev.accept ?? []).length) {
-      await commitMailContactImport({ rows: prev.accept })
-      await reload()
-    }
-    return skip
-  }
-
   async function prepareSend(draftId: string, expectedRevision: number): Promise<PrepareMailSendResult> {
     return prepareMailSend({ draftId, expectedRevision })
   }
@@ -98,7 +88,7 @@ export function useMail() {
   return {
     settings, drafts, contacts, outbox, loading, error, setError,
     hasAccount, reload, loadDraft, createDraft, persistDraft, removeDraft,
-    addContact, removeContact, importContacts,
+    addContact, removeContact,
     prepareSend, confirmSend,
   }
 }

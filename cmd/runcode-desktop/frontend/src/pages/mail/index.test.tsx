@@ -14,8 +14,6 @@ const api = vi.hoisted(() => ({
   deleteMailDraft: vi.fn(),
   saveMailContact: vi.fn(),
   deleteMailContact: vi.fn(),
-  previewMailContactImport: vi.fn(),
-  commitMailContactImport: vi.fn(),
 }))
 
 vi.mock('@/core/bridge', async (importOriginal) => {
@@ -100,12 +98,47 @@ describe('MailPage', () => {
     expect(onOpenSettings).toHaveBeenCalled()
   })
 
-  it('renders tabs without groups', async () => {
+  it('renders tabs without groups or CSV import', async () => {
     await mount()
     expect(host.textContent).toContain('草稿（1）')
     expect(host.textContent).toContain('通信录')
     expect(host.textContent).toContain('发件箱（0）')
     expect(host.textContent).not.toContain('分组')
+    await click('通信录')
+    expect(host.textContent).not.toContain('CSV 导入')
+    expect(host.textContent).not.toContain('预览并导入')
+  })
+
+  it('saves cc with draft and opens contact picker', async () => {
+    api.listMailContacts.mockResolvedValue([{
+      id: 'c1', name: '马文涛', emails: ['mawentao@ouc-online.com.cn'], revision: 1,
+      createdAtUtc: '2026-01-01T00:00:00Z', updatedAtUtc: '2026-01-01T00:00:00Z',
+    }])
+    api.saveMailDraft.mockResolvedValue({
+      ...draftA, revision: 2, cc: [{ address: 'cc@example.com' }],
+    })
+    await mount()
+    await click('主题甲')
+    const cc = host.querySelector('[data-testid="mail-draft-cc"]') as HTMLInputElement
+    expect(cc).toBeTruthy()
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(cc, 'cc@example.com')
+      cc.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+    await click('保存草稿')
+    expect(api.saveMailDraft).toHaveBeenCalledWith(expect.objectContaining({
+      cc: [{ address: 'cc@example.com' }],
+    }))
+    const pickCc = host.querySelector('[data-testid="mail-pick-cc"]') as HTMLButtonElement
+    await act(async () => { pickCc.click() })
+    await flush()
+    expect(host.querySelector('[data-testid="mail-contact-picker"]')).toBeTruthy()
+    const box = host.querySelector('[data-testid="mail-contact-picker"] input[type="checkbox"]') as HTMLInputElement
+    await act(async () => { box.click() })
+    await click('加入')
+    expect((host.querySelector('[data-testid="mail-draft-cc"]') as HTMLInputElement).value)
+      .toContain('mawentao@ouc-online.com.cn')
   })
 
   it('hides meta line and markdown toggle; preview sits after save', async () => {
@@ -161,6 +194,39 @@ describe('MailPage', () => {
     expect((host.querySelector('[data-testid="mail-draft-subject"]') as HTMLInputElement).value).toBe('本地新主题')
     expect((host.querySelector('[data-testid="mail-draft-body"]') as HTMLTextAreaElement).value).toBe('本地新正文')
     expect(host.textContent).toMatch(/保存失败|冲突/)
+  })
+
+  it('clears stale send notice when saving draft and shows Chinese validation errors', async () => {
+    api.saveMailDraft
+      .mockRejectedValueOnce(new Error('mail: invalid input: empty body'))
+      .mockResolvedValueOnce({
+        id: 'd1', revision: 2, subject: '主题甲', bodyMarkdown: '本地新正文',
+        to: [{ address: 'a@example.com' }], status: 'draft', accountId: 'acc1',
+      })
+    await mount()
+    await click('主题甲')
+    // 模拟先前发送遗留的成功提示。
+    const subject = host.querySelector('[data-testid="mail-draft-subject"]') as HTMLInputElement
+    const body = host.querySelector('[data-testid="mail-draft-body"]') as HTMLTextAreaElement
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(subject, '主题甲')
+      subject.dispatchEvent(new InputEvent('input', { bubbles: true }))
+      const tsetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      tsetter.call(body, '')
+      body.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+    await click('保存草稿')
+    expect(host.textContent).toContain('请填写正文内容')
+    expect(host.textContent).not.toContain('邮件已发送')
+    await act(async () => {
+      const tsetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+      tsetter.call(body, '本地新正文')
+      body.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+    await click('保存草稿')
+    expect(host.querySelector('[data-testid="mail-send-notice"]')?.textContent).toContain('草稿已保存')
+    expect(host.textContent).not.toContain('邮件已发送')
   })
 
   it('outbox tab lists delivery rows and expands body read-only', async () => {

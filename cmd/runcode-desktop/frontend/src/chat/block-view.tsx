@@ -24,7 +24,7 @@ import {
 } from './image-generation-note'
 import type { CodePreviewTarget } from '@/preview/code-preview'
 
-export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings, onOpenMailSettings, sessionId, onOpenCodePreview }: {
+export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, onRetryQuestion, onEditQuestion, questionActionsDisabled, textOnly = false, onContentHeightChange, onOpenImageGenerationSettings, onOpenMailSettings, onOpenMailDraft, sessionId, onOpenCodePreview }: {
   textOnly?: boolean
   block: Block
   onRetryQuestion?: (id: string) => void
@@ -36,6 +36,7 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
   onContentHeightChange?: () => void
   onOpenImageGenerationSettings?: () => void
   onOpenMailSettings?: () => void
+  onOpenMailDraft?: (draftId: string) => void
   sessionId?: string
   onOpenCodePreview?: (target: CodePreviewTarget) => void
 }) {
@@ -126,6 +127,22 @@ export function BlockView({ block, onOpenFile, resolveFile, onGenerateMinutes, o
                   </button>
                 ) : (
                   <span className="text-faint">在「设置 → 邮箱」中接入</span>
+                )}
+              </div>
+            )}
+            {!block.streaming && block.mailDraftId && (
+              <div className="text-[12px] text-muted leading-snug flex flex-wrap items-center gap-x-2 gap-y-1" data-testid="mail-draft-reply-link">
+                <span>可在「邮箱与通信录」中编辑并确认发送。</span>
+                {onOpenMailDraft ? (
+                  <button
+                    type="button"
+                    onClick={() => onOpenMailDraft(block.mailDraftId!)}
+                    className="text-primary hover:underline cursor-pointer bg-transparent border-0 p-0 text-[12px]"
+                  >
+                    查看草稿
+                  </button>
+                ) : (
+                  <span className="text-faint">打开「更多 → 邮箱与通信录」查看草稿</span>
                 )}
               </div>
             )}

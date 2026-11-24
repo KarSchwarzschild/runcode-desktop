@@ -2,6 +2,7 @@
 // 账号配置只跳转设置，本页不收集安全密码；编辑保存不发信。
 import { useEffect, useMemo, useState } from 'react'
 import { errText, type MailDraftView, type PrepareMailSendResult } from '@/core/bridge'
+import { formatMailUserError } from '@/core/mail-user-error'
 import { useMail, type MailTab } from '@/session/use-mail'
 import { BTN, BTN_PRIMARY } from '@/ui/tokens'
 import { InlineError } from '@/ui/feedback'
@@ -9,6 +10,7 @@ import { FIELD_CLS, LABEL_CLS } from '@/ui/fields'
 import { PageShell, Placeholder } from '@/ui/layout'
 import { ConfirmDialog } from '@/ui/confirm-dialog'
 import { isComposingKey } from '@/ui/keys'
+import { ContactPickerModal, mergeContactEmails, type ContactPickerTarget } from './contact-picker-modal'
 import { clearDraftSeen, isDraftSeen, markDraftSeen } from './draft-seen'
 import { MailMessageModal } from './mail-message-modal'
 import { MailSafePreview } from './safe-preview'
@@ -59,14 +61,14 @@ export function MailPage({
   const [editSubject, setEditSubject] = useState('')
   const [editBody, setEditBody] = useState('')
   const [editTo, setEditTo] = useState('')
+  const [editCc, setEditCc] = useState('')
   const [saving, setSaving] = useState(false)
   const [leaveOpen, setLeaveOpen] = useState(false)
   const [pendingTab, setPendingTab] = useState<MailTab | null>(null)
   const [pendingDraftId, setPendingDraftId] = useState<string | null>(null)
   const [contactName, setContactName] = useState('')
   const [contactEmail, setContactEmail] = useState('')
-  const [importText, setImportText] = useState('')
-  const [importSkip, setImportSkip] = useState<string[]>([])
+  const [pickerTarget, setPickerTarget] = useState<ContactPickerTarget | null>(null)
   const [sendPrep, setSendPrep] = useState<PrepareMailSendResult | null>(null)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [confirming, setConfirming] = useState(false)
@@ -79,6 +81,7 @@ export function MailPage({
     editSubject !== draft.subject
     || editBody !== draft.bodyMarkdown
     || editTo !== joinAddresses(draft.to)
+    || editCc !== joinAddresses(draft.cc)
   )
 
   useEffect(() => {
@@ -97,6 +100,7 @@ export function MailPage({
       setEditSubject(d.subject)
       setEditBody(d.bodyMarkdown)
       setEditTo(joinAddresses(d.to))
+      setEditCc(joinAddresses(d.cc))
       markDraftSeen(d.id)
       setSeenTick((n) => n + 1)
     }).catch((e) => {
@@ -112,6 +116,7 @@ export function MailPage({
     setEditSubject(draft.subject)
     setEditBody(draft.bodyMarkdown)
     setEditTo(joinAddresses(draft.to))
+    setEditCc(joinAddresses(draft.cc))
   }
 
   function applyLeave() {
@@ -130,6 +135,8 @@ export function MailPage({
       setLeaveOpen(true)
       return
     }
+    // 切回草稿等操作时清掉发送成功提示，避免误当成「保存也算已发送」。
+    if (next === 'drafts') setNotice('')
     setTab(next)
   }
 
@@ -140,13 +147,16 @@ export function MailPage({
       setLeaveOpen(true)
       return
     }
+    setNotice('')
     setActiveDraftId(id)
   }
 
-  async function saveDraft(current = draft): Promise<MailDraftView | null> {
+  async function saveDraft(current = draft, opts?: { announce?: boolean }): Promise<MailDraftView | null> {
     if (!current || saving) return null
     setSaving(true)
     mail.setError('')
+    // 保存草稿绝不沿用「邮件已发送」提示。
+    setNotice('')
     try {
       const saved = await mail.persistDraft({
         id: current.id,
@@ -155,7 +165,7 @@ export function MailPage({
         subject: editSubject,
         bodyMarkdown: editBody,
         to: parseAddresses(editTo),
-        cc: current.cc,
+        cc: parseAddresses(editCc),
         bcc: current.bcc,
         sendMode: current.sendMode || 'together',
         dispatchMode: current.dispatchMode || 'immediate',
@@ -166,9 +176,12 @@ export function MailPage({
       setEditSubject(saved.subject)
       setEditBody(saved.bodyMarkdown)
       setEditTo(joinAddresses(saved.to))
+      setEditCc(joinAddresses(saved.cc))
+      if (opts?.announce !== false) setNotice('草稿已保存')
       return saved
     } catch (e) {
-      mail.setError(errText(e) || '保存失败，编辑已保留')
+      setNotice('')
+      mail.setError(formatMailUserError(errText(e) || '保存失败，编辑已保留'))
       return null
     } finally {
       setSaving(false)
@@ -178,7 +191,8 @@ export function MailPage({
   async function openConfirmSend() {
     if (!draft) return
     if (dirty) {
-      const saved = await saveDraft()
+      // 发送前静默落盘，不提示「草稿已保存」，避免与发信提示混淆。
+      const saved = await saveDraft(undefined, { announce: false })
       if (!saved) return
       await runPrepare(saved)
       return
@@ -188,12 +202,13 @@ export function MailPage({
 
   async function runPrepare(d: MailDraftView) {
     mail.setError('')
+    setNotice('')
     try {
       const prep = await mail.prepareSend(d.id, d.revision)
       setSendPrep(prep)
       setPreviewOpen(false)
     } catch (e) {
-      mail.setError(errText(e) || '检查失败')
+      mail.setError(formatMailUserError(errText(e) || '检查失败'))
     }
   }
 
@@ -230,12 +245,13 @@ export function MailPage({
 
   async function newDraft() {
     mail.setError('')
+    setNotice('')
     try {
       const d = await mail.createDraft()
       setActiveDraftId(d.id)
       setTab('drafts')
     } catch (e) {
-      mail.setError(errText(e))
+      mail.setError(formatMailUserError(errText(e)))
     }
   }
 
@@ -267,19 +283,10 @@ export function MailPage({
     }
   }
 
-  async function runImport() {
-    const rows = importText.split(/\r?\n/).map((line) => {
-      const parts = line.split(/[,，\t]/).map((s) => s.trim()).filter(Boolean)
-      const [name, ...emails] = parts
-      return { name: name || '', emails }
-    }).filter((r) => r.name || r.emails.length)
-    try {
-      const skip = await mail.importContacts(rows)
-      setImportSkip(skip)
-      if (skip.length < rows.length) setImportText('')
-    } catch (e) {
-      mail.setError(errText(e))
-    }
+  function applyPickedContacts(emails: string[]) {
+    if (pickerTarget === 'to') setEditTo((prev) => mergeContactEmails(prev, emails))
+    if (pickerTarget === 'cc') setEditCc((prev) => mergeContactEmails(prev, emails))
+    setPickerTarget(null)
   }
 
   const tabs = useMemo(() => ([
@@ -353,7 +360,7 @@ export function MailPage({
                     ) : null}
                     <button
                       type="button"
-                      className={`${BTN} flex-none px-2 py-1 text-muted`}
+                      className="flex-none inline-flex items-center justify-center w-5 h-5 text-[11px] leading-none text-muted border border-line2 rounded-field bg-surface hover:border-primary hover:text-primaryink cursor-pointer p-0"
                       title="删除"
                       aria-label="删除"
                       data-testid="mail-draft-list-delete"
@@ -392,14 +399,44 @@ export function MailPage({
                     删除草稿
                   </button>
                 </div>
-                <label className={LABEL_CLS}>收件人（逗号分隔）
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] text-muted">收件人（逗号分隔）</span>
+                    <button
+                      type="button"
+                      className={`${BTN} py-1 px-2 text-[12px]`}
+                      data-testid="mail-pick-to"
+                      onClick={() => setPickerTarget('to')}
+                    >
+                      从通信录选择
+                    </button>
+                  </div>
                   <input
                     className={FIELD_CLS}
                     value={editTo}
                     onChange={(e) => setEditTo(e.target.value)}
                     data-testid="mail-draft-to"
                   />
-                </label>
+                </div>
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-[13px] text-muted">抄送（逗号分隔）</span>
+                    <button
+                      type="button"
+                      className={`${BTN} py-1 px-2 text-[12px]`}
+                      data-testid="mail-pick-cc"
+                      onClick={() => setPickerTarget('cc')}
+                    >
+                      从通信录选择
+                    </button>
+                  </div>
+                  <input
+                    className={FIELD_CLS}
+                    value={editCc}
+                    onChange={(e) => setEditCc(e.target.value)}
+                    data-testid="mail-draft-cc"
+                  />
+                </div>
                 <textarea
                   className={`${FIELD_CLS} min-h-[220px] resize-y font-mono text-[13px]`}
                   value={editBody}
@@ -466,15 +503,7 @@ export function MailPage({
             </label>
             <button type="button" className={`${BTN} ${BTN_PRIMARY}`} onClick={() => void addContact()}>添加</button>
           </div>
-          <label className={LABEL_CLS}>CSV 导入（每行：姓名,邮箱）
-            <textarea className={`${FIELD_CLS} min-h-[80px]`} value={importText} onChange={(e) => setImportText(e.target.value)} />
-          </label>
-          <button type="button" className={BTN} onClick={() => void runImport()}>预览并导入</button>
-          {importSkip.length > 0 && (
-            <ul className="text-[12px] text-amberink m-0 pl-4" data-testid="mail-import-skip">
-              {importSkip.map((s) => <li key={s}>{s}</li>)}
-            </ul>
-          )}
+          <p className="text-[12px] text-muted m-0">也可在对话中说「把某某 email@x.com 加入通信录」，由助手写入（需您批准）。</p>
           <ul className="m-0 p-0 list-none flex flex-col gap-2">
             {mail.contacts.map((c) => (
               <li key={c.id} className="flex items-center justify-between border border-line2 rounded-field px-3 py-2 text-[13px]">
@@ -565,6 +594,7 @@ export function MailPage({
           mode="preview"
           subject={editSubject}
           recipients={editTo}
+          cc={editCc}
           bodyMarkdown={editBody}
           onClose={() => setPreviewOpen(false)}
         />
@@ -575,10 +605,20 @@ export function MailPage({
           mode="confirm-send"
           subject={sendPrep.preview.subject}
           recipients={formatRecipients(sendPrep.preview.to)}
+          cc={formatRecipients(sendPrep.preview.cc)}
           bodyMarkdown={sendPrep.preview.bodyMarkdown}
           confirming={confirming}
           onClose={() => setSendPrep(null)}
           onConfirmSend={() => void confirmPrepared()}
+        />
+      )}
+
+      {pickerTarget && (
+        <ContactPickerModal
+          contacts={mail.contacts}
+          target={pickerTarget}
+          onClose={() => setPickerTarget(null)}
+          onConfirm={applyPickedContacts}
         />
       )}
     </PageShell>

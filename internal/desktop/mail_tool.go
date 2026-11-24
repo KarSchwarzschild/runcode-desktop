@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -20,13 +21,43 @@ func (a *App) mailTools(cfg *engine.Config, sessionID string) []tool.Tool {
 	_ = cfg
 	host := mailDraftHost{app: a, sessionID: sessionID}
 	searcher := mailContactSearcher{app: a}
+	saver := mailContactSaver{app: a}
 	return []tool.Tool{
 		mailtool.SearchContactsTool{Searcher: searcher},
+		mailtool.AddMailContactTool{Saver: saver},
 		mailtool.SendEmailTool{Host: host},
 	}
 }
 
 type mailContactSearcher struct{ app *App }
+
+type mailContactSaver struct{ app *App }
+
+func (s mailContactSaver) SaveContact(ctx context.Context, name, email string) (mailtool.ContactHit, error) {
+	if err := mailRefuseIfExiting(s.app); err != nil {
+		return mailtool.ContactHit{}, err
+	}
+	st, err := s.app.mailStore()
+	if err != nil {
+		return mailtool.ContactHit{}, err
+	}
+	saved, err := st.SaveContact(ctx, mail.Contact{
+		OwnerScope: mailOwnerLocal,
+		Name:       name,
+		Emails:     []string{email},
+	}, 0)
+	if err != nil {
+		if errors.Is(err, mail.ErrInvalid) && strings.Contains(err.Error(), "email already used") {
+			return mailtool.ContactHit{}, fmt.Errorf("该邮箱已在通信录中，未重复添加")
+		}
+		return mailtool.ContactHit{}, err
+	}
+	emails := saved.Emails
+	if emails == nil {
+		emails = []string{}
+	}
+	return mailtool.ContactHit{ID: saved.ID, Name: saved.Name, Emails: emails}, nil
+}
 
 func (s mailContactSearcher) SearchContacts(ctx context.Context, query string, limit int) ([]mailtool.ContactHit, error) {
 	if err := mailRefuseIfExiting(s.app); err != nil {

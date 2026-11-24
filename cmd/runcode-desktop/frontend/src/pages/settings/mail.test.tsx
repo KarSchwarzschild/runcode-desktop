@@ -147,20 +147,58 @@ describe('MailSection wizard', () => {
       message: '发送结果待核实：邮件可能已发出。请先按短编号搜索，不要自动重发。',
     })
     await mount()
-    expect(host.textContent).toContain('确认发送测试邮件')
-    await click('确认发送测试邮件')
+    expect(host.textContent).toContain('发送测试邮件')
+    const receiptBefore = host.querySelector('[data-testid="mail-confirm-receipt"]') as HTMLButtonElement
+    expect(receiptBefore.disabled).toBe(true)
+    await click('发送测试邮件')
     await flush()
     expect(host.textContent).toContain('不要自动重发')
     expect(api.sendMailTestToSelf).toHaveBeenCalledTimes(1)
+    const receiptAfter = host.querySelector('[data-testid="mail-confirm-receipt"]') as HTMLButtonElement
+    expect(receiptAfter.disabled).toBe(false)
   })
 
-  it('shows phone verification help without collecting codes', async () => {
+  it('switches to configured summary after receipt confirm', async () => {
+    api.getMailSettings.mockResolvedValue({
+      secretStorageOk: true,
+      account: {
+        id: 'm1', address: 'me@corp.com', displayName: '', version: 'standard',
+        host: 'smtp.qiye.aliyun.com', port: 465, enabled: true, hasPassword: true,
+        revision: 1, credentialRevision: 1, onboardingStatus: 'test_mail_accepted',
+        lastTestShortId: 'abc123',
+      },
+    })
+    api.sendMailTestToSelf.mockResolvedValue({
+      status: 'accepted', shortId: 'abc123', submissionId: 'sub1',
+      message: '已发送',
+    })
+    api.confirmMailTestReceipt.mockResolvedValue({
+      secretStorageOk: true,
+      account: {
+        id: 'm1', address: 'me@corp.com', displayName: '', version: 'standard',
+        host: 'smtp.qiye.aliyun.com', port: 465, enabled: true, hasPassword: true,
+        revision: 2, credentialRevision: 1, onboardingStatus: 'receipt_confirmed',
+        lastTestShortId: 'abc123',
+      },
+    })
+    await mount()
+    expect(host.textContent).toContain('已收到邮件')
+    await click('已收到邮件')
+    await flush()
+    expect(host.textContent).toContain('重新配置 / 更新安全密码')
+    expect(host.textContent).toContain('接入与自测完成')
+    expect(api.confirmMailTestReceipt).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps official help on step 2 and does not collect codes', async () => {
     await mount()
     await click('开始接入')
     await typeLabeled('邮箱地址', 'name@corp.com')
     await click('下一步')
-    await click('遇到问题')
-    expect(host.textContent).toContain('不索要验证码')
+    expect(host.textContent).toContain('打开官方图文帮助')
+    expect(host.textContent).toContain('不会代收手机验证码')
+    expect(host.textContent).not.toContain('遇到问题')
+    expect(host.textContent).not.toContain('收起问题帮助')
     expect(host.querySelector('input[name="sms"]')).toBeNull()
   })
 

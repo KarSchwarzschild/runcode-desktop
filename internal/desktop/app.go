@@ -719,8 +719,9 @@ var hostToolClasses = func() map[string]permissions.ToolClass {
 		// 生图会计费并写本地文件：ClassMutating 保留；会话开启「生成图片」后免弹窗放行。
 		imagegentool.Name:   permissions.ClassMutating,
 		imageinput.ToolName: permissions.ClassReadOnly,
-		// 邮件：查询只读；send_email 只建草稿仍归 mutating（写库），SMTP 另走用户确认。
+		// 邮件：查询只读；add_mail_contact / send_email 写库归 mutating；SMTP 另走用户确认。
 		mailtool.SearchContactsName: permissions.ClassReadOnly,
+		mailtool.AddMailContactName: permissions.ClassMutating,
 		mailtool.SendEmailName:      permissions.ClassMutating,
 	}
 	for name, class := range oaToolClasses {

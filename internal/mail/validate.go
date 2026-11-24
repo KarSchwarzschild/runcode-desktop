@@ -26,29 +26,29 @@ func NormalizeAddress(name, address string) (MailAddress, error) {
 	name = strings.TrimSpace(name)
 	address = strings.TrimSpace(address)
 	if address == "" {
-		return MailAddress{}, fmt.Errorf("%w: empty address", ErrInvalid)
+		return MailAddress{}, fmt.Errorf("%w: 收件人邮箱不能为空", ErrInvalid)
 	}
 	if headerInjectRe.MatchString(name) || headerInjectRe.MatchString(address) {
-		return MailAddress{}, fmt.Errorf("%w: header injection", ErrInvalid)
+		return MailAddress{}, fmt.Errorf("%w: 收件人姓名或地址含有非法字符", ErrInvalid)
 	}
 	parsed, err := mail.ParseAddress(address)
 	if err != nil {
 		// 允许纯地址无尖括号。
 		parsed, err = mail.ParseAddress(fmt.Sprintf("<%s>", address))
 		if err != nil {
-			return MailAddress{}, fmt.Errorf("%w: bad address", ErrInvalid)
+			return MailAddress{}, fmt.Errorf("%w: 收件人邮箱格式不正确", ErrInvalid)
 		}
 	}
 	addr := strings.ToLower(strings.TrimSpace(parsed.Address))
 	if addr == "" || strings.ContainsAny(addr, "\r\n") {
-		return MailAddress{}, fmt.Errorf("%w: bad address", ErrInvalid)
+		return MailAddress{}, fmt.Errorf("%w: 收件人邮箱格式不正确", ErrInvalid)
 	}
 	display := name
 	if display == "" {
 		display = strings.TrimSpace(parsed.Name)
 	}
 	if headerInjectRe.MatchString(display) {
-		return MailAddress{}, fmt.Errorf("%w: header injection", ErrInvalid)
+		return MailAddress{}, fmt.Errorf("%w: 收件人姓名或地址含有非法字符", ErrInvalid)
 	}
 	return MailAddress{Name: display, Address: addr}, nil
 }
@@ -75,7 +75,7 @@ func DedupeAddresses(in []MailAddress) []MailAddress {
 // RejectNativeHTML 拒绝正文中的原生 HTML 标签。
 func RejectNativeHTML(body string) error {
 	if htmlTagRe.MatchString(body) {
-		return fmt.Errorf("%w: native HTML not allowed in body", ErrInvalid)
+		return fmt.Errorf("%w: 正文不能包含 HTML 标签，请使用 Markdown 纯文本", ErrInvalid)
 	}
 	return nil
 }
@@ -84,20 +84,20 @@ func RejectNativeHTML(body string) error {
 func ValidateDraftEdit(edit DraftEdit) error {
 	subject := strings.TrimSpace(edit.Subject)
 	if subject == "" {
-		return fmt.Errorf("%w: empty subject", ErrInvalid)
+		return fmt.Errorf("%w: 请填写主题", ErrInvalid)
 	}
 	if utf8.RuneCountInString(subject) > maxSubjectRunes {
-		return fmt.Errorf("%w: subject too long", ErrInvalid)
+		return fmt.Errorf("%w: 主题过长（最多 200 字）", ErrInvalid)
 	}
 	if headerInjectRe.MatchString(subject) {
-		return fmt.Errorf("%w: header injection in subject", ErrInvalid)
+		return fmt.Errorf("%w: 主题含有非法换行或冒号，请修改后重试", ErrInvalid)
 	}
 	body := strings.TrimSpace(edit.BodyMarkdown)
 	if body == "" {
-		return fmt.Errorf("%w: empty body", ErrInvalid)
+		return fmt.Errorf("%w: 请填写正文内容", ErrInvalid)
 	}
 	if len(body) > maxBodyBytes {
-		return fmt.Errorf("%w: body too large", ErrInvalid)
+		return fmt.Errorf("%w: 正文过长，请删减后重试", ErrInvalid)
 	}
 	if err := RejectNativeHTML(edit.BodyMarkdown); err != nil {
 		return err
@@ -105,19 +105,19 @@ func ValidateDraftEdit(edit DraftEdit) error {
 	switch edit.SendMode {
 	case ModeTogether, ModeIndividual:
 	default:
-		return fmt.Errorf("%w: send mode", ErrInvalid)
+		return fmt.Errorf("%w: 发送模式无效", ErrInvalid)
 	}
 	switch edit.DispatchMode {
 	case ModeImmediate, ModeScheduledAt:
 	default:
-		return fmt.Errorf("%w: dispatch mode", ErrInvalid)
+		return fmt.Errorf("%w: 投递模式无效", ErrInvalid)
 	}
 	to, err := normalizeList(edit.To)
 	if err != nil {
 		return err
 	}
 	if len(to) == 0 {
-		return fmt.Errorf("%w: need recipients", ErrInvalid)
+		return fmt.Errorf("%w: 请至少填写一位收件人", ErrInvalid)
 	}
 	cc, err := normalizeList(edit.Cc)
 	if err != nil {
@@ -128,18 +128,18 @@ func ValidateDraftEdit(edit DraftEdit) error {
 		return err
 	}
 	if edit.SendMode == ModeIndividual && (len(cc) > 0 || len(bcc) > 0) {
-		return fmt.Errorf("%w: individual forbids Cc/Bcc", ErrInvalid)
+		return fmt.Errorf("%w: 分别发送模式不能填写抄送或密送", ErrInvalid)
 	}
 	total := len(to) + len(cc) + len(bcc)
 	if total > maxAddrPerMsg {
-		return fmt.Errorf("%w: too many addresses", ErrInvalid)
+		return fmt.Errorf("%w: 收件人过多，请减少后重试", ErrInvalid)
 	}
 	if strings.TrimSpace(edit.AccountID) == "" {
-		return fmt.Errorf("%w: account required", ErrInvalid)
+		return fmt.Errorf("%w: 请先在设置中接入可用邮箱账号", ErrInvalid)
 	}
 	if edit.DispatchMode == ModeScheduledAt {
 		if strings.TrimSpace(edit.ScheduledLocal) == "" || strings.TrimSpace(edit.TimeZone) == "" {
-			return fmt.Errorf("%w: schedule requires local time and timezone", ErrInvalid)
+			return fmt.Errorf("%w: 定时发送需要填写本地时间与时区", ErrInvalid)
 		}
 	}
 	return nil
@@ -167,10 +167,10 @@ func ResolveAmbiguousContacts(name string, candidates []Contact) (Contact, error
 		}
 	}
 	if len(matches) == 0 {
-		return Contact{}, fmt.Errorf("%w: contact not found", ErrNotFound)
+		return Contact{}, fmt.Errorf("%w: 未找到该联系人", ErrNotFound)
 	}
 	if len(matches) > 1 {
-		return Contact{}, fmt.Errorf("%w: ambiguous contact name", ErrInvalid)
+		return Contact{}, fmt.Errorf("%w: 同名联系人有多条，请明确选择邮箱地址", ErrInvalid)
 	}
 	return matches[0], nil
 }
