@@ -316,7 +316,7 @@ describe('SettingsNavigation (wide)', () => {
       />,
     ))
     const items = Array.from(host.querySelectorAll('.settings-nav-item'))
-    expect(items).toHaveLength(13)
+    expect(items).toHaveLength(14)
     expect(items.every((item) => item.querySelector('svg') !== null)).toBe(true)
     await act(async () => root.unmount())
   })

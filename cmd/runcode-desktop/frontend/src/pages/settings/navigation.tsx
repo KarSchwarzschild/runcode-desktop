@@ -19,6 +19,7 @@ import './settings.css'
 const SECTION_ICONS: Record<SettingsSectionId, string> = {
   passport: 'bot',
   login: 'logout',
+  mail: 'send',
   session: 'chat',
   'custom-models': 'plug',
   'model-context': 'settings',
